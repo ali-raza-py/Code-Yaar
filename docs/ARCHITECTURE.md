@@ -12,9 +12,11 @@ No technology stack is evidenced in the repository.
 
 | Area | Current status | Evidence |
 |---|---|---|
-| Language/runtime | TBD | No source or configuration files present |
-| Frontend framework | TBD | No frontend files present |
-| Backend framework | TBD | No backend files present |
+| Language/runtime | PYTHON | No source or configuration files present |
+| Frontend framework | REACT NEXT.JS TYPESCRIPT TAILWIND-CSS SHADCN/UI  | No frontend files present |
+| Backend framework | DJANGO | No backend files present |
+| DATABASE | POSTGRESQL | No integration exists yet |
+| DATABASE HOSTING | SUPABASE | No integration yet |
 | Build tooling | TBD | No package or build files present |
 | Testing | TBD | No tests or test configuration present |
 
