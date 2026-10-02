@@ -17,20 +17,20 @@ const footerLinks = [
   {
     title: "Resources",
     links: [
-      { label: "Documentation", href: "#" },
-      { label: "Blog", href: "#" },
-      { label: "Community", href: "#" },
-      { label: "FAQ", href: "#" },
+      { label: "Documentation", href: "/learn" },
+      { label: "Blog", href: "/learn" },
+      { label: "Community", href: "/leaderboard" },
+      { label: "FAQ", href: "/about#faq" },
     ],
   },
   {
     title: "Company",
     links: [
-      { label: "About", href: "#" },
-      { label: "Careers", href: "#" },
-      { label: "Contact", href: "#" },
-      { label: "Privacy Policy", href: "#" },
-      { label: "Terms of Service", href: "#" },
+      { label: "About", href: "/about" },
+      { label: "Careers", href: "/about#careers" },
+      { label: "Contact", href: "/about#contact" },
+      { label: "Privacy Policy", href: "/about#privacy" },
+      { label: "Terms of Service", href: "/about#terms" },
     ],
   },
 ];
@@ -64,10 +64,17 @@ export function Footer() {
 
             {/* Social links */}
             <div className="mt-4 flex gap-3">
-              {["Twitter", "GitHub", "LinkedIn", "YouTube"].map((social) => (
+              {[
+                ["Twitter", "https://x.com"],
+                ["GitHub", "https://github.com"],
+                ["LinkedIn", "https://linkedin.com"],
+                ["YouTube", "https://youtube.com"],
+              ].map(([social, href]) => (
                 <a
                   key={social}
-                  href="#"
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
                   className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-section-light)] text-xs font-medium text-muted-foreground transition-colors hover:bg-foreground hover:text-white"
                   aria-label={social}
                 >
