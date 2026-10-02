@@ -1,12 +1,17 @@
 # Code-Yaar Current Progress
 
-This document is the source of truth for implementation status as observed on 2026-09-10.
+This document is the source of truth for implementation status as observed on 2026-10-02.
 
 ## Repository Evidence
 
-The workspace contains no committed files and no application source, package manifest, configuration, tests, database files, routes, assets, deployment files, or existing README. The only pre-existing repository entry observed was `.git/`; the five files in `docs/` are being created by this documentation task.
+The repository now has a separated project foundation:
 
-No application behavior could be executed or verified.
+- `backend/` contains the Django project and Python dependency manifest.
+- `frontend/` contains the TypeScript/Next.js project and npm dependency manifest.
+- `docs/` contains the product and engineering documentation.
+- Root configuration contains repository-wide ignore rules, README, and licensing.
+
+Existing application code predates this setup cleanup. This task reorganizes the repository and does not add new product functionality.
 
 ## Status Definitions
 
@@ -21,56 +26,29 @@ No application behavior could be executed or verified.
 
 ## Completed
 
-| Feature | Status | Evidence | Notes |
+| Item | Status | Evidence | Notes |
 |---|---|---|---|
-| Product context documentation | Implemented | The five requested documents exist under `docs/` | Documentation records product direction; it does not implement product functionality |
-
-No product feature is Verified or Implemented based on working application code.
+| Product context documentation | Implemented | The requested documents exist under `docs/` | Documentation records product direction |
+| Repository foundation | Implemented | Separate `frontend/` and `backend/` projects, root README, ignore rules, and license | Dependencies remain owned by their respective projects |
 
 ## In Progress
 
-No in-progress application feature can be established from the repository.
+No new product feature is in progress as part of this repository cleanup.
 
-## Planned
+## Not Implemented or Needs Decisions
 
-No feature can be treated as Planned until the product owner explicitly commits it. The roadmap records foundation and MVP work as Planned or Proposed where indicated; it does not imply that work has begun.
-
-## Proposed
-
-The product direction proposes a Learn → Build → Prove loop involving learning direction, hands-on practice, project work, proof of work, feedback, and progression. Personas, MVP workflow, content strategy, community, mentorship, and AI assistance remain Proposed or TBD as marked in the PRD and roadmap.
-
-## Not Implemented
-
-The following known or intended capabilities have no implementation evidence:
-
-- Frontend application and learner-facing routes.
-- Backend or API.
-- Database or other application persistence.
-- Authentication and authorization.
-- Learning content and practice activities.
-- Project workflow.
-- Feedback workflow.
-- Progress tracking.
-- Proof-of-work or portfolio system.
-- Community, mentorship, peer review, and AI assistance.
-- Tests, linting, type checking, build configuration, and deployment configuration.
-
-## Unknown / Needs Verification
-
-The following cannot be determined from the repository:
-
-- Final MVP scope and primary persona.
-- Technology stack and hosting platform.
-- Data model, privacy policy, and retention rules.
-- Authentication requirements.
-- Accessibility and security standards.
-- Analytics and success-metric definitions.
-- Content ownership and authoring workflow.
-- Monetization and business model.
-- Community moderation model.
-- AI provider, role, and data boundaries.
-- Validation plan, team ownership, and delivery timing.
+- Final product scope and acceptance criteria.
+- Production database, authentication, authorization, and deployment configuration.
+- Learning content, practice, project, feedback, progress, and proof-of-work workflows.
+- Community, mentorship, peer review, and AI assistance boundaries.
+- Complete automated test and release strategy.
 
 ## Verification Record
 
-No build, test, lint, type-check, runtime, or deployment verification was possible because no application or toolchain exists in the repository. Production readiness is not established.
+- `backend`: dependency installation, `python manage.py check`, server startup, and an HTTP `200` response passed.
+- `frontend`: dependency installation, production build, development server startup, and an HTTP `200` response passed.
+- `frontend`: linting remains failing on pre-existing application warnings/errors.
+- `backend`: the existing test suite remains failing because the `learning` app has no migrations and tests report missing tables.
+- All five existing documentation files remain present under `docs/`.
+
+Production readiness is not established.

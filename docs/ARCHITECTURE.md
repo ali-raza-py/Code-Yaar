@@ -2,29 +2,34 @@
 
 ## 1. Architecture Overview
 
-The repository currently has no commits and no source, configuration, package, database, deployment, or documentation files. Consequently, there is no implemented application architecture to describe or verify.
+The repository has a separated full-stack foundation. The existing frontend is a Next.js/TypeScript application under `frontend/`; the existing backend is a Django project under `backend/`. Product architecture beyond this separation remains subject to the documented proposals and decisions below.
 
 The product architecture is **TBD**. Any future architecture must be derived from approved product scope and documented here after implementation.
 
 ## 2. Current Technology Stack
 
-No technology stack is evidenced in the repository.
+The current project structure evidences the following stack:
 
 | Area | Current status | Evidence |
 |---|---|---|
-| Language/runtime | PYTHON | No source or configuration files present |
-| Frontend framework | REACT NEXT.JS TYPESCRIPT TAILWIND-CSS SHADCN/UI  | No frontend files present |
-| Backend framework | DJANGO | No backend files present |
-| DATABASE | POSTGRESQL | No integration exists yet |
-| DATABASE HOSTING | SUPABASE | No integration yet |
-| Build tooling | TBD | No package or build files present |
-| Testing | TBD | No tests or test configuration present |
+| Language/runtime | Python, TypeScript | `backend/` and `frontend/` |
+| Frontend framework | Next.js, React, TypeScript | `frontend/package.json` |
+| Backend framework | Django | `backend/manage.py` |
+| Database | PostgreSQL planned | Environment-based backend settings |
+| Database hosting | TBD | No hosting decision is recorded |
+| Build tooling | npm and Next.js | `frontend/package.json` |
+| Testing | TBD | No release-level test strategy is recorded |
 
 ## 3. Repository Structure
 
-The only observed repository entry is `.git/`. There are no application directories. The `docs/` directory created by this documentation task contains the five requested product and engineering documents.
+The repository is organized as follows:
 
-No source-directory responsibilities can be established.
+- `backend/` owns Django, Python dependencies, settings, and backend assets.
+- `frontend/` owns Next.js, TypeScript, npm dependencies, and frontend assets.
+- `docs/` owns product and engineering documentation.
+- Root files own repository-wide instructions, ignore rules, and licensing.
+
+The two application directories are independent and are developed with their own toolchains.
 
 ## 4. Application Flow
 
@@ -32,19 +37,27 @@ No request, route, user action, or application entry point exists in the reposit
 
 ## 5. Frontend Architecture
 
-Not Implemented / no evidence found. No frontend entry point, routes, components, styling system, state management, or client data access exists in the repository.
+The frontend implementation exists under `frontend/`. Its product scope and production readiness remain under review.
 
 ## 6. Backend Architecture
 
-Not Implemented / no evidence found. No server entry point, API handlers, services, jobs, or backend configuration exists in the repository.
+The Django project and existing backend modules exist under `backend/`. Further API and domain decisions remain documented as proposals until approved.
 
 ## 7. Data Layer
 
-Not Implemented / no evidence found. No database, schema, migration, file storage, cache, or persistence configuration exists in the repository.
+### Database Decision
+
+Current:
+Local PostgreSQL
+
+Future:
+Supabase - deferred
+
+The backend reads local PostgreSQL settings from `backend/.env`. Supabase is intentionally deferred and is not an active dependency, configuration, hosted database, or storage provider in the current development environment.
 
 ## 8. Authentication and Authorization
 
-Not Implemented / no evidence found. No authentication provider, session mechanism, identity model, roles, permissions, or authorization middleware exists in the repository.
+Authentication and authorization decisions are not finalized. Existing code must not be treated as production-ready security architecture.
 
 ## 9. External Integrations
 
@@ -52,19 +65,19 @@ No external integrations are evidenced. Providers, APIs, analytics, email, payme
 
 ## 10. Deployment
 
-No deployment configuration, hosting configuration, CI/CD workflow, container definition, or environment configuration exists in the repository. Deployment is TBD. Production readiness cannot be claimed.
+Deployment configuration, hosting, CI/CD, and containerization remain TBD. Production readiness cannot be claimed.
 
 ## 11. Security Considerations
 
-There are no implemented protections to assess. Secrets, dependency management, authentication, authorization, input validation, data protection, logging, and incident handling are TBD. Security requirements must be defined before implementation and release.
+Security requirements, secret management, authentication, authorization, input validation, data protection, logging, and incident handling must be defined before implementation and release.
 
 ## 12. Architectural Decisions
 
-No architectural decisions are recorded in repository history. Future decisions should document the context, alternatives, decision, and consequences before the relevant implementation is added.
+The repository separation decision is recorded by the `backend/` and `frontend/` ownership boundaries. Future decisions should document context, alternatives, decision, and consequences before the relevant implementation is added.
 
 ## 13. Known Technical Debt
 
-The repository has no application implementation to assess. The primary known gap is the absence of the complete project foundation: source code, configuration, tests, dependency manifest, and deployment setup. This is a current repository state, not evidence of a defect in a previously implemented system.
+The primary known gaps are product scope, automated verification, production configuration, and deployment readiness. Existing application code should be treated as pre-existing work, not as a completed MVP.
 
 ## 14. Future Architecture
 
