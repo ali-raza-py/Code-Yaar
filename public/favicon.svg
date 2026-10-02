@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect width="64" height="64" rx="12" fill="#0a0a0f"/>
+  <g fill="#ffffff">
+    <!-- C shape -->
+    <path d="M42 10 L22 20 L22 44 L42 54 L42 42 L30 36 L30 28 L42 22 Z"/>
+    <!-- Cube top -->
+    <path d="M30 28 L38 24 L46 28 L38 32 Z"/>
+    <!-- Cube left face -->
+    <path d="M30 28 L30 38 L38 42 L38 32 Z"/>
+    <!-- Cube right face -->
+    <path d="M38 32 L38 42 L46 38 L46 28 Z"/>
+  </g>
+</svg>

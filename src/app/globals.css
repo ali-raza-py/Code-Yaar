@@ -1,0 +1,426 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-surface-base: var(--surface-base);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-interactive: var(--surface-interactive);
+  --color-surface-recessed: var(--surface-recessed);
+
+  --font-sans: var(--font-montserrat);
+  --font-mono: var(--font-jetbrains-mono);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* ─── Design Tokens ─── */
+
+:root {
+  /* Color — Light (Purple) */
+  --background: oklch(0.97 0.005 285);
+  --foreground: oklch(0.16 0.03 285);
+  --card: oklch(0.99 0.003 285);
+  --card-foreground: oklch(0.16 0.03 285);
+  --popover: oklch(0.99 0.003 285);
+  --popover-foreground: oklch(0.16 0.03 285);
+  --primary: oklch(0.55 0.22 285);
+  --primary-foreground: oklch(0.98 0.003 285);
+  --secondary: oklch(0.93 0.012 285);
+  --secondary-foreground: oklch(0.22 0.03 285);
+  --muted: oklch(0.93 0.008 285);
+  --muted-foreground: oklch(0.48 0.03 285);
+  --accent: oklch(0.65 0.17 285);
+  --accent-foreground: oklch(0.16 0.03 285);
+  --destructive: oklch(0.58 0.2 25);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(0.89 0.012 285);
+  --input: oklch(0.89 0.012 285);
+  --ring: oklch(0.55 0.22 285);
+
+  /* Surfaces — Light */
+  --surface-base: oklch(0.97 0.005 285);
+  --surface-elevated: oklch(0.99 0.003 285);
+  --surface-interactive: oklch(0.95 0.015 285);
+  --surface-recessed: oklch(0.94 0.01 285);
+
+  /* Shadows — Light */
+  --shadow-0: none;
+  --shadow-1: 0 1px 2px oklch(0.16 0.03 285 / 0.04), 0 1px 3px oklch(0.16 0.03 285 / 0.03);
+  --shadow-2: 0 2px 8px oklch(0.16 0.03 285 / 0.06), 0 1px 3px oklch(0.16 0.03 285 / 0.04);
+  --shadow-3: 0 8px 24px oklch(0.16 0.03 285 / 0.08), 0 2px 8px oklch(0.16 0.03 285 / 0.04);
+
+  /* Grid */
+  --grid-color: oklch(0.89 0.012 285 / 0.4);
+
+  /* Surfaces — additional materials */
+  --surface-matte: oklch(0.96 0.004 285);
+  --surface-technical: oklch(0.95 0.008 285);
+
+  /* Radius */
+  --radius: 0.5rem;
+
+  /* Motion */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-smooth: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 200ms;
+  --duration-normal: 400ms;
+  --duration-slow: 600ms;
+
+  /* Spacing */
+  --space-section: 6rem;
+
+  /* Z-index layers */
+  --z-base: 0;
+  --z-surface: 10;
+  --z-overlay: 20;
+  --z-float: 30;
+  --z-3d: 40;
+  --z-cursor: 9999;
+
+  /* 3D Depth */
+  --perspective-scene: 1200px;
+  --perspective-card: 800px;
+  --depth-3d: 200px;
+
+  /* Cursor */
+  --cursor-size: 6px;
+  --cursor-size-interactive: 32px;
+
+  /* DataCamp-inspired dark palette */
+  --color-dark-bg: #1b2631;
+  --color-dark-bg-alt: #232f3e;
+  --color-dark-surface: #2a3a4a;
+  --color-cta-green: #2dbe52;
+  --color-cta-green-hover: #25a848;
+  --color-cta-green-fg: #ffffff;
+  --color-section-light: #f7f8fa;
+  --color-section-border: #e8eaed;
+  --color-card-hover: #f0f4ff;
+  --color-text-dark-hero: #ffffff;
+  --color-text-dark-muted: #b0bec5;
+}
+
+
+
+/* ─── Base ─── */
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-sans);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  p, span, li, a {
+    font-family: var(--font-sans);
+  }
+  code, pre, .font-mono {
+    font-family: var(--font-mono);
+  }
+}
+
+/* ─── Utility Classes ─── */
+
+/* Technical grid background */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, var(--grid-color) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-color) 1px, transparent 1px);
+  background-size: 4rem 4rem;
+}
+
+.bg-grid-sm {
+  background-image:
+    linear-gradient(to right, var(--grid-color) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-color) 1px, transparent 1px);
+  background-size: 2rem 2rem;
+}
+
+/* Surface materials */
+.surface-base {
+  background-color: var(--surface-base);
+}
+
+.surface-elevated {
+  background-color: var(--surface-elevated);
+  box-shadow: var(--shadow-1);
+}
+
+.surface-interactive {
+  background-color: var(--surface-interactive);
+  transition: background-color var(--duration-fast) var(--ease-smooth);
+}
+
+.surface-interactive:hover {
+  background-color: color-mix(in oklch, var(--surface-interactive) 85%, var(--primary) 15%);
+}
+
+.surface-recessed {
+  background-color: var(--surface-recessed);
+}
+
+/* Depth shadows */
+.depth-0 { box-shadow: var(--shadow-0); }
+.depth-1 { box-shadow: var(--shadow-1); }
+.depth-2 { box-shadow: var(--shadow-2); }
+.depth-3 { box-shadow: var(--shadow-3); }
+
+/* Motion utilities */
+.motion-safe {
+  transition-timing-function: var(--ease-smooth);
+}
+
+/* Technical label style */
+.tech-label {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Syntax accent */
+.syntax-accent {
+  color: var(--primary);
+  font-family: var(--font-mono);
+}
+
+/* Display typography */
+.display-xl {
+  font-size: clamp(3rem, 6vw, 5.5rem);
+  font-weight: 800;
+  line-height: 0.95;
+  letter-spacing: -0.03em;
+}
+
+.display-lg {
+  font-size: clamp(2rem, 4vw, 3.5rem);
+  font-weight: 800;
+  line-height: 1.0;
+  letter-spacing: -0.025em;
+}
+
+/* Code inline fragment */
+.code-inline {
+  font-family: var(--font-mono);
+  font-size: 0.8125em;
+  padding: 0.15em 0.4em;
+  border-radius: 0.25rem;
+  background: var(--surface-recessed);
+  border: 1px solid var(--border);
+  color: var(--primary);
+}
+
+/* Stage number — oversized display */
+.stage-number {
+  font-family: var(--font-sans);
+  font-size: clamp(4rem, 8vw, 7rem);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.05em;
+  color: var(--primary);
+  opacity: 0.08;
+  position: absolute;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* Perspective wrapper for 3D sections */
+.perspective-scene {
+  perspective: var(--perspective-scene);
+  perspective-origin: center;
+}
+
+.perspective-card {
+  perspective: var(--perspective-card);
+  perspective-origin: center;
+}
+
+/* Cursor-reactive gradient */
+.cursor-glow {
+  position: fixed;
+  width: 600px;
+  height: 600px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--glow-primary, oklch(0.72 0.18 285 / 0.06)) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+
+.cursor-glow.active {
+  opacity: 1;
+}
+
+/* ─── Reduced Motion ─── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ─── DataCamp-style Section Utilities ─── */
+
+.dc-dark-section {
+  background-color: var(--color-dark-bg);
+  color: var(--color-text-dark-hero);
+}
+
+.dc-light-section {
+  background-color: var(--color-section-light);
+}
+
+.dc-card {
+  background: white;
+  border: 1px solid var(--color-section-border);
+  border-radius: 12px;
+  transition: all 0.2s ease;
+}
+
+.dc-card:hover {
+  border-color: var(--primary);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
+}
+
+.dc-btn-primary {
+  background-color: var(--color-cta-green);
+  color: var(--color-cta-green-fg);
+  font-weight: 600;
+  padding: 0.625rem 1.5rem;
+  border-radius: 8px;
+  transition: background-color 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dc-btn-primary:hover {
+  background-color: var(--color-cta-green-hover);
+}
+
+.dc-btn-outline {
+  background: transparent;
+  border: 1px solid var(--color-section-border);
+  color: var(--foreground);
+  font-weight: 500;
+  padding: 0.625rem 1.5rem;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dc-btn-outline:hover {
+  border-color: var(--foreground);
+  background: var(--color-section-light);
+}
+
+.dc-input {
+  border: 1px solid var(--color-section-border);
+  border-radius: 8px;
+  padding: 0.625rem 1rem;
+  font-size: 0.9375rem;
+  outline: none;
+  transition: border-color 0.2s ease;
+  width: 100%;
+}
+
+.dc-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px oklch(0.55 0.22 285 / 0.1);
+}
+
+.dc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.dc-badge-beginner {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.dc-badge-intermediate {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.dc-badge-advanced {
+  background: #fce4ec;
+  color: #c62828;
+}
+
+.dc-star {
+  color: #f59e0b;
+}
+
+/* Tab styles */
+.dc-tab {
+  padding: 0.5rem 1.25rem;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+}
+
+.dc-tab:hover {
+  color: var(--foreground);
+  background: var(--color-section-light);
+}
+
+.dc-tab-active {
+  background: var(--foreground);
+  color: white;
+}
+
+.dc-tab-active:hover {
+  background: var(--foreground);
+  color: white;
+}
