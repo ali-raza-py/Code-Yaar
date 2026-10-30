@@ -4,17 +4,19 @@ from rest_framework.response import Response
 from rest_framework.authtoken.models import Token
 from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import ValidationError
 from django.db.models import F, Sum, Count
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
 from .models import (
     UserProfile, CareerTrack, Course, Chapter, Lesson, Exercise, Hint,
-    Resource, Project, Challenge, Enrollment,
+    Resource, Project, Challenge, Enrollment, SnippetRun,
     LessonProgress, ExerciseAttempt, XPTransaction, Achievement,
     UserAchievement, Progress, Certification, UserCertification,
     Skill, UserSkill,
 )
+from .services.sandbox import get_sandbox
 from .serializers import (
     UserSerializer, RegisterSerializer, UserProfileSerializer,
     CareerTrackSerializer, CareerTrackListSerializer,
@@ -32,6 +34,7 @@ from .serializers import (
     SkillSerializer, UserSkillSerializer,
     ExerciseRunSerializer, ExerciseSubmitSerializer,
 )
+from .services.sandbox import validate_submission
 
 
 # ─── Leaderboard Serializer ────────────────────────────────────────────────
@@ -45,6 +48,74 @@ class LeaderboardEntrySerializer(serializers.Serializer):
     streak_days = serializers.IntegerField()
     courses_completed = serializers.IntegerField()
     challenges_solved = serializers.IntegerField()
+
+
+# ─── Lesson XP helper ──────────────────────────────────────────────────
+
+def _award_lesson_xp(user, lesson):
+    """Award lesson-completion XP exactly once (guarded by XPTransaction)."""
+    already = XPTransaction.objects.filter(
+        user=user,
+        action='lesson_complete',
+        content_type=ContentType.objects.get_for_model(lesson),
+        object_id=lesson.id,
+    ).exists()
+    if already or lesson.xp_reward <= 0:
+        return 0
+    XPTransaction.objects.create(
+        user=user,
+        amount=lesson.xp_reward,
+        action='lesson_complete',
+        description=f'Lesson completed: {lesson.title}',
+        content_type=ContentType.objects.get_for_model(lesson),
+        object_id=lesson.id,
+    )
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+    profile.xp_points += lesson.xp_reward
+    profile.save()
+    return lesson.xp_reward
+
+
+# ─── Sandbox snippet execution (lesson code blocks) ──────────────────────
+
+SNIPPET_DAILY_LIMIT = 150
+
+
+class SnippetRunSerializer(serializers.Serializer):
+    code = serializers.CharField(max_length=5000)
+    language = serializers.ChoiceField(choices=['python'], default='python')
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def execute_snippet_view(request):
+    """
+    Run a lesson code snippet in the sandbox (read-only teaching examples).
+    Authenticated only, with a per-user daily limit as an abuse guard.
+    """
+    serializer = SnippetRunSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    code = serializer.validated_data['code']
+
+    today = timezone.now().date()
+    counter, _ = SnippetRun.objects.get_or_create(user=request.user, date=today)
+    if counter.count >= SNIPPET_DAILY_LIMIT:
+        return Response(
+            {'error': f'Daily run limit reached ({SNIPPET_DAILY_LIMIT}). '
+                      'Try again tomorrow — your exercises are still available.'},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+    counter.count += 1
+    counter.save()
+
+    sandbox = get_sandbox()
+    result = sandbox.execute(code=code, language=serializer.validated_data['language'])
+    return Response({
+        'status': result.status,
+        'output': result.output,
+        'error': result.error,
+        'execution_time_ms': result.execution_time_ms,
+    })
 
 
 # ─── Auth Views ─────────────────────────────────────────────────────────────
@@ -200,6 +271,77 @@ class LessonViewSet(viewsets.ReadOnlyModelViewSet):
 
         return qs
 
+    def get_object(self, queryset=None):
+        """
+        The course-scoped retrieve URL captures the lesson ``slug`` while the
+        completion route captures ``pk``; DRF's default lookup only knows
+        about ``pk``. Resolve whichever kwarg the matched pattern provided.
+        """
+        if 'slug' in self.kwargs:
+            obj = get_object_or_404(
+                self.filter_queryset(self.get_queryset()), slug=self.kwargs['slug']
+            )
+            self.check_object_permissions(self.request, obj)
+            return obj
+        return super().get_object(queryset)
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    def complete(self, request, pk=None):
+        """
+        Mark a lesson complete from the reading view.
+
+        Honest rule: a lesson with exercises is only completed when every
+        active exercise has a correct attempt (which the submit endpoint
+        already tracks). Exercise-free lessons are completed on request —
+        this is self-reported reading completion.
+        """
+        lesson = self.get_object()
+        user = request.user
+
+        progress, _ = LessonProgress.objects.get_or_create(
+            user=user, lesson=lesson, defaults={'status': 'in_progress'}
+        )
+        enrollment, _ = Enrollment.objects.get_or_create(
+            user=user, course=lesson.chapter.course, defaults={'status': 'active'}
+        )
+
+        total_exercises = lesson.exercises.filter(is_active=True).count()
+        solved_exercises = ExerciseAttempt.objects.filter(
+            user=user, exercise__lesson=lesson, status='correct',
+        ).values('exercise').distinct().count()
+
+        xp_awarded = 0
+        if progress.status not in ('completed', 'mastered'):
+            if total_exercises == 0:
+                progress.status = 'completed'
+                progress.completed_at = timezone.now()
+                progress.save()
+                xp_awarded = _award_lesson_xp(user, lesson)
+            elif solved_exercises >= total_exercises:
+                # All exercises are actually solved; finalize completion + XP once.
+                progress.status = 'completed'
+                progress.completed_at = timezone.now()
+                progress.save()
+                xp_awarded = _award_lesson_xp(user, lesson)
+            else:
+                progress.status = 'in_progress'
+                progress.save()
+
+        enrollment.last_lesson = lesson
+        enrollment.last_activity_at = timezone.now()
+        enrollment.save()
+
+        remaining = max(total_exercises - solved_exercises, 0)
+        return Response({
+            'status': progress.status,
+            'xp_awarded': xp_awarded,
+            'exercises_remaining': remaining,
+            'message': (
+                'Lesson completed.' if progress.status == 'completed' else
+                f'Solve {remaining} more exercise{"s" if remaining != 1 else ""} to complete this lesson.'
+            ),
+        })
+
 
 class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
     """List and retrieve exercises."""
@@ -287,8 +429,13 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
             ).count() + 1,
         )
 
-        # If correct, award XP and update progress
+        # If correct, award XP and update progress; auto-enroll so progress
+        # is never lost for learners who started reading before enrolling.
         if result['status'] == 'correct':
+            Enrollment.objects.get_or_create(
+                user=request.user, course=exercise.lesson.chapter.course,
+                defaults={'status': 'active'},
+            )
             self._award_xp(request.user, exercise, attempt)
             self._update_lesson_progress(request.user, exercise.lesson)
 
@@ -300,16 +447,17 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
             'test_results': result.get('test_results', []),
             'xp_earned': result.get('xp_earned', 0),
             'correct_answer': result.get('correct_answer'),
+            'explain': result.get('explain', ''),
             'attempt_id': attempt.id,
         })
 
-    @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=True, methods=['get'], permission_classes=[permissions.AllowAny])
     def hint(self, request, pk=None):
         """Get the next available hint for this exercise."""
         exercise = self.get_object()
         hints_used = ExerciseAttempt.objects.filter(
             user=request.user, exercise=exercise
-        ).count()
+        ).count() if request.user.is_authenticated else 0
 
         next_hint = exercise.hints.filter(order__gt=hints_used).first()
         if not next_hint:
@@ -318,8 +466,8 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
         if not next_hint:
             return Response({'hint': None, 'message': 'No hints available.'})
 
-        # Deduct XP penalty if hint is used
-        if next_hint.xp_penalty > 0:
+        # Deduct XP penalty if hint is used (authenticated learners only)
+        if request.user.is_authenticated and next_hint.xp_penalty > 0:
             XPTransaction.objects.create(
                 user=request.user,
                 amount=-next_hint.xp_penalty,
@@ -340,119 +488,42 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
         })
 
     def _execute_code(self, exercise, code):
-        """
-        Development code execution adapter.
-        In production, this calls the sandbox service.
-        For now, returns a simulated result.
-        """
-        # TODO: Replace with actual sandbox execution service
-        # Architecture: Django API → Execution Service → Sandbox → Result
+        """Execute learner code in the configured sandbox service."""
+        sandbox = get_sandbox()
+        # Feed the first test case's stdin so programs using input() can be
+        # run directly from the editor.
+        stdin = ''
+        for test in (exercise.test_cases or []):
+            if isinstance(test.get('input'), str) and test['input']:
+                stdin = test['input']
+                break
+        result = sandbox.execute(code=code, language=exercise.language, stdin=stdin)
+        if result.status == 'success':
+            return {'status': 'correct', 'output': result.output, 'error': ''}
         return {
-            'status': 'running',
-            'output': f'# Code execution requires sandbox service.\n# Your code ({len(code)} chars) would be executed here.',
-            'error': '',
+            'status': 'error',
+            'output': result.output,
+            'error': result.error or 'Your program raised an error.',
         }
 
     def _validate_exercise(self, exercise, code, selected_answer):
         """
-        Validate exercise submission based on type.
-        Development adapter — replace with actual validation in production.
+        Validate an exercise submission via the shared validation service
+        (single source of truth with the sandbox layer).
         """
-        exercise_type = exercise.exercise_type
-
-        if exercise_type in ('multiple_choice', 'multiple_select'):
-            return self._validate_choice(exercise, selected_answer)
-        elif exercise_type == 'output_prediction':
-            return self._validate_output(exercise, selected_answer)
-        elif exercise_type in ('code', 'debugging', 'fill_blank'):
-            return self._validate_code(exercise, code)
-
-        return {'status': 'error', 'feedback': 'Unknown exercise type.'}
-
-    def _validate_choice(self, exercise, selected_answer):
-        """Validate MCQ/MSQ exercises."""
-        if not selected_answer:
-            return {
-                'status': 'incorrect',
-                'feedback': 'Please select an answer.',
-                'xp_earned': 0,
-            }
-
-        correct_ids = [c['id'] for c in exercise.choices if c.get('is_correct')]
-
-        if exercise.exercise_type == 'multiple_choice':
-            is_correct = selected_answer in correct_ids
-        else:  # multiple_select
-            if isinstance(selected_answer, list):
-                is_correct = set(selected_answer) == set(correct_ids)
-            else:
-                is_correct = selected_answer in correct_ids
-
-        if is_correct:
-            return {
-                'status': 'correct',
-                'feedback': 'Correct! Well done.',
-                'xp_earned': exercise.xp_reward,
-            }
-        else:
-            return {
-                'status': 'incorrect',
-                'feedback': 'Not quite. Review the concept and try again.',
-                'correct_answer': correct_ids,
-                'xp_earned': 0,
-            }
-
-    def _validate_output(self, exercise, selected_answer):
-        """Validate output prediction exercises."""
-        if not selected_answer:
-            return {
-                'status': 'incorrect',
-                'feedback': 'Please predict the output.',
-                'xp_earned': 0,
-            }
-
-        is_correct = str(selected_answer).strip() == exercise.expected_output.strip()
-        if is_correct:
-            return {
-                'status': 'correct',
-                'feedback': 'Correct! You predicted the output accurately.',
-                'xp_earned': exercise.xp_reward,
-            }
-        else:
-            return {
-                'status': 'incorrect',
-                'feedback': 'Not quite. Trace through the code step by step.',
-                'correct_answer': exercise.expected_output,
-                'xp_earned': 0,
-            }
-
-    def _validate_code(self, exercise, code):
-        """
-        Validate code exercises.
-        Development adapter — in production, runs test cases in sandbox.
-        """
-        if not code or code.strip() == exercise.starter_code.strip():
-            return {
-                'status': 'incorrect',
-                'feedback': 'It looks like you haven\'t made any changes yet. Try writing your solution.',
-                'xp_earned': 0,
-            }
-
-        # Development mode: basic check that code is non-trivial
-        # TODO: Replace with actual sandbox test execution
-        test_results = []
-        for i, test in enumerate(exercise.test_cases):
-            test_results.append({
-                'test': i + 1,
-                'status': 'pending',
-                'message': 'Sandbox execution required for validation.',
-            })
-
+        result = validate_submission(exercise, code, selected_answer)
+        # Map the service 'pending' state onto the client-facing 'running'
+        # status: the submission is recorded, but automated evaluation of
+        # runnable code is not available yet — never reported as a pass.
+        status = 'running' if result.status == 'pending' else result.status
         return {
-            'status': 'running',
-            'feedback': 'Code validation requires sandbox service. Your submission has been recorded.',
-            'test_results': test_results,
-            'xp_earned': 0,
+            'status': status,
+            'feedback': result.feedback,
+            'test_results': result.test_results,
+            'xp_earned': result.xp_earned,
+            'correct_answer': result.correct_answer,
+            # Revealed only now that the learner has attempted the exercise.
+            'explain': exercise.explain,
         }
 
     def _award_xp(self, user, exercise, attempt):
@@ -490,31 +561,22 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
             defaults={'status': 'in_progress'}
         )
 
-        # Check if all exercises in lesson are completed
-        total_exercises = lesson.exercises.count()
+        # Check if all active exercises in the lesson are solved
+        total_exercises = lesson.exercises.filter(is_active=True).count()
         completed_exercises = ExerciseAttempt.objects.filter(
             user=user,
             exercise__lesson=lesson,
             status='correct',
         ).values('exercise').distinct().count()
 
-        if completed_exercises >= total_exercises and total_exercises > 0:
+        if total_exercises > 0 and completed_exercises >= total_exercises \
+                and progress.status not in ('completed', 'mastered'):
             progress.status = 'completed'
             progress.completed_at = timezone.now()
             progress.save()
 
-            # Award lesson XP
-            XPTransaction.objects.create(
-                user=user,
-                amount=lesson.xp_reward,
-                action='lesson_complete',
-                description=f'Lesson completed: {lesson.title}',
-                content_type=ContentType.objects.get_for_model(lesson),
-                object_id=lesson.id,
-            )
-            profile, _ = UserProfile.objects.get_or_create(user=user)
-            profile.xp_points += lesson.xp_reward
-            profile.save()
+            # Award lesson XP exactly once (guarded against re-award)
+            _award_lesson_xp(user, lesson)
 
         # Update enrollment's last_lesson
         enrollment = Enrollment.objects.filter(

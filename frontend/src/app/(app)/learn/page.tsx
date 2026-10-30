@@ -1,29 +1,45 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { ArrowRight, BookOpen, Search } from "lucide-react";
-import { ApiError, courses as coursesApi } from "@/lib/api";
+import { courses as coursesApi } from "@/lib/api";
 import type { Course } from "@/types";
 import { NetworkError } from "@/components/learning/workspace/error-states";
 
-const categories = ["All", "Python", "JavaScript", "React", "Node.js", "TypeScript", "SQL", "Git", "Docker", "AWS"];
-
-export default function LearnPage() {
+function LearnContent() {
+  const searchParams = useSearchParams();
+  const trackParam = searchParams.get("track") ?? undefined;
   const [courses, setCourses] = useState<Course[]>([]);
   const [category, setCategory] = useState("All");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
+  const load = async () => {
+    try {
+      const data = await coursesApi.list(trackParam ? { track: trackParam } : undefined);
+      setCourses(data);
+      setError(false);
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    coursesApi.list()
-      .then((data) => setCourses(Array.isArray(data) ? data as Course[] : []))
-      .catch((reason) => {
-        if (reason instanceof ApiError || reason instanceof TypeError) setError(true);
-      })
-      .finally(() => setLoading(false));
-  }, []);
+    // Deferred via await so the effect never sets state synchronously.
+    (async () => { await load(); })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackParam]);
+
+  // Category chips reflect languages that actually exist in the catalog.
+  const categories = useMemo(
+    () => ["All", ...Array.from(new Set(courses.map((course) => course.language))).sort((a, b) => a.localeCompare(b))],
+    [courses]
+  );
 
   const filteredCourses = useMemo(() => courses.filter((course) => {
     const matchesCategory = category === "All" || course.language.toLowerCase() === category.toLowerCase();
@@ -31,7 +47,7 @@ export default function LearnPage() {
     return matchesCategory && (!query || `${course.title} ${course.description} ${course.track_title}`.toLowerCase().includes(query));
   }), [category, courses, search]);
 
-  if (error) return <NetworkError />;
+  if (error) return <NetworkError onRetry={load} />;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
@@ -54,7 +70,15 @@ export default function LearnPage() {
         <label className="relative block w-full sm:w-80"><span className="sr-only">Search courses</span><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><input value={search} onChange={(event) => setSearch(event.target.value)} type="search" placeholder="Search courses..." className="w-full rounded-lg border border-[var(--color-section-border)] bg-white px-4 py-2 pl-9 text-sm outline-none focus:border-[var(--primary)]" /></label>
       </div>
 
-      {loading ? <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{[1, 2, 3].map((item) => <div key={item} className="h-48 animate-pulse rounded-xl bg-white" />)}</div> : filteredCourses.length === 0 ? <div className="border border-dashed border-[var(--color-section-border)] bg-white p-12 text-center"><h2 className="font-semibold">No courses match that search</h2><p className="mt-2 text-sm text-muted-foreground">Try another technology or clear the search.</p></div> : <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{filteredCourses.map((course) => <Link key={course.id} href={`/courses/${course.slug}`} className="group overflow-hidden rounded-xl border border-[var(--color-section-border)] bg-white transition-all hover:border-[var(--primary)] hover:shadow-md"><div className="h-2 bg-[var(--primary)]" /><div className="p-5"><div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-muted-foreground"><span>{course.track_title || course.language}</span><span>{course.difficulty}</span></div><h2 className="mt-3 text-lg font-bold text-foreground group-hover:text-[var(--primary)]">{course.title}</h2><p className="mt-2 line-clamp-2 text-sm text-muted-foreground">{course.description}</p><div className="mt-5 flex items-center justify-between text-xs text-muted-foreground"><span>{course.estimated_hours}h · {course.lesson_count} lessons</span><span className="font-semibold text-[var(--primary)]">{course.progress_percentage > 0 ? `${course.progress_percentage}% complete` : "Start course"}<ArrowRight className="ml-1 inline h-3.5 w-3.5" /></span></div></div></Link>)}</div>}
+      {loading ? <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{[1, 2, 3].map((item) => <div key={item} className="h-48 animate-pulse rounded-xl bg-white" />)}</div> : filteredCourses.length === 0 ? <div className="border border-dashed border-[var(--color-section-border)] bg-white p-12 text-center"><h2 className="font-semibold">No courses match that search</h2><p className="mt-2 text-sm text-muted-foreground">Try another technology or clear the search.</p></div> : <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{filteredCourses.map((course) => <Link key={course.id} href={`/courses/${course.slug}`} className="group overflow-hidden rounded-xl border border-[var(--color-section-border)] bg-white transition-all hover:border-[var(--primary)] hover:shadow-md"><div className="h-2 bg-[var(--primary)]" /><div className="p-5"><div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-muted-foreground"><span>{course.track_title || course.language}</span><span>{course.difficulty}</span></div><h2 className="mt-3 text-lg font-bold text-foreground group-hover:text-[var(--primary)]">{course.title}</h2><p className="mt-2 line-clamp-2 text-sm text-muted-foreground">{course.description}</p><div className="mt-5 flex items-center justify-between text-xs text-muted-foreground"><span>{course.estimated_hours}h · {course.lesson_count} lessons</span><span className="font-semibold text-[var(--primary)]">{course.progress_percentage && course.progress_percentage > 0 ? `${course.progress_percentage}% complete` : course.enrolled ? "Continue" : "Start course"}<ArrowRight className="ml-1 inline h-3.5 w-3.5" /></span></div></div></Link>)}</div>}
     </div>
+  );
+}
+
+export default function LearnPage() {
+  return (
+    <Suspense fallback={<div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8"><div className="h-40 animate-pulse rounded-xl bg-white" /></div>}>
+      <LearnContent />
+    </Suspense>
   );
 }

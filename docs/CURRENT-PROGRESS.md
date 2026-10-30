@@ -1,54 +1,45 @@
 # Code-Yaar Current Progress
 
-This document is the source of truth for implementation status as observed on 2026-10-02.
+This document is the source of truth for implementation status as observed on
+2026-10-30. See `docs/COURSE-PLATFORM-IMPLEMENTATION.md` for the full 100-task
+checklist and final report of the Master Academy implementation.
 
-## Repository Evidence
+## Verified Current State
 
-The repository now has a separated project foundation:
+| Item | Status | Evidence |
+|---|---|---|
+| Django backend (DRF, token auth, CORS) | Verified | `backend/config`, 67 passing tests |
+| Five complete courses (Python, C++, Web, Git, DSA) | Implemented | `learning/management/commands/academy/` + `seed_academy` (32 chapters, 45 lessons, 92 exercises) |
+| Idempotent content seeding | Verified | `SeedAcademyIntegrityTest` — re-run creates 0 duplicates |
+| Server-side sandbox grading (Python) | Verified | subprocess sandbox with timeouts; honest-grading tests |
+| Certificate engine (eligibility, issuance, PDF+QR, verify, revoke, reissue, audit) | Verified | `certificates` app, 19 tests |
+| Public verification page + My Certificates + claim flow | Implemented | `/verify/[publicId]`, `/certificates`, course dashboard panel |
+| Answer/solution non-leakage | Verified | `AnswerLeakageTest` |
+| Health endpoint | Implemented | `GET /api/health/` |
+| Production configuration surface | Implemented | env-driven DB/hosts/CORS/SITE_URL/HSTS in `settings.py` + `.env.example` |
 
-- `backend/` contains the Django project and Python dependency manifest.
-- `frontend/` contains the TypeScript/Next.js project and npm dependency manifest.
-- `docs/` contains the product and engineering documentation.
-- Root configuration contains repository-wide ignore rules, README, and licensing.
+## Backend Test Suite
 
-Existing application code predates this setup cleanup. This task reorganizes the repository and does not add new product functionality.
+- 67 tests, all green: `cd backend && python manage.py test`
+  (48 in `learning`, 19 in `certificates`).
+- `python manage.py check` clean; `makemigrations --check` clean.
 
-## Status Definitions
+## Frontend Checks
 
-- **Implemented:** The functionality exists in the codebase.
-- **Verified:** The functionality exists and has been meaningfully tested or confirmed.
-- **In Progress:** Development has started but the feature is incomplete.
-- **Planned:** The team has decided that it should be built.
-- **Proposed:** An idea under consideration; not yet committed.
-- **Deferred:** Previously considered or planned but intentionally postponed.
-- **Not Implemented:** A known requirement exists, but no working implementation exists.
-- **TBD:** The information or decision itself has not yet been determined.
+- `tsc --noEmit` clean, ESLint clean on all touched files,
+  `next build` succeeds (18 routes, incl. `/certificates` and
+  `/verify/[publicId]`).
 
-## Completed
+## Remaining Gaps / Next Steps
 
-| Item | Status | Evidence | Notes |
-|---|---|---|---|
-| Product context documentation | Implemented | The requested documents exist under `docs/` | Documentation records product direction |
-| Repository foundation | Implemented | Separate `frontend/` and `backend/` projects, root README, ignore rules, and license | Dependencies remain owned by their respective projects |
+- Multi-language code execution (C++, JS, git) is not sandboxed; those
+  courses grade via server-side answer comparison, and the course content
+  states this honestly.
+- Some marketing/catalog sections still render static `src/data/` content.
+- Certificate PDFs use local media storage; configure object storage before
+  multi-server deployments.
+- The legacy `seed_courses` command is superseded by `seed_academy`.
 
-## In Progress
-
-No new product feature is in progress as part of this repository cleanup.
-
-## Not Implemented or Needs Decisions
-
-- Final product scope and acceptance criteria.
-- Production database, authentication, authorization, and deployment configuration.
-- Learning content, practice, project, feedback, progress, and proof-of-work workflows.
-- Community, mentorship, peer review, and AI assistance boundaries.
-- Complete automated test and release strategy.
-
-## Verification Record
-
-- `backend`: dependency installation, `python manage.py check`, server startup, and an HTTP `200` response passed.
-- `frontend`: dependency installation, production build, development server startup, and an HTTP `200` response passed.
-- `frontend`: linting remains failing on pre-existing application warnings/errors.
-- `backend`: the existing test suite remains failing because the `learning` app has no migrations and tests report missing tables.
-- All five existing documentation files remain present under `docs/`.
-
-Production readiness is not established.
+Production readiness is *configured* (env-driven settings, hardening when
+`DEBUG=False`) but not yet *deployed* — see the production checklist in
+`COURSE-PLATFORM-IMPLEMENTATION.md`.

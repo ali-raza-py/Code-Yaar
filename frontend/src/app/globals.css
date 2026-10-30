@@ -25,13 +25,80 @@
   --color-surface-interactive: var(--surface-interactive);
   --color-surface-recessed: var(--surface-recessed);
 
+  /* DataCamp-inspired brand surfaces + CTA, exposed as governed utilities */
+  --color-hero-bg: var(--color-dark-bg);
+  --color-hero-bg-alt: var(--color-dark-bg-alt);
+  --color-hero-surface: var(--color-dark-surface);
+  --color-hero-navy: var(--color-hero-navy);
+  --color-cta: var(--color-cta-green);
+  --color-cta-hover: var(--color-cta-green-hover);
+  --color-cta-fg: var(--color-cta-green-fg);
+  --color-amber: var(--color-amber);
+  --color-mint-on-navy: var(--color-mint-on-navy);
+  --color-green-deep: var(--color-green-deep);
+  --color-green-pale: var(--color-green-pale);
+  --color-section-light: var(--color-section-light);
+  --color-sidebar-bg: var(--sidebar-bg);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-soft: var(--sidebar-accent-soft);
+  --color-sidebar-accent-strong: var(--sidebar-accent-strong);
+  --color-sidebar-avatar-bg: var(--sidebar-avatar-bg);
+
+  /* Semantic state + difficulty aliases (one name drives text / bg / border) */
+  --color-success: var(--state-success);
+  --color-warning: var(--state-warning);
+  --color-danger: var(--state-danger);
+  --color-difficulty-easy: var(--difficulty-easy);
+  --color-difficulty-medium: var(--difficulty-medium);
+  --color-difficulty-hard: var(--difficulty-hard);
+
+  /* Info / link + difficulty soft backgrounds, exposed as utilities */
+  --color-info: var(--state-info);
+  --color-link: var(--state-info);
+  --color-difficulty-easy-soft: var(--difficulty-easy-bg);
+  --color-difficulty-medium-soft: var(--difficulty-medium-bg);
+  --color-difficulty-hard-soft: var(--difficulty-hard-bg);
+
+  /* Forest marketing palette (learning-entry) as governed utilities */
+  --color-forest-bg: var(--forest-bg);
+  --color-forest-deep: var(--forest-deep);
+  --color-forest-surface: var(--forest-surface);
+  --color-forest-border: var(--forest-border);
+  --color-forest-line: var(--forest-line);
+  --color-forest-ink: var(--forest-ink);
+  --color-forest-muted: var(--forest-muted);
+  --color-forest-accent: var(--forest-accent);
+  --color-forest-panel: var(--forest-panel);
+  --color-forest-line-soft: var(--forest-line-soft);
+  --color-forest-icon: var(--forest-icon);
+  --color-forest-border-hover: var(--forest-border-hover);
+  --color-forest-on-deep: var(--forest-on-deep);
+  --color-forest-on-deep-soft: var(--forest-on-deep-soft);
+  --color-forest-cta-band: var(--forest-cta-band);
+  --color-forest-deep-hover: var(--forest-deep-hover);
+  --color-forest-chip-bg: var(--forest-chip-bg);
+  --color-forest-chip-fg: var(--forest-chip-fg);
+  --color-mint: var(--forest-mint);
+  --color-mint-soft: var(--forest-mint-soft);
+  --color-forest-grid: var(--forest-grid);
+  --color-tone-mint-bg: var(--forest-tone-mint-bg);
+  --color-tone-blue-bg: var(--forest-tone-blue-bg);
+  --color-tone-amber-bg: var(--forest-tone-amber-bg);
+  --color-tone-amber-fg: var(--forest-tone-amber-fg);
+  --color-tone-rose-bg: var(--forest-tone-rose-bg);
+  --color-tone-rose-fg: var(--forest-tone-rose-fg);
+
   --font-sans: var(--font-montserrat);
   --font-mono: var(--font-jetbrains-mono);
 
+  /* Bimodal radius scale: tool chrome < cards < pills/status */
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --radius-tool: 0.125rem;   /* 2px — editor/IDE chrome, segmented tabs */
+  --radius-card: 0.75rem;    /* 12px — cards, panels */
+  --radius-pill: 9999px;     /* badges, difficulty pills, search */
 }
 
 /* ─── Design Tokens ─── */
@@ -108,7 +175,7 @@
   --cursor-size: 6px;
   --cursor-size-interactive: 32px;
 
-  /* DataCamp-inspired dark palette */
+  /* DataCamp-inspired dark palette — brand surfaces (kept, now governed) */
   --color-dark-bg: #1b2631;
   --color-dark-bg-alt: #232f3e;
   --color-dark-surface: #2a3a4a;
@@ -121,34 +188,163 @@
   --color-text-dark-hero: #ffffff;
   --color-text-dark-muted: #b0bec5;
 
-  /* Challenge workspace */
-  --challenge-bg: #f7f8fb;
-  --challenge-surface: #ffffff;
-  --challenge-surface-muted: #f0f1f5;
-  --challenge-border: #e2e4ea;
-  --challenge-text: #18202d;
-  --challenge-text-soft: #4c5565;
-  --challenge-muted: #667085;
-  --challenge-accent: #7257b8;
-  --challenge-accent-strong: #5a429a;
-  --challenge-accent-soft: #eeeafb;
-  --challenge-shadow: 0 1px 2px rgb(24 32 45 / 0.03);
-  --challenge-shadow-hover: 0 10px 24px rgb(24 32 45 / 0.08);
+  /* Unified marketing navy (consolidates former #0a1628 / #0f1d32) + amber accent */
+  --color-hero-navy: #0f1d32;
+  --color-amber: #f59e0b;
+
+  /* Brand greens used on navy / pale panels (about page) */
+  --color-mint-on-navy: #8ee59f;
+  --color-green-deep: #16833a;
+  --color-green-pale: #e9f8ed;
+
+  /* Application sidebar shell (dark navy + violet brand accents), governed */
+  --sidebar-bg: #0b1220;
+  --sidebar-accent: #c4b5fd;
+  --sidebar-accent-soft: #ddd6fe;
+  --sidebar-accent-strong: #a78bfa;
+  --sidebar-active-bg: rgba(139, 92, 246, 0.16);
+  --sidebar-badge-bg: rgba(139, 92, 246, 0.2);
+  --sidebar-badge-border: rgba(196, 181, 253, 0.3);
+  --sidebar-avatar-bg: #5b4bb7;
+
+  /* Semantic state + difficulty: one token drives text / bg / border */
+  --state-success: #2dbe52;      /* aligned to brand CTA green */
+  --state-warning: #e65100;
+  --state-danger: #c62828;
+  --state-info: #1659a8;
+  --difficulty-easy: #2e7d32;
+  --difficulty-medium: #e65100;
+  --difficulty-hard: #c62828;
+
+  /* Difficulty soft backgrounds (pill fills) — derived, single source */
+  --difficulty-easy-bg: color-mix(in oklab, var(--difficulty-easy) 14%, white);
+  --difficulty-medium-bg: color-mix(in oklab, var(--difficulty-medium) 14%, white);
+  --difficulty-hard-bg: color-mix(in oklab, var(--difficulty-hard) 14%, white);
+
+  /* Marketing “learning entry” forest accent, now governed */
+  --forest-bg: #f5f7f4;
+  --forest-deep: #102a22;
+  --forest-surface: #173a2e;
+  --forest-border: #d7e2da;
+  --forest-line: #456557;
+  --forest-ink: #11221c;
+  --forest-muted: #5c6d64;
+  --forest-mint: #a7f3c3;
+  --forest-mint-soft: #9ae6b4;
+  --forest-accent: #087443;
+  --forest-panel: #fbfdfb;
+  --forest-line-soft: #87a293;
+  --forest-icon: #6f8177;
+  --forest-border-hover: #87b69a;
+  --forest-on-deep: #c4d8ce;
+  --forest-on-deep-soft: #9ab9aa;
+  --forest-cta-band: #e7f4eb;
+  --forest-deep-hover: #1b4939;
+  --forest-chip-bg: #eef6f0;
+  --forest-chip-fg: #446254;
+  --forest-grid: #c9f5db;
+  --forest-shadow-deep: #0b1d17;
+  --forest-shadow-soft: #cbe4d3;
+  --forest-tone-mint-bg: #d9f7e8;
+  --forest-tone-blue-bg: #dcecff;
+  --forest-tone-amber-bg: #fff0c9;
+  --forest-tone-amber-fg: #976400;
+  --forest-tone-rose-bg: #ffe0e0;
+  --forest-tone-rose-fg: #a53a3a;
+
+  /* Dark-surface layering via translucent white (no drop shadows in dark) */
+  --overlay-hover: rgba(255, 255, 255, 0.07);
+  --overlay-active: rgba(255, 255, 255, 0.11);
+  --overlay-field: rgba(255, 255, 255, 0.08);
+  --overlay-badge: rgba(255, 255, 255, 0.10);
+  --overlay-border: rgba(255, 255, 255, 0.10);
+  --overlay-text-muted: rgba(255, 255, 255, 0.60);
+
+  /* Learning workspace (dark IDE surface) — governed tokens, was raw hex */
+  --editor-bg: #1e1e2e;
+  --editor-chrome: #181825;
+  --editor-gutter: #181825;
+  --editor-gutter-fg: #6c7086;
+  --editor-text: #e2e4f1;
+  --editor-border: #313244;
+  --editor-font-size: 0.8125rem;   /* 13px */
+  --editor-line-height: 1.5rem;
+  --editor-gutter-width: 3rem;     /* ~48px, quiet */
+  --editor-active-line: rgba(255, 255, 255, 0.04);
+  --editor-selection: rgba(45, 190, 82, 0.22);
+
+  /* Syntax highlighting palette (CodeMirror token → governed var) */
+  --syn-keyword: #c792ea;
+  --syn-operator: #89ddff;
+  --syn-string: #c3e88d;
+  --syn-string-special: #f07178;
+  --syn-number: #f78c6c;
+  --syn-comment: #6c7086;
+  --syn-variable: #e2e4f1;
+  --syn-definition: #82aaff;
+  --syn-property: #f07178;
+  --syn-bool: #ff9cac;
+  --syn-class: #ffcb6b;
+  --syn-invalid: #ff5370;
+
+  /* Elevation: hairline borders + whisper-quiet shadows (dark uses overlays) */
+  --shadow-hairline: inset 0 0 0 1px var(--color-section-border);
+
+  /* Challenge workspace — unified onto core semantic tokens (single source) */
+  --challenge-bg: var(--background);
+  --challenge-surface: var(--card);
+  --challenge-surface-muted: var(--muted);
+  --challenge-border: var(--border);
+  --challenge-text: var(--foreground);
+  --challenge-text-soft: var(--muted-foreground);
+  --challenge-muted: var(--muted-foreground);
+  --challenge-accent: var(--primary);
+  --challenge-accent-strong: var(--primary);
+  --challenge-accent-soft: color-mix(in oklab, var(--primary) 12%, white);
+  --challenge-shadow: var(--shadow-0);
+  --challenge-shadow-hover: var(--shadow-2);
 }
 
 .dark {
-  --challenge-bg: #111a29;
-  --challenge-surface: #172235;
-  --challenge-surface-muted: #202d43;
-  --challenge-border: #2d3b52;
-  --challenge-text: #f3f5f8;
-  --challenge-text-soft: #c4ccda;
-  --challenge-muted: #a4afc0;
-  --challenge-accent: #a491db;
-  --challenge-accent-strong: #c0b4eb;
-  --challenge-accent-soft: #2c2850;
-  --challenge-shadow: 0 1px 2px rgb(0 0 0 / 0.16);
-  --challenge-shadow-hover: 0 10px 24px rgb(0 0 0 / 0.24);
+  /* Core surfaces flip to the DataCamp-navy family (themeable dark) */
+  --background: #0f1d32;
+  --foreground: #e6ecf5;
+  --card: #172235;
+  --card-foreground: #e6ecf5;
+  --popover: #172235;
+  --popover-foreground: #e6ecf5;
+  --primary: #a78bfa;
+  --primary-foreground: #0f1d32;
+  --secondary: #1f2c44;
+  --secondary-foreground: #dbe3ef;
+  --muted: #1f2c44;
+  --muted-foreground: #9fb0c8;
+  --accent: #c4b5fd;
+  --accent-foreground: #0f1d32;
+  --destructive: #f8615c;
+  --destructive-foreground: #0f1d32;
+  --border: #2d3b52;
+  --input: #2d3b52;
+  --ring: #a78bfa;
+
+  /* Translucent-white surface layering (depth via alpha, not shadows) */
+  --surface-base: #0f1d32;
+  --surface-elevated: #172235;
+  --surface-interactive: #1f2c44;
+  --surface-recessed: #0b1626;
+
+  /* Difficulty + state colors lighten for contrast on dark */
+  --difficulty-easy: #4ade80;
+  --difficulty-medium: #fbbf24;
+  --difficulty-hard: #f87171;
+  --state-success: #4ade80;
+  --state-warning: #fbbf24;
+  --state-danger: #f8715c;
+  --state-info: #60a5fa;
+
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.24);
+  --shadow-2: 0 2px 8px rgb(0 0 0 / 0.32), 0 1px 3px rgb(0 0 0 / 0.24);
+  --shadow-3: 0 8px 24px rgb(0 0 0 / 0.40), 0 2px 8px rgb(0 0 0 / 0.24);
 }
 
 
@@ -163,11 +359,14 @@
     @apply bg-background text-foreground;
     font-family: var(--font-sans);
     font-feature-settings: "rlig" 1, "calt" 1;
+    line-height: 1.5;
+    text-rendering: optimizeLegibility;
   }
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-sans);
     font-weight: 700;
     letter-spacing: -0.02em;
+    text-wrap: balance;
   }
   p, span, li, a {
     font-family: var(--font-sans);
@@ -209,8 +408,10 @@
   transition: background-color var(--duration-fast) var(--ease-smooth);
 }
 
-.surface-interactive:hover {
-  background-color: color-mix(in oklch, var(--surface-interactive) 85%, var(--primary) 15%);
+@media (hover: hover) {
+  .surface-interactive:hover {
+    background-color: color-mix(in oklch, var(--surface-interactive) 85%, var(--primary) 15%);
+  }
 }
 
 .surface-recessed {
@@ -324,6 +525,60 @@
   }
 }
 
+/* ─── Guarded Interaction & Layout Utilities ─── */
+
+/* Reusable focus ring for interactive elements */
+/* Global keyboard-focus fallback: every interactive element gets a visible
+   ring unless it styles its own (zero specificity via :where, so component
+   utilities like .focus-ring and focus-visible:ring-* win cleanly). */
+:where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.focus-ring {
+  outline: none;
+}
+.focus-ring:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Hover-only lift — no stuck transforms on touch devices */
+@media (hover: hover) {
+  .hover-lift {
+    transition: transform var(--duration-fast) var(--ease-smooth),
+                box-shadow var(--duration-fast) var(--ease-smooth);
+  }
+  .hover-lift:hover {
+    transform: translateY(-2px);
+  }
+}
+
+/* Hairline card: borders do the elevation, zero shadows (GfG pattern) */
+.card-hairline {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: none;
+}
+
+/* Section vertical rhythm token */
+.section-pad {
+  padding-block: var(--space-section);
+}
+
+/* Animate only when the user allows motion */
+@media (prefers-reduced-motion: no-preference) {
+  .anim-fade-in {
+    animation: fade-in var(--duration-normal) var(--ease-out-expo) both;
+  }
+}
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
 /* ─── DataCamp-style Section Utilities ─── */
 
 .dc-dark-section {
@@ -338,14 +593,16 @@
 .dc-card {
   background: white;
   border: 1px solid var(--color-section-border);
-  border-radius: 12px;
-  transition: all 0.2s ease;
+  border-radius: var(--radius-card);
+  transition: border-color var(--duration-fast) var(--ease-smooth),
+              box-shadow var(--duration-fast) var(--ease-smooth);
 }
 
-.dc-card:hover {
-  border-color: var(--primary);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-  transform: translateY(-2px);
+@media (hover: hover) {
+  .dc-card:hover {
+    border-color: var(--primary);
+    box-shadow: var(--shadow-2);
+  }
 }
 
 .dc-btn-primary {
@@ -353,15 +610,17 @@
   color: var(--color-cta-green-fg);
   font-weight: 600;
   padding: 0.625rem 1.5rem;
-  border-radius: 8px;
-  transition: background-color 0.2s ease;
+  border-radius: var(--radius-lg);
+  transition: background-color var(--duration-fast) var(--ease-smooth);
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
 }
 
-.dc-btn-primary:hover {
-  background-color: var(--color-cta-green-hover);
+@media (hover: hover) {
+  .dc-btn-primary:hover {
+    background-color: var(--color-cta-green-hover);
+  }
 }
 
 .dc-btn-outline {
@@ -370,16 +629,19 @@
   color: var(--foreground);
   font-weight: 500;
   padding: 0.625rem 1.5rem;
-  border-radius: 8px;
-  transition: all 0.2s ease;
+  border-radius: var(--radius-lg);
+  transition: border-color var(--duration-fast) var(--ease-smooth),
+              background-color var(--duration-fast) var(--ease-smooth);
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
 }
 
-.dc-btn-outline:hover {
-  border-color: var(--foreground);
-  background: var(--color-section-light);
+@media (hover: hover) {
+  .dc-btn-outline:hover {
+    border-color: var(--foreground);
+    background: var(--color-section-light);
+  }
 }
 
 .dc-input {
@@ -402,24 +664,24 @@
   align-items: center;
   gap: 0.25rem;
   padding: 0.25rem 0.75rem;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   font-size: 0.75rem;
   font-weight: 600;
 }
 
 .dc-badge-beginner {
-  background: #e8f5e9;
-  color: #2e7d32;
+  background: color-mix(in oklch, var(--difficulty-easy) 12%, white);
+  color: var(--difficulty-easy);
 }
 
 .dc-badge-intermediate {
-  background: #fff3e0;
-  color: #e65100;
+  background: color-mix(in oklch, var(--difficulty-medium) 12%, white);
+  color: var(--difficulty-medium);
 }
 
 .dc-badge-advanced {
-  background: #fce4ec;
-  color: #c62828;
+  background: color-mix(in oklch, var(--difficulty-hard) 12%, white);
+  color: var(--difficulty-hard);
 }
 
 .dc-star {
@@ -439,9 +701,11 @@
   background: transparent;
 }
 
-.dc-tab:hover {
-  color: var(--foreground);
-  background: var(--color-section-light);
+@media (hover: hover) {
+  .dc-tab:hover {
+    color: var(--foreground);
+    background: var(--color-section-light);
+  }
 }
 
 .dc-tab-active {
@@ -452,4 +716,110 @@
 .dc-tab-active:hover {
   background: var(--foreground);
   color: white;
+}
+
+/* ─── Learning Workspace (dark IDE surface) ─── */
+
+/* Mobile-chrome-safe full-height workspace */
+.workspace-full-height {
+  height: 100vh;
+  height: 100dvh;
+}
+
+.editor-surface {
+  background-color: var(--editor-bg);
+  color: var(--editor-text);
+}
+
+.editor-chrome {
+  background-color: var(--editor-chrome);
+  border-color: var(--editor-border);
+}
+
+/* Resizable split track (code ↔ output), grab area per reference standard */
+.workspace-splitter {
+  flex: 0 0 8px;
+  cursor: col-resize;
+  background: var(--editor-border);
+  transition: background var(--duration-fast) var(--ease-smooth);
+}
+
+@media (hover: hover) {
+  .workspace-splitter:hover {
+    background: var(--color-cta-green);
+  }
+}
+
+/* Resizable track (editor ↕ output) */
+.workspace-splitter-row {
+  flex: 0 0 6px;
+  cursor: row-resize;
+  background: var(--editor-border);
+  transition: background var(--duration-fast) var(--ease-smooth);
+}
+
+@media (hover: hover) {
+  .workspace-splitter-row:hover {
+    background: var(--color-cta-green);
+  }
+}
+
+/* Quiet line-number gutter shares the editor bg (no hard divider) */
+.editor-gutter {
+  width: var(--editor-gutter-width);
+  background: var(--editor-gutter);
+  color: var(--editor-gutter-fg);
+}
+
+/* Fixed-width, non-shrinking primary Run button (toolbar never reflows) */
+.editor-run-btn {
+  min-width: 68px;
+  flex-shrink: 0;
+}
+
+/* Status bar: Saved · Ln, Col */
+.editor-statusbar {
+  background: var(--editor-chrome);
+  color: var(--overlay-text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  border-top: 1px solid var(--editor-border);
+}
+
+/* In-lesson runnable code block (Programiz pattern) */
+.code-block-runnable {
+  border-radius: var(--radius-card);
+  border: 1px solid var(--editor-border);
+  background: var(--editor-bg);
+  overflow: hidden;
+}
+
+.code-block-runnable pre {
+  background: var(--editor-bg);
+  color: var(--editor-text);
+  font-family: var(--font-mono);
+  font-size: var(--editor-font-size);
+  line-height: var(--editor-line-height);
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+}
+
+/* Segmented tab pair in editor chrome: active is the only filled element */
+.seg-tab {
+  border-radius: var(--radius-tool);
+  padding: 0.25rem 0.9375rem;
+  min-height: 2.25rem; /* touch-friendly segmented tab target */
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid var(--overlay-border);
+  background: transparent;
+  color: var(--overlay-text-muted);
+  transition: background var(--duration-fast) var(--ease-smooth),
+              color var(--duration-fast) var(--ease-smooth);
+}
+
+.seg-tab-active {
+  background: var(--color-cta-green);
+  border-color: var(--color-cta-green);
+  color: var(--color-cta-green-fg);
 }

@@ -6,7 +6,10 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
-import { AlertCircle, ArrowRight } from "lucide-react";
+import { AlertCircle, ArrowRight, FlaskConical } from "lucide-react";
+
+const DEMO_EMAIL = "demo@codeyaar.dev";
+const DEMO_PASSWORD = "demo123";
 
 export default function SignInPage() {
   const [email, setEmail] = useState("");
@@ -31,6 +34,12 @@ export default function SignInPage() {
     }
   };
 
+  const fillDemoCredentials = () => {
+    setEmail(DEMO_EMAIL);
+    setPassword(DEMO_PASSWORD);
+    setError(null);
+  };
+
   return (
     <div>
       {/* Header */}
@@ -43,6 +52,30 @@ export default function SignInPage() {
 
       {/* Form */}
       <form onSubmit={handleSubmit} className="space-y-5">
+        {/* Demo access — works without a personal account once courses are seeded */}
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-start gap-3 rounded-lg border border-primary/20 bg-primary/[0.05] p-3.5 text-sm"
+        >
+          <FlaskConical className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <div className="space-y-1.5">
+            <p className="text-foreground">
+              Just exploring? Use the demo account:
+            </p>
+            <p className="font-mono text-xs text-muted-foreground">
+              {DEMO_EMAIL} / {DEMO_PASSWORD}
+            </p>
+            <button
+              type="button"
+              onClick={fillDemoCredentials}
+              className="text-xs font-semibold text-primary transition-colors hover:text-primary/80"
+            >
+              Fill demo credentials
+            </button>
+          </div>
+        </motion.div>
+
         {error && (
           <motion.div
             initial={{ opacity: 0, y: -8 }}

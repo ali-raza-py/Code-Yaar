@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  Award,
   BookOpen,
   ChevronDown,
   ClipboardCheck,
@@ -77,6 +78,7 @@ const navGroups: NavGroup[] = [
 
 const secondaryItems: NavItem[] = [
   { href: "/leaderboard", label: "Leaderboard", icon: Medal, badge: "NEW" },
+  { href: "/certificates", label: "Certificates", icon: Award },
   { href: "/profile", label: "Profile", icon: User },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
@@ -117,9 +119,9 @@ function SidebarLink({
         className={cn(
           "group relative flex min-h-10 items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors duration-150",
           "before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-r-full before:transition-colors",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c4b5fd] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0b1220]",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--sidebar-bg)]",
           active
-            ? "bg-[#8b5cf6]/[0.16] text-white before:bg-[#c4b5fd]"
+            ? "bg-[var(--sidebar-active-bg)] text-white before:bg-[var(--sidebar-accent)]"
             : "text-white/75 hover:bg-white/[0.07] hover:text-white before:bg-transparent"
         )}
       >
@@ -127,12 +129,12 @@ function SidebarLink({
           aria-hidden="true"
           className={cn(
             "h-5 w-5 shrink-0 stroke-[1.7] transition-colors",
-            active ? "text-[#c4b5fd]" : "text-white/65 group-hover:text-white"
+            active ? "text-[var(--sidebar-accent)]" : "text-white/65 group-hover:text-white"
           )}
         />
         <span className="min-w-0 truncate">{item.label}</span>
         {item.badge && (
-          <span className="ml-auto rounded-full border border-[#c4b5fd]/30 bg-[#8b5cf6]/20 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-[#ddd6fe]">
+          <span className="ml-auto rounded-pill border border-[var(--sidebar-badge-border)] bg-[var(--sidebar-badge-bg)] px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-[var(--sidebar-accent-soft)]">
             {item.badge}
           </span>
         )}
@@ -165,7 +167,7 @@ function SidebarGroup({
         aria-expanded={expanded}
         aria-controls={contentId}
         onClick={onToggle}
-        className="flex min-h-8 w-full items-center justify-between rounded-md px-3 text-[11px] font-bold uppercase tracking-[0.12em] text-white/75 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c4b5fd]"
+        className="flex min-h-8 w-full items-center justify-between rounded-md px-3 text-[11px] font-bold uppercase tracking-[0.12em] text-white/75 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]"
       >
         {group.label}
         <ChevronDown
@@ -222,7 +224,7 @@ function SidebarPanel({
   const initials = displayName.slice(0, 1).toUpperCase();
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#0b1220] text-white">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--sidebar-bg)] text-white">
       <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-white/10 px-4">
         <div className="relative h-6 w-6 shrink-0">
           <Image
@@ -283,10 +285,10 @@ function SidebarPanel({
               <p className="font-semibold text-white">Getting started</p>
               <p className="mt-1 text-[11px] text-white/65">One small win today.</p>
             </div>
-            <span className="font-bold text-[#ddd6fe]">0/4</span>
+            <span className="font-bold text-[var(--sidebar-accent-soft)]">0/4</span>
           </div>
           <div className="mt-3 h-1 overflow-hidden rounded-full bg-white/10">
-            <div className="h-full min-w-1.5 w-0 rounded-full bg-[#a78bfa]" />
+            <div className="h-full min-w-1.5 w-0 rounded-full bg-[var(--sidebar-accent-strong)]" />
           </div>
         </div>
 
@@ -294,9 +296,9 @@ function SidebarPanel({
           <Link
             href="/profile"
             onClick={onNavigate}
-            className="flex items-center gap-3 rounded-lg p-2 text-white transition-colors hover:bg-white/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c4b5fd]"
+            className="flex items-center gap-3 rounded-lg p-2 text-white transition-colors hover:bg-white/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]"
           >
-            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#5b4bb7] text-xs font-bold">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[var(--sidebar-avatar-bg)] text-xs font-bold">
               {initials}
             </span>
             <span className="min-w-0">
@@ -402,7 +404,7 @@ export function AppSidebar() {
                 type="button"
                 aria-label="Close navigation"
                 onClick={closeMobile}
-                className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c4b5fd]"
+                className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]"
               >
                 <X aria-hidden="true" className="h-4 w-4" />
               </button>

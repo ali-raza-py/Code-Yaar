@@ -43,7 +43,7 @@ class CourseModelTest(TestCase):
         self.course = Course.objects.create(
             slug='python-101', title='Python 101', description='Intro',
             track=self.track, difficulty='beginner', language='python',
-            estimated_hours=4, total_xp=1000, is_published=True,
+            is_published=True,
         )
         self.chapter = Chapter.objects.create(
             course=self.course, title='Basics', slug='basics', order=1,
@@ -351,6 +351,52 @@ class SandboxServiceTest(TestCase):
         self.assertFalse(result.all_passed)
         self.assertEqual(result.xp_earned, 0)
 
+    def _make_exercise(self, slug, **kwargs):
+        track = CareerTrack.objects.create(slug=f't{slug}', title='T', description='T')
+        course = Course.objects.create(
+            slug=f'c{slug}', title='C', description='', track=track, language='python',
+        )
+        chapter = Chapter.objects.create(course=course, title='Ch', slug=f'ch{slug}', order=1)
+        lesson = Lesson.objects.create(chapter=chapter, title='L', slug=f'l{slug}', order=1)
+        defaults = dict(lesson=lesson, title='Ex', slug=slug, instructions='Do it')
+        defaults.update(kwargs)
+        return Exercise.objects.create(**defaults)
+
+    def test_code_exercise_is_honest_pending_not_fake_pass(self):
+        """Code exercises must never report a pass without a real evaluator."""
+        exercise = self._make_exercise(
+            'code1', exercise_type='code', language='python',
+            starter_code='# start', test_cases=[], xp_reward=100,
+        )
+        result = validate_submission(exercise, 'print("done")')
+        self.assertEqual(result.status, 'pending')
+        self.assertFalse(result.all_passed)
+        self.assertEqual(result.xp_earned, 0)
+
+    def test_debugging_validated_against_solution(self):
+        """Debugging/fill-blank are graded for real via solution comparison."""
+        exercise = self._make_exercise(
+            'dbg1', exercise_type='debugging', language='python',
+            starter_code='print(nums[5])  # fix',
+            solution_code='nums = [10, 20, 30, 40, 50]\nprint(nums[4])',
+            xp_reward=100,
+        )
+        correct = validate_submission(exercise, 'nums = [10, 20, 30, 40, 50]\nprint(nums[4])  # fixed')
+        self.assertEqual(correct.status, 'correct')
+        self.assertEqual(correct.xp_earned, 100)
+
+        wrong = validate_submission(exercise, 'nums = [10, 20, 30, 40, 50]\nprint(nums[3])')
+        self.assertEqual(wrong.status, 'incorrect')
+        self.assertEqual(wrong.xp_earned, 0)
+
+    def test_output_prediction_status_flag(self):
+        exercise = self._make_exercise(
+            'op1', exercise_type='output_prediction', expected_output='0\n2\n4', xp_reward=75,
+        )
+        result = validate_submission(exercise, None, selected_answer='0\n2\n4')
+        self.assertEqual(result.status, 'correct')
+        self.assertEqual(result.xp_earned, 75)
+
 
 # ─── Course API Tests ────────────────────────────────────────────────────────
 
@@ -362,7 +408,6 @@ class CourseAPITest(TestCase):
             slug='python-foundations', title='Python Foundations',
             description='Learn Python', track=self.track,
             difficulty='beginner', language='python',
-            estimated_hours=4, total_xp=3900,
             is_published=True, is_active=True,
         )
         self.chapter = Chapter.objects.create(
@@ -400,7 +445,8 @@ class CourseAPITest(TestCase):
             is_published=False, is_active=True,
         )
         response = self.client.get('/api/courses/')
-        titles = [c['title'] for c in response.data]
+        # List endpoints are globally paginated (PageNumberPagination).
+        titles = [c['title'] for c in response.data['results']]
         self.assertNotIn('Hidden', titles)
 
 
@@ -440,3 +486,137 @@ class AuthAPITest(TestCase):
     def test_profile_requires_auth(self):
         response = self.client.get('/api/auth/profile/')
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+# ─── Security & Integrity Tests (Phase H) ───────────────────────────────────────
+
+class AnswerLeakageTest(TestCase):
+    """The content API must never hand learners the answers or grading data."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username='curious', password='pass123')
+        self.client.force_authenticate(user=self.user)
+        self.track = CareerTrack.objects.create(slug='py', title='Py', description='Py')
+        self.course = Course.objects.create(
+            slug='c1', title='C1', description='', track=self.track,
+            language='python', is_published=True, is_active=True,
+        )
+        self.chapter = Chapter.objects.create(course=self.course, title='Ch1', slug='ch1', order=1)
+        self.lesson = Lesson.objects.create(chapter=self.chapter, title='L1', slug='l1', order=1)
+
+    def _detail(self, exercise):
+        response = self.client.get(f'/api/exercises/{exercise.id}/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        return response
+
+    def test_mcq_detail_hides_correct_flags(self):
+        exercise = Exercise.objects.create(
+            lesson=self.lesson, title='MCQ', slug='mcq',
+            exercise_type='multiple_choice', instructions='Pick',
+            choices=[
+                {'id': 'a', 'text': 'Wrong', 'is_correct': False},
+                {'id': 'b', 'text': 'Right', 'is_correct': True},
+            ],
+            solution_code='b',
+        )
+        data = self._detail(exercise).data
+        self.assertNotIn('solution_code', data)
+        for choice in data['choices']:
+            self.assertNotIn('is_correct', choice)
+            self.assertIn('text', choice)
+
+    def test_output_prediction_detail_hides_expected_answer(self):
+        exercise = Exercise.objects.create(
+            lesson=self.lesson, title='OP', slug='op',
+            exercise_type='output_prediction', instructions='What prints?',
+            expected_output='42',
+        )
+        data = self._detail(exercise).data
+        self.assertEqual(data['expected_output'], '')
+
+    def test_code_exercise_keeps_spec_output(self):
+        exercise = Exercise.objects.create(
+            lesson=self.lesson, title='Code', slug='code',
+            exercise_type='code', instructions='Print 42',
+            expected_output='42', solution_code='print(42)',
+            test_cases=[{'input': '', 'expected_output': '42'}],
+        )
+        data = self._detail(exercise).data
+        # Code exercises show the expected behaviour as part of the spec…
+        self.assertEqual(data['expected_output'], '42')
+        # …but never the solution or the grading tests.
+        self.assertNotIn('solution_code', data)
+        self.assertNotIn('test_cases', data)
+        self.assertNotIn('hidden_tests', data)
+
+
+class HonestGradingIntegrityTest(TestCase):
+    """Ungradeable submissions are recorded honestly — never as fake passes."""
+
+    def setUp(self):
+        self.track = CareerTrack.objects.create(slug='py', title='Py', description='Py')
+        self.course = Course.objects.create(
+            slug='c1', title='C1', description='', track=self.track,
+            language='python', is_published=True,
+        )
+        self.chapter = Chapter.objects.create(course=self.course, title='Ch1', slug='ch1', order=1)
+        self.lesson = Lesson.objects.create(chapter=self.chapter, title='L1', slug='l1', order=1)
+
+    def test_code_without_tests_or_solution_is_pending(self):
+        exercise = Exercise.objects.create(
+            lesson=self.lesson, title='Open', slug='open',
+            exercise_type='code', instructions='Write anything',
+        )
+        result = validate_submission(exercise, 'print("whatever")')
+        self.assertNotEqual(result.status, 'correct')
+        self.assertFalse(result.all_passed)
+
+    def test_fill_blank_wrong_answer_is_incorrect(self):
+        exercise = Exercise.objects.create(
+            lesson=self.lesson, title='FB', slug='fb',
+            exercise_type='fill_blank', instructions='Complete',
+            solution_code='git add',
+        )
+        wrong = validate_submission(exercise, 'git commit')
+        self.assertEqual(wrong.status, 'incorrect')
+        right = validate_submission(exercise, ' git  add ')
+        self.assertEqual(right.status, 'correct')
+
+
+class SeedAcademyIntegrityTest(TestCase):
+    """The academy seeder must produce the five full courses, idempotently."""
+
+    def test_seed_is_idempotent_and_complete(self):
+        from django.core.management import call_command
+        from .models import Lesson as LessonModel
+
+        call_command('seed_academy', verbosity=0)
+        first_exercises = Exercise.objects.count()
+        first_lessons = LessonModel.objects.count()
+
+        expected = {
+            'python-foundations', 'cpp-fundamentals', 'web-foundations',
+            'git-github-foundations', 'problem-solving-dsa',
+        }
+        slugs = set(Course.objects.filter(slug__in=expected).values_list('slug', flat=True))
+        self.assertEqual(slugs, expected)
+
+        for course in Course.objects.filter(slug__in=expected):
+            finals = Exercise.objects.filter(
+                lesson__chapter__course=course,
+                lesson__chapter__is_active=True,
+                lesson__is_active=True,
+                is_final_assessment=True,
+                is_active=True,
+            )
+            self.assertGreaterEqual(finals.count(), 5, course.slug)
+            self.assertTrue(
+                LessonModel.objects.filter(chapter__course=course, is_active=True).exists(),
+                course.slug,
+            )
+
+        # Re-running must not duplicate anything.
+        call_command('seed_academy', verbosity=0)
+        self.assertEqual(Exercise.objects.count(), first_exercises)
+        self.assertEqual(LessonModel.objects.count(), first_lessons)

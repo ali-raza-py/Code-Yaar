@@ -35,10 +35,10 @@ const principles = [
 
 export default function AboutPage() {
   return (
-    <div className="bg-[#f7f8fa]">
-      <section className="bg-[#0f1d32] text-white">
+    <div className="bg-section-light">
+      <section className="bg-hero-navy text-white">
         <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 lg:px-8 lg:py-28">
-          <p className="tech-label text-[#8ee59f]">ABOUT CODE-YAAR</p>
+          <p className="tech-label text-mint-on-navy">ABOUT CODE-YAAR</p>
           <h1 className="mt-5 max-w-3xl text-4xl font-extrabold leading-tight sm:text-6xl">
             Become the developer who can actually build.
           </h1>
@@ -46,10 +46,10 @@ export default function AboutPage() {
             Code-Yaar is a practical learning platform for people who are done collecting tutorials and ready to turn understanding into working software.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <Link href="/learn" className="inline-flex items-center gap-2 rounded-lg bg-[#2dbe52] px-5 py-3 text-sm font-bold text-white hover:bg-[#25a848]">
+            <Link href="/learn" className="focus-ring inline-flex items-center gap-2 rounded-lg bg-cta px-5 py-3 text-sm font-bold text-cta-fg hover:bg-cta-hover">
               Explore learning paths <ArrowRight className="h-4 w-4" />
             </Link>
-            <Link href="#contact" className="inline-flex items-center gap-2 rounded-lg border border-white/20 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">
+            <Link href="#contact" className="focus-ring inline-flex items-center gap-2 rounded-lg border border-white/20 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">
               Talk to us <Mail className="h-4 w-4" />
             </Link>
           </div>
@@ -68,7 +68,7 @@ export default function AboutPage() {
         </div>
         <div className="mt-12 grid gap-4 md:grid-cols-3">
           {principles.map(({ icon: Icon, title, text }) => (
-            <div key={title} className="border border-[var(--color-section-border)] bg-white p-6">
+            <div key={title} className="card-hairline bg-card border-[var(--color-section-border)] p-6">
               <Icon className="h-6 w-6 text-[var(--primary)]" />
               <h3 className="mt-5 text-lg font-bold text-foreground">{title}</h3>
               <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{text}</p>
@@ -77,7 +77,7 @@ export default function AboutPage() {
         </div>
       </section>
 
-      <section className="border-y border-[var(--color-section-border)] bg-white">
+      <section className="border-y border-[var(--color-section-border)] bg-card">
         <div className="mx-auto grid max-w-6xl gap-10 px-4 py-16 sm:px-6 lg:grid-cols-[0.8fr_1.2fr] lg:px-8">
           <div>
             <p className="tech-label text-[var(--primary)]">QUICK ANSWERS</p>
@@ -102,17 +102,17 @@ export default function AboutPage() {
 
       <section id="careers" className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:px-8">
         <div className="grid gap-6 md:grid-cols-2">
-          <div className="border border-[var(--color-section-border)] bg-[#e9f8ed] p-8">
-            <BriefcaseBusiness className="h-6 w-6 text-[#16833a]" />
+          <div className="card-hairline border-[var(--color-section-border)] bg-green-pale p-8">
+            <BriefcaseBusiness className="h-6 w-6 text-green-deep" />
             <h2 className="mt-5 text-2xl font-bold text-foreground">Help shape the next learning platform.</h2>
             <p className="mt-3 text-sm leading-relaxed text-muted-foreground">We are building a small, thoughtful team around practical education and better developer tools.</p>
-            <a href="mailto:careers@codeyaar.dev" className="mt-6 inline-flex items-center gap-2 text-sm font-bold text-[#16833a]">See opportunities <ArrowRight className="h-4 w-4" /></a>
+            <a href="mailto:careers@codeyaar.dev" className="focus-ring mt-6 inline-flex items-center gap-2 text-sm font-bold text-green-deep">See opportunities <ArrowRight className="h-4 w-4" /></a>
           </div>
-          <div id="contact" className="border border-[var(--color-section-border)] bg-[#0f1d32] p-8 text-white">
-            <Mail className="h-6 w-6 text-[#8ee59f]" />
+          <div id="contact" className="card-hairline border-[var(--color-section-border)] bg-hero-navy p-8 text-white">
+            <Mail className="h-6 w-6 text-mint-on-navy" />
             <h2 className="mt-5 text-2xl font-bold">Have a question or idea?</h2>
             <p className="mt-3 text-sm leading-relaxed text-white/65">Tell us what you are building, what you are stuck on, or what you want to see next.</p>
-            <a href="mailto:hello@codeyaar.dev" className="mt-6 inline-flex items-center gap-2 text-sm font-bold text-[#8ee59f]">hello@codeyaar.dev <ArrowRight className="h-4 w-4" /></a>
+            <a href="mailto:hello@codeyaar.dev" className="focus-ring mt-6 inline-flex items-center gap-2 text-sm font-bold text-mint-on-navy">hello@codeyaar.dev <ArrowRight className="h-4 w-4" /></a>
           </div>
         </div>
       </section>

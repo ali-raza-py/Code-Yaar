@@ -27,7 +27,6 @@ export default function VideoLesson({
   videoUrl,
   title,
   durationSeconds,
-  lessonId,
   onProgress,
   onComplete,
   completionThreshold = 0.8,
@@ -36,7 +35,7 @@ export default function VideoLesson({
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [playbackRate, setPlaybackRate] = useState(1);
-  const [hasCompleted, setHasCompleted] = useState(false);
+  const completedNotifiedRef = useRef(false);
   const [showControls, setShowControls] = useState(true);
 
   const progressPercent = durationSeconds > 0 ? (currentTime / durationSeconds) * 100 : 0;
@@ -50,13 +49,13 @@ export default function VideoLesson({
     onProgress?.(video.currentTime);
   }, [onProgress]);
 
-  // Mark complete when threshold reached
+  // Mark complete when threshold reached (notify once via ref guard — no state churn)
   useEffect(() => {
-    if (isComplete && !hasCompleted) {
-      setHasCompleted(true);
+    if (isComplete && !completedNotifiedRef.current) {
+      completedNotifiedRef.current = true;
       onComplete?.();
     }
-  }, [isComplete, hasCompleted, onComplete]);
+  }, [isComplete, onComplete]);
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current;

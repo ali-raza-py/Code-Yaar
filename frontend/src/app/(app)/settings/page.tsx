@@ -23,8 +23,8 @@ export default function SettingsPage() {
   const [accountSaving, setAccountSaving] = useState(false);
   const [accountMsg, setAccountMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Profile state
-  const [profile, setProfile] = useState<ProfileData>({ avatar: '', bio: '', role: 'student' });
+  // Profile state (server copy is write-only here; the form is the working copy)
+  const [, setProfile] = useState<ProfileData>({ avatar: '', bio: '', role: 'student' });
   const [profileForm, setProfileForm] = useState<ProfileData>({ avatar: '', bio: '', role: 'student' });
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMsg, setProfileMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -47,25 +47,8 @@ export default function SettingsPage() {
   const [prefsSaving, setPrefsSaving] = useState(false);
   const [prefsMsg, setPrefsMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  useEffect(() => {
-    loadSettings();
-    loadPrefs();
-  }, []);
-
-  function loadPrefs() {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('user_preferences');
-      if (saved) {
-        try {
-          setPrefs(JSON.parse(saved));
-        } catch { /* use defaults */ }
-      }
-    }
-  }
-
-  async function loadSettings() {
+  const loadSettings = useCallback(async () => {
     try {
-      setLoading(true);
       const [accountData, profileData] = await Promise.all([
         settingsApi.getAccount(),
         auth.getProfile() as Promise<ProfileData & { user: unknown }>,
@@ -95,7 +78,24 @@ export default function SettingsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    // Deferred via await so the effect never sets state synchronously.
+    (async () => { await loadSettings(); })();
+  }, [loadSettings]);
+
+  // Hydrate localStorage preferences after mount (SSR renders defaults).
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve(window.localStorage.getItem('user_preferences')).then((saved) => {
+      if (!saved || cancelled) return;
+      try {
+        setPrefs((p) => ({ ...p, ...JSON.parse(saved) }));
+      } catch { /* use defaults */ }
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const handleSaveAccount = useCallback(async () => {
     setAccountSaving(true);
@@ -178,7 +178,7 @@ export default function SettingsPage() {
   if (error === 'network') return <NetworkError />;
   if (error === 'auth') return (
     <div className="mx-auto max-w-3xl px-4 py-12 text-center">
-      <p className="text-gray-500">Please sign in to access settings.</p>
+      <p className="text-muted-foreground">Please sign in to access settings.</p>
     </div>
   );
 
@@ -193,25 +193,25 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
       {/* Header */}
       <div className="mb-8">
-        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-purple-200 bg-purple-50 px-3 py-1 text-xs font-medium text-purple-700">
+        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
           <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
           SETTINGS
         </div>
-        <h1 className="text-3xl font-bold tracking-tight text-gray-900">Settings</h1>
-        <p className="mt-2 text-gray-600">Manage your account, profile, and preferences.</p>
+        <h1 className="text-3xl font-bold tracking-tight text-foreground">Settings</h1>
+        <p className="mt-2 text-muted-foreground">Manage your account, profile, and preferences.</p>
       </div>
 
       {loading ? (
         <div className="animate-pulse space-y-4">
           <div className="flex gap-2">
             {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="h-9 w-24 rounded-full bg-gray-200" />
+              <div key={i} className="h-9 w-24 rounded-full bg-muted" />
             ))}
           </div>
-          <div className="h-64 rounded-xl bg-gray-200" />
+          <div className="h-64 rounded-xl bg-muted" />
         </div>
       ) : (
         <div className="flex flex-col gap-8 sm:flex-row">
@@ -224,8 +224,8 @@ export default function SettingsPage() {
                   onClick={() => setTab(t.id)}
                   className={`flex items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                     tab === t.id
-                      ? 'bg-purple-50 text-purple-700'
-                      : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                      ? 'bg-primary/10 text-primary'
+                      : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
                   }`}
                 >
                   <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -241,52 +241,52 @@ export default function SettingsPage() {
           <div className="flex-1 min-w-0">
             {/* Account Tab */}
             {tab === 'account' && (
-              <div className="rounded-xl border border-gray-200 bg-white p-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-1">Account Settings</h2>
-                <p className="text-sm text-gray-500 mb-6">Update your username, email, and display name.</p>
+              <div className="rounded-xl border border-border bg-card p-6">
+                <h2 className="text-lg font-semibold text-foreground mb-1">Account Settings</h2>
+                <p className="text-sm text-muted-foreground mb-6">Update your username, email, and display name.</p>
 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                    <label className="block text-sm font-medium text-muted-foreground mb-1">Username</label>
                     <input
                       type="text"
                       value={accountForm.username}
                       onChange={(e) => setAccountForm(f => ({ ...f, username: e.target.value }))}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      className="w-full rounded-lg border border-border px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                    <label className="block text-sm font-medium text-muted-foreground mb-1">Email</label>
                     <input
                       type="email"
                       value={accountForm.email}
                       onChange={(e) => setAccountForm(f => ({ ...f, email: e.target.value }))}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      className="w-full rounded-lg border border-border px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
+                      <label className="block text-sm font-medium text-muted-foreground mb-1">First Name</label>
                       <input
                         type="text"
                         value={accountForm.first_name}
                         onChange={(e) => setAccountForm(f => ({ ...f, first_name: e.target.value }))}
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                        className="w-full rounded-lg border border-border px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
+                      <label className="block text-sm font-medium text-muted-foreground mb-1">Last Name</label>
                       <input
                         type="text"
                         value={accountForm.last_name}
                         onChange={(e) => setAccountForm(f => ({ ...f, last_name: e.target.value }))}
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                        className="w-full rounded-lg border border-border px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                       />
                     </div>
                   </div>
 
                   {accountMsg && (
-                    <p className={`text-sm ${accountMsg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                    <p className={`text-sm ${accountMsg.type === 'success' ? 'text-success' : 'text-danger'}`}>
                       {accountMsg.text}
                     </p>
                   )}
@@ -294,7 +294,7 @@ export default function SettingsPage() {
                   <button
                     onClick={handleSaveAccount}
                     disabled={accountSaving}
-                    className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-700 disabled:opacity-50 transition-colors"
+                    className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
                   >
                     {accountSaving ? 'Saving...' : 'Save Changes'}
                   </button>
@@ -304,46 +304,46 @@ export default function SettingsPage() {
 
             {/* Profile Tab */}
             {tab === 'profile' && (
-              <div className="rounded-xl border border-gray-200 bg-white p-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-1">Public Profile</h2>
-                <p className="text-sm text-gray-500 mb-6">Customize how others see you on Code-Yaar.</p>
+              <div className="rounded-xl border border-border bg-card p-6">
+                <h2 className="text-lg font-semibold text-foreground mb-1">Public Profile</h2>
+                <p className="text-sm text-muted-foreground mb-6">Customize how others see you on Code-Yaar.</p>
 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Avatar URL</label>
+                    <label className="block text-sm font-medium text-muted-foreground mb-1">Avatar URL</label>
                     <input
                       type="url"
                       value={profileForm.avatar}
                       onChange={(e) => setProfileForm(p => ({ ...p, avatar: e.target.value }))}
                       placeholder="https://example.com/avatar.jpg"
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      className="w-full rounded-lg border border-border px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                     {profileForm.avatar && (
                       <div className="mt-2 flex items-center gap-3">
-                        <div className="h-12 w-12 overflow-hidden rounded-full bg-gray-100">
+                        <div className="h-12 w-12 overflow-hidden rounded-full bg-muted">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={profileForm.avatar} alt="Avatar preview" className="h-full w-full object-cover" />
                         </div>
-                        <span className="text-xs text-gray-500">Preview</span>
+                        <span className="text-xs text-muted-foreground">Preview</span>
                       </div>
                     )}
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Bio</label>
+                    <label className="block text-sm font-medium text-muted-foreground mb-1">Bio</label>
                     <textarea
                       value={profileForm.bio}
                       onChange={(e) => setProfileForm(p => ({ ...p, bio: e.target.value }))}
                       rows={3}
                       placeholder="Tell us about yourself..."
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500 resize-none"
+                      className="w-full rounded-lg border border-border px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary resize-none"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                    <label className="block text-sm font-medium text-muted-foreground mb-1">Role</label>
                     <select
                       value={profileForm.role}
                       onChange={(e) => setProfileForm(p => ({ ...p, role: e.target.value }))}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      className="w-full rounded-lg border border-border px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                     >
                       <option value="student">Student</option>
                       <option value="mentor">Mentor</option>
@@ -351,7 +351,7 @@ export default function SettingsPage() {
                   </div>
 
                   {profileMsg && (
-                    <p className={`text-sm ${profileMsg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                    <p className={`text-sm ${profileMsg.type === 'success' ? 'text-success' : 'text-danger'}`}>
                       {profileMsg.text}
                     </p>
                   )}
@@ -359,7 +359,7 @@ export default function SettingsPage() {
                   <button
                     onClick={handleSaveProfile}
                     disabled={profileSaving}
-                    className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-700 disabled:opacity-50 transition-colors"
+                    className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
                   >
                     {profileSaving ? 'Saving...' : 'Save Profile'}
                   </button>
@@ -369,47 +369,47 @@ export default function SettingsPage() {
 
             {/* Password Tab */}
             {tab === 'password' && (
-              <div className="rounded-xl border border-gray-200 bg-white p-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-1">Change Password</h2>
-                <p className="text-sm text-gray-500 mb-6">Update your password to keep your account secure.</p>
+              <div className="rounded-xl border border-border bg-card p-6">
+                <h2 className="text-lg font-semibold text-foreground mb-1">Change Password</h2>
+                <p className="text-sm text-muted-foreground mb-6">Update your password to keep your account secure.</p>
 
                 <div className="space-y-4 max-w-md">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Current Password</label>
+                    <label className="block text-sm font-medium text-muted-foreground mb-1">Current Password</label>
                     <input
                       type="password"
                       value={passwordForm.current_password}
                       onChange={(e) => setPasswordForm(f => ({ ...f, current_password: e.target.value }))}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      className="w-full rounded-lg border border-border px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
+                    <label className="block text-sm font-medium text-muted-foreground mb-1">New Password</label>
                     <input
                       type="password"
                       value={passwordForm.new_password}
                       onChange={(e) => setPasswordForm(f => ({ ...f, new_password: e.target.value }))}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      className="w-full rounded-lg border border-border px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                     {passwordForm.new_password && passwordForm.new_password.length < 8 && (
-                      <p className="mt-1 text-xs text-red-500">Minimum 8 characters</p>
+                      <p className="mt-1 text-xs text-danger">Minimum 8 characters</p>
                     )}
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Confirm New Password</label>
+                    <label className="block text-sm font-medium text-muted-foreground mb-1">Confirm New Password</label>
                     <input
                       type="password"
                       value={passwordForm.confirm_password}
                       onChange={(e) => setPasswordForm(f => ({ ...f, confirm_password: e.target.value }))}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      className="w-full rounded-lg border border-border px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                     {passwordForm.confirm_password && passwordForm.new_password !== passwordForm.confirm_password && (
-                      <p className="mt-1 text-xs text-red-500">Passwords do not match</p>
+                      <p className="mt-1 text-xs text-danger">Passwords do not match</p>
                     )}
                   </div>
 
                   {passwordMsg && (
-                    <p className={`text-sm ${passwordMsg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                    <p className={`text-sm ${passwordMsg.type === 'success' ? 'text-success' : 'text-danger'}`}>
                       {passwordMsg.text}
                     </p>
                   )}
@@ -417,7 +417,7 @@ export default function SettingsPage() {
                   <button
                     onClick={handleSavePassword}
                     disabled={passwordSaving || !passwordForm.current_password || !passwordForm.new_password || passwordForm.new_password !== passwordForm.confirm_password}
-                    className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-700 disabled:opacity-50 transition-colors"
+                    className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
                   >
                     {passwordSaving ? 'Changing...' : 'Change Password'}
                   </button>
@@ -427,14 +427,14 @@ export default function SettingsPage() {
 
             {/* Preferences Tab */}
             {tab === 'preferences' && (
-              <div className="rounded-xl border border-gray-200 bg-white p-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-1">Preferences</h2>
-                <p className="text-sm text-gray-500 mb-6">Customize your learning experience.</p>
+              <div className="rounded-xl border border-border bg-card p-6">
+                <h2 className="text-lg font-semibold text-foreground mb-1">Preferences</h2>
+                <p className="text-sm text-muted-foreground mb-6">Customize your learning experience.</p>
 
                 <div className="space-y-6">
                   {/* Theme */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Theme</label>
+                    <label className="block text-sm font-medium text-muted-foreground mb-2">Theme</label>
                     <div className="flex gap-3">
                       {(['light', 'dark', 'system'] as const).map((theme) => (
                         <button
@@ -442,8 +442,8 @@ export default function SettingsPage() {
                           onClick={() => setPrefs(p => ({ ...p, theme }))}
                           className={`rounded-lg border px-4 py-2 text-sm font-medium capitalize transition-colors ${
                             prefs.theme === theme
-                              ? 'border-purple-300 bg-purple-50 text-purple-700'
-                              : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                              ? 'border-primary/30 bg-primary/10 text-primary'
+                              : 'border-border bg-card text-muted-foreground hover:bg-muted/60'
                           }`}
                         >
                           {theme}
@@ -454,11 +454,11 @@ export default function SettingsPage() {
 
                   {/* Code Font Size */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Code Editor Font Size</label>
+                    <label className="block text-sm font-medium text-muted-foreground mb-1">Code Editor Font Size</label>
                     <select
                       value={prefs.code_font_size}
                       onChange={(e) => setPrefs(p => ({ ...p, code_font_size: e.target.value }))}
-                      className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                      className="rounded-lg border border-border px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                     >
                       <option value="12">12px</option>
                       <option value="14">14px</option>
@@ -477,17 +477,17 @@ export default function SettingsPage() {
                     ].map((item) => (
                       <div key={item.key} className="flex items-center justify-between">
                         <div>
-                          <p className="text-sm font-medium text-gray-900">{item.label}</p>
-                          <p className="text-xs text-gray-500">{item.desc}</p>
+                          <p className="text-sm font-medium text-foreground">{item.label}</p>
+                          <p className="text-xs text-muted-foreground">{item.desc}</p>
                         </div>
                         <button
                           onClick={() => setPrefs(p => ({ ...p, [item.key]: !p[item.key] }))}
                           className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
-                            prefs[item.key] ? 'bg-purple-600' : 'bg-gray-200'
+                            prefs[item.key] ? 'bg-primary' : 'bg-muted'
                           }`}
                         >
                           <span
-                            className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform ${
+                            className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-card shadow transform transition-transform ${
                               prefs[item.key] ? 'translate-x-4' : 'translate-x-0'
                             }`}
                           />
@@ -497,7 +497,7 @@ export default function SettingsPage() {
                   </div>
 
                   {prefsMsg && (
-                    <p className={`text-sm ${prefsMsg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+                    <p className={`text-sm ${prefsMsg.type === 'success' ? 'text-success' : 'text-danger'}`}>
                       {prefsMsg.text}
                     </p>
                   )}
@@ -505,7 +505,7 @@ export default function SettingsPage() {
                   <button
                     onClick={handleSavePrefs}
                     disabled={prefsSaving}
-                    className="rounded-lg bg-purple-600 px-4 py-2 text-sm font-semibold text-white hover:bg-purple-700 disabled:opacity-50 transition-colors"
+                    className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
                   >
                     {prefsSaving ? 'Saving...' : 'Save Preferences'}
                   </button>

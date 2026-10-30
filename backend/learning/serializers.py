@@ -65,10 +65,17 @@ class ExerciseListSerializer(serializers.ModelSerializer):
 
 
 class ExerciseDetailSerializer(serializers.ModelSerializer):
-    """Full exercise with instructions, starter code, and hints."""
+    """Full exercise with instructions, starter code, and hints.
+
+    Security: correct-answer flags and test expectations are never sent to
+    the client. Grading happens server-side; the explanation is only
+    returned by the submit endpoint once the learner has attempted it.
+    """
     hints = HintSerializer(many=True, read_only=True)
     lesson_title = serializers.CharField(source='lesson.title', read_only=True)
     chapter_title = serializers.CharField(source='lesson.chapter.title', read_only=True)
+    choices = serializers.SerializerMethodField()
+    expected_output = serializers.SerializerMethodField()
 
     class Meta:
         model = Exercise
@@ -77,10 +84,24 @@ class ExerciseDetailSerializer(serializers.ModelSerializer):
             'lesson_title', 'chapter_title',
             'instructions', 'context', 'constraints', 'expected_behavior',
             'starter_code', 'expected_output',
-            'choices', 'test_cases',
+            'choices',
             'xp_reward', 'max_attempts', 'order',
             'hints',
         ]
+
+    def get_choices(self, obj):
+        return [
+            {'id': c.get('id'), 'text': c.get('text')}
+            for c in (obj.choices or [])
+        ]
+
+    def get_expected_output(self, obj):
+        # For output-prediction items the expected output IS the answer, so
+        # it must never reach the client. For code exercises it is the spec
+        # the learner is asked to satisfy and stays visible.
+        if obj.exercise_type == 'output_prediction':
+            return ''
+        return obj.expected_output
 
 
 class LessonListSerializer(serializers.ModelSerializer):
@@ -114,15 +135,56 @@ class LessonDetailSerializer(serializers.ModelSerializer):
     exercises = ExerciseListSerializer(many=True, read_only=True)
     chapter_title = serializers.CharField(source='chapter.title', read_only=True)
     course_title = serializers.CharField(source='chapter.course.title', read_only=True)
+    course_slug = serializers.CharField(source='chapter.course.slug', read_only=True)
+    exercise_count = serializers.SerializerMethodField()
+    progress_status = serializers.SerializerMethodField()
+    prev_lesson = serializers.SerializerMethodField()
+    next_lesson = serializers.SerializerMethodField()
 
     class Meta:
         model = Lesson
         fields = [
             'id', 'title', 'slug', 'content_type', 'chapter_title', 'course_title',
+            'course_slug',
             'learning_objective', 'content_body', 'video_url', 'video_duration_seconds',
             'order', 'duration_minutes', 'xp_reward', 'is_free_preview',
+            'exercise_count', 'progress_status', 'prev_lesson', 'next_lesson',
             'exercises',
         ]
+
+    def get_exercise_count(self, obj):
+        return obj.exercises.count()
+
+    def get_progress_status(self, obj):
+        request = self.context.get('request')
+        if request and hasattr(request, 'user') and request.user.is_authenticated:
+            progress = LessonProgress.objects.filter(
+                user=request.user, lesson=obj
+            ).first()
+            if progress:
+                return progress.status
+        return 'not_started'
+
+    def _sibling(self, obj, direction):
+        """Previous/next lesson across the whole course, by content order."""
+        qs = Lesson.objects.filter(
+            chapter__course=obj.chapter.course,
+            chapter__is_active=True,
+            is_active=True,
+        ).order_by('chapter__order', 'order')
+        if direction == 'prev':
+            return qs.filter(chapter__order=obj.chapter.order).filter(order__lt=obj.order).last() \
+                or qs.filter(chapter__order__lt=obj.chapter.order).last()
+        return qs.filter(chapter__order=obj.chapter.order).filter(order__gt=obj.order).first() \
+            or qs.filter(chapter__order__gt=obj.chapter.order).order_by('chapter__order', 'order').first()
+
+    def get_prev_lesson(self, obj):
+        lesson = self._sibling(obj, 'prev')
+        return {'slug': lesson.slug, 'title': lesson.title} if lesson else None
+
+    def get_next_lesson(self, obj):
+        lesson = self._sibling(obj, 'next')
+        return {'slug': lesson.slug, 'title': lesson.title} if lesson else None
 
 
 class ChapterListSerializer(serializers.ModelSerializer):
@@ -180,6 +242,8 @@ class CourseListSerializer(serializers.ModelSerializer):
     lesson_count = serializers.SerializerMethodField()
     exercise_count = serializers.SerializerMethodField()
     enrolled = serializers.SerializerMethodField()
+    estimated_hours = serializers.IntegerField(read_only=True)
+    total_xp = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Course
@@ -214,6 +278,8 @@ class CourseDetailSerializer(serializers.ModelSerializer):
     enrollment_id = serializers.SerializerMethodField()
     resume_lesson = serializers.SerializerMethodField()
     progress_percentage = serializers.SerializerMethodField()
+    estimated_hours = serializers.IntegerField(read_only=True)
+    total_xp = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Course

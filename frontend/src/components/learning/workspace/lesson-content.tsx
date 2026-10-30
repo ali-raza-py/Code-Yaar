@@ -2,16 +2,23 @@
 
 import React from 'react';
 import { LessonDetail } from '@/types';
+import RunCodeBlock from './runnable-code-block';
 
 interface LessonContentProps {
   lesson: LessonDetail;
+  /**
+   * Real snippet executor backed by the platform sandbox. Passed down to
+   * every Python fence; when absent, code blocks render statically without
+   * a Run button (we never advertise execution that isn't wired up).
+   */
+  onRunSandbox?: (code: string, language: string) => Promise<string>;
 }
 
 /**
  * Simple markdown-like renderer for lesson content.
  * Handles headings, paragraphs, code blocks, inline code, and lists.
  */
-function renderContent(body: string) {
+function renderContent(body: string, onRunSandbox?: (code: string, language: string) => Promise<string>) {
   const lines = body.split('\n');
   const elements: React.ReactNode[] = [];
   let inCodeBlock = false;
@@ -26,16 +33,7 @@ function renderContent(body: string) {
     if (line.startsWith('```')) {
       if (inCodeBlock) {
         elements.push(
-          <div key={key++} className="my-3 rounded-lg overflow-hidden border border-gray-200">
-            {codeLanguage && (
-              <div className="bg-gray-100 px-3 py-1 text-[10px] font-medium text-gray-500 uppercase tracking-wider border-b border-gray-200">
-                {codeLanguage}
-              </div>
-            )}
-            <pre className="bg-gray-50 p-3 text-sm text-gray-800 overflow-x-auto">
-              <code>{codeContent.trim()}</code>
-            </pre>
-          </div>
+          <RunCodeBlock key={key++} code={codeContent.trim()} language={codeLanguage} onRunSandbox={onRunSandbox} />
         );
         codeContent = '';
         codeLanguage = '';
@@ -113,7 +111,7 @@ function renderContent(body: string) {
   return elements;
 }
 
-export default function LessonContent({ lesson }: LessonContentProps) {
+export default function LessonContent({ lesson, onRunSandbox }: LessonContentProps) {
   return (
     <div className="px-6 py-6 max-w-2xl mx-auto">
       {/* Lesson Header */}
@@ -140,7 +138,7 @@ export default function LessonContent({ lesson }: LessonContentProps) {
 
       {/* Lesson Body */}
       <div className="prose-learning">
-        {renderContent(lesson.content_body)}
+        {renderContent(lesson.content_body, onRunSandbox)}
       </div>
     </div>
   );

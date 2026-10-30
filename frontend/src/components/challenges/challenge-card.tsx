@@ -1,28 +1,27 @@
 import Link from "next/link";
-import { ArrowUpRight, Circle, CheckCircle2, Clock3, MinusCircle } from "lucide-react";
+import { ArrowUpRight, Circle, CheckCircle2, Clock3 } from "lucide-react";
 import type { Challenge } from "@/types";
 
 interface ChallengeCardProps {
   challenge: Challenge;
-  acceptanceRate: number;
   solved?: boolean;
 }
 
 const difficultyStyles = {
-  beginner: "bg-emerald-50 text-emerald-700",
-  intermediate: "bg-amber-50 text-amber-700",
-  advanced: "bg-rose-50 text-rose-700",
+  beginner: "bg-difficulty-easy-soft text-difficulty-easy",
+  intermediate: "bg-difficulty-medium-soft text-difficulty-medium",
+  advanced: "bg-difficulty-hard-soft text-difficulty-hard",
 };
 
-export function ChallengeCard({ challenge, acceptanceRate, solved = false }: ChallengeCardProps) {
+export function ChallengeCard({ challenge, solved = false }: ChallengeCardProps) {
   return (
-    <article className="group flex min-h-[220px] flex-col rounded-xl border border-[var(--challenge-border)] bg-[var(--challenge-surface)] p-5 shadow-[var(--challenge-shadow)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-[var(--challenge-accent)]/45 hover:shadow-[var(--challenge-shadow-hover)]">
+    <article className="group flex min-h-[220px] flex-col rounded-[var(--radius-card)] border border-[var(--challenge-border)] bg-[var(--challenge-surface)] p-5 shadow-[var(--challenge-shadow)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-[var(--challenge-accent)]/45 hover:shadow-[var(--challenge-shadow-hover)]">
       <div className="flex items-center justify-between gap-3">
-        <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold capitalize ${difficultyStyles[challenge.difficulty]}`}>
+        <span className={`rounded-pill px-2.5 py-1 text-[11px] font-bold capitalize ${difficultyStyles[challenge.difficulty]}`}>
           {challenge.difficulty}
         </span>
         <span className="inline-flex items-center gap-1.5 text-xs text-[var(--challenge-muted)]">
-          {solved ? <CheckCircle2 aria-label="Solved" className="h-4 w-4 text-emerald-600" /> : <Circle aria-label="Unsolved" className="h-4 w-4" />}
+          {solved ? <CheckCircle2 aria-label="Solved" className="h-4 w-4 text-success" /> : <Circle aria-label="Unsolved" className="h-4 w-4" />}
           {solved ? "Solved" : "Open"}
         </span>
       </div>
@@ -34,7 +33,7 @@ export function ChallengeCard({ challenge, acceptanceRate, solved = false }: Cha
         <div className="flex items-center gap-3">
           <span className="rounded-md bg-[var(--challenge-surface-muted)] px-2 py-1 font-semibold text-[var(--challenge-text-soft)]">{challenge.topic}</span>
           <span className="inline-flex items-center gap-1"><Clock3 aria-hidden="true" className="h-3.5 w-3.5" />{challenge.estimated_minutes}m</span>
-          <span>{acceptanceRate}% accepted</span>
+          <span className="font-semibold text-success">+{challenge.xp_reward} XP</span>
         </div>
         <Link href={`/challenges/${challenge.slug}`} aria-label={`Start ${challenge.title}`} className="inline-flex min-h-9 items-center gap-1 rounded-md px-2.5 font-bold text-[var(--challenge-accent-strong)] opacity-75 transition-all group-hover:opacity-100 hover:bg-[var(--challenge-accent-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--challenge-accent)]">
           Start <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" />

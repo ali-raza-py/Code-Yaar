@@ -66,11 +66,28 @@ urlpatterns = [
         name='chapter-lessons',
     ),
 
+    # Lesson completion (mark reading/exercises complete)
+    path(
+        'lessons/<int:pk>/complete/',
+        api_views.LessonViewSet.as_view({'post': 'complete'}),
+        name='lesson-complete',
+    ),
+
+    # Sandbox snippet execution (lesson "Run" buttons)
+    path('execute/', api_views.execute_snippet_view, name='api-execute'),
+
     # Exercises for a lesson
     path(
         'lessons/<int:lesson_id>/exercises/',
         api_views.ExerciseViewSet.as_view({'get': 'list'}),
         name='lesson-exercises',
+    ),
+
+    # Exercise detail (instructions, starter code, sanitized choices)
+    path(
+        'exercises/<int:pk>/',
+        api_views.ExerciseViewSet.as_view({'get': 'retrieve'}),
+        name='exercise-detail',
     ),
 
     # Exercise actions

@@ -1,7 +1,6 @@
 ﻿"use client";
 
 import * as React from "react";
-import { motion } from "framer-motion";
 import type { VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "./button-variants";

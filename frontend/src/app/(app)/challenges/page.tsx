@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { AlertCircle, Check, RotateCcw } from "lucide-react";
 import { challenges as challengesApi, ApiError } from "@/lib/api";
 import { demoChallenges } from "@/data/challenges";
@@ -36,7 +37,6 @@ export default function ChallengesPage() {
 
   const loadChallenges = useCallback(async () => {
     try {
-      setLoading(true);
       const liveChallenges = await challengesApi.list();
       const shouldUseDemo = liveChallenges.length === 0 && process.env.NODE_ENV === "development";
       setChallenges(shouldUseDemo ? demoChallenges : liveChallenges);
@@ -49,7 +49,10 @@ export default function ChallengesPage() {
     }
   }, []);
 
-  useEffect(() => { loadChallenges(); }, [loadChallenges]);
+  useEffect(() => {
+    // Deferred via await so the effect never sets state synchronously.
+    (async () => { await loadChallenges(); })();
+  }, [loadChallenges]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => setSearch(searchInput.trim()), 250);
@@ -110,8 +113,8 @@ export default function ChallengesPage() {
             <p className="mt-3 max-w-[60ch] text-[15px] leading-7 text-[var(--challenge-muted)]">Focused problems for building sharper technical instincts, one concept at a time.</p>
           </div>
           <div className="w-full max-w-[220px] md:pb-1">
-            <div className="flex items-baseline justify-between text-xs font-semibold"><span className="text-[var(--challenge-muted)]">Progress</span><span className="text-[var(--challenge-text)]">0 / 120 solved</span></div>
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--challenge-surface-muted)]"><div className="h-full w-0 rounded-full bg-[var(--challenge-accent)]" /></div>
+            <div className="flex items-baseline justify-between text-xs font-semibold"><span className="text-[var(--challenge-muted)]">Library</span><span className="text-[var(--challenge-text)]">{loading ? "Loading…" : `${challenges.length} challenge${challenges.length === 1 ? "" : "s"}`}</span></div>
+            <p className="mt-2 text-[11px] leading-4 text-[var(--challenge-muted)]">Solve challenges to earn XP and track your progress.</p>
           </div>
         </header>
 
@@ -120,7 +123,7 @@ export default function ChallengesPage() {
           <TopicChips topics={topics} value={topic} showAll={showAllTopics} onChange={setTopic} onToggleShowAll={() => setShowAllTopics((value) => !value)} />
         </section>
 
-        {filtersOpen && <div className="fixed inset-0 z-50 flex items-end bg-slate-950/35 lg:hidden" role="presentation" onClick={() => setFiltersOpen(false)}>
+        {filtersOpen && <div className="fixed inset-0 z-50 flex items-end bg-black/40 lg:hidden" role="presentation" onClick={() => setFiltersOpen(false)}>
           <section role="dialog" aria-modal="true" aria-labelledby="mobile-filter-title" onClick={(event) => event.stopPropagation()} className="w-full rounded-t-2xl border-t border-[var(--challenge-border)] bg-[var(--challenge-surface)] p-5 shadow-2xl">
             <div className="flex items-center justify-between"><h2 id="mobile-filter-title" className="text-lg font-bold text-[var(--challenge-text)]">Filters</h2><button type="button" onClick={() => setFiltersOpen(false)} className="min-h-10 rounded-md px-3 text-sm font-semibold text-[var(--challenge-accent-strong)]">Done</button></div>
             <div className="mt-5"><DifficultyTabs value={difficulty} onChange={setDifficulty} /></div>
@@ -139,12 +142,12 @@ export default function ChallengesPage() {
           <p className="text-sm font-semibold text-[var(--challenge-muted)]">{loading ? "Loading challenges..." : `${filtered.length} challenge${filtered.length === 1 ? "" : "s"}`}</p>
         </div>
 
-        {usingDemoData && <p className="mt-3 text-xs text-[var(--challenge-muted)]"><Check aria-hidden="true" className="mr-1 inline h-3.5 w-3.5 text-emerald-600" />Development preview using local examples while the API library is empty.</p>}
+        {usingDemoData && <p className="mt-3 text-xs text-[var(--challenge-muted)]"><Check aria-hidden="true" className="mr-1 inline h-3.5 w-3.5 text-success" />Development preview using local examples while the API library is empty.</p>}
 
         <section className="mt-5" aria-label="Challenge results">
-          {error === "network" && <div className="flex items-center justify-between gap-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800"><span className="inline-flex items-center gap-2"><AlertCircle aria-hidden="true" className="h-4 w-4" />Could not load the challenge library.</span><button type="button" onClick={loadChallenges} className="font-bold underline underline-offset-2">Try again</button></div>}
-          {error === "auth" && <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">Sign in to view your challenge progress.</div>}
-          {loading ? <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">{Array.from({ length: 6 }).map((_, index) => <ChallengeSkeleton key={index} />)}</div> : !error && filtered.length === 0 ? <EmptyState filtered={hasFilters} onClear={clearFilters} /> : !error && <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">{filtered.map((challenge) => <ChallengeCard key={challenge.id} challenge={challenge} acceptanceRate={Math.max(54, 92 - challenge.id * 5)} />)}</div>}
+          {error === "network" && <div role="alert" className="flex items-center justify-between gap-4 rounded-card border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger"><span className="inline-flex items-center gap-2"><AlertCircle aria-hidden="true" className="h-4 w-4" />Could not load the challenge library.</span><button type="button" onClick={() => { setLoading(true); void loadChallenges(); }} className="focus-ring rounded font-bold underline underline-offset-2">Try again</button></div>}
+          {error === "auth" && <div role="alert" className="rounded-card border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-tone-amber-fg">Sign in to view your challenge progress. <Link href="/sign-in" className="focus-ring rounded font-bold underline underline-offset-2">Sign in</Link></div>}
+          {loading ? <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">{Array.from({ length: 6 }).map((_, index) => <ChallengeSkeleton key={index} />)}</div> : !error && filtered.length === 0 ? <EmptyState filtered={hasFilters} onClear={clearFilters} /> : !error && <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">{filtered.map((challenge) => <ChallengeCard key={challenge.id} challenge={challenge} />)}</div>}
         </section>
       </div>
     </main>

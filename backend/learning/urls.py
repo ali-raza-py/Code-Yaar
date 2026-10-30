@@ -1,8 +1,6 @@
 
-from django.contrib import admin
-from django.urls import path, include
-from . import views
+from django.urls import path
 
-urlpatterns = [
-    path('admin/', admin.site.urls, name="admin")
-]
+# The learning app serves its API through learning/api_urls.py; the admin
+# site is registered once in config/urls.py.
+urlpatterns = []

@@ -72,6 +72,7 @@ class Course(models.Model):
         ('javascript', 'JavaScript'),
         ('cpp', 'C++'),
         ('java', 'Java'),
+        ('other', 'Other'),
     ]
 
     slug = models.SlugField(max_length=100, unique=True)
@@ -86,8 +87,6 @@ class Course(models.Model):
     )
     difficulty = models.CharField(max_length=20, choices=DIFFICULTY_CHOICES, default='beginner')
     language = models.CharField(max_length=20, choices=LANGUAGE_CHOICES, default='python')
-    estimated_hours = models.PositiveIntegerField(default=0)
-    total_xp = models.PositiveIntegerField(default=0)
     instructor = models.CharField(max_length=200, blank=True, default='')
     prerequisites = models.TextField(blank=True, default='None')
     learning_objectives = models.JSONField(default=list, blank=True, help_text='List of skills learned')
@@ -95,6 +94,23 @@ class Course(models.Model):
     order = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
     is_published = models.BooleanField(default=False)
+    # ── Certification policy (configurable per course) ──
+    certification_enabled = models.BooleanField(
+        default=True,
+        help_text='Whether completing this course can earn a verifiable certificate'
+    )
+    certification_passing_score = models.PositiveIntegerField(
+        default=70,
+        help_text='Minimum final-assessment percentage (0-100) required to certify'
+    )
+    require_all_lessons = models.BooleanField(
+        default=True,
+        help_text='Learner must complete every published lesson before certification'
+    )
+    require_final_assessment = models.BooleanField(
+        default=True,
+        help_text='Learner must pass the exercises flagged as the final assessment'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -112,6 +128,25 @@ class Course(models.Model):
     @property
     def exercise_count(self):
         return Exercise.objects.filter(lesson__chapter__course=self).count()
+
+    @property
+    def total_xp(self):
+        """Derived from published content, never stored/fabricated."""
+        lesson_xp = Lesson.objects.filter(
+            chapter__course=self, is_active=True
+        ).aggregate(s=models.Sum('xp_reward'))['s'] or 0
+        exercise_xp = Exercise.objects.filter(
+            lesson__chapter__course=self, lesson__is_active=True, is_active=True
+        ).aggregate(s=models.Sum('xp_reward'))['s'] or 0
+        return lesson_xp + exercise_xp
+
+    @property
+    def estimated_hours(self):
+        """Derived from actual lesson durations."""
+        minutes = Lesson.objects.filter(
+            chapter__course=self, is_active=True
+        ).aggregate(s=models.Sum('duration_minutes'))['s'] or 0
+        return max(1, round(minutes / 60))
 
     class Meta:
         ordering = ['track', 'order', 'title']
@@ -232,6 +267,10 @@ class Exercise(models.Model):
     context = models.TextField(blank=True, default='', help_text='Why this exercise matters')
     constraints = models.TextField(blank=True, default='', help_text='Rules/limitations')
     expected_behavior = models.TextField(blank=True, default='', help_text='Expected outcome')
+    explain = models.TextField(
+        blank=True, default='',
+        help_text='Explanation revealed to the learner after they submit an attempt'
+    )
     difficulty = models.CharField(max_length=10, choices=DIFFICULTY_CHOICES, default='easy')
     language = models.CharField(max_length=10, choices=LANGUAGE_CHOICES, default='python')
     starter_code = models.TextField(blank=True, default='')
@@ -246,6 +285,10 @@ class Exercise(models.Model):
     # Scoring
     xp_reward = models.PositiveIntegerField(default=100)
     max_attempts = models.PositiveIntegerField(default=0, help_text='0 = unlimited')
+    is_final_assessment = models.BooleanField(
+        default=False,
+        help_text='Counts toward the course final-assessment grade used for certification'
+    )
     order = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -433,6 +476,24 @@ class ExerciseAttempt(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+
+class SnippetRun(models.Model):
+    """Daily counter of sandboxed snippet runs per user (abuse guard)."""
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='snippet_runs'
+    )
+    date = models.DateField()
+    count = models.PositiveIntegerField(default=0)
+
+    def __str__(self):
+        return f"{self.user.username} snippet runs {self.date}: {self.count}"
+
+    class Meta:
+        unique_together = ['user', 'date']
+        ordering = ['-date']
 
 
 class XPTransaction(models.Model):

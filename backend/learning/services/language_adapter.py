@@ -45,6 +45,15 @@ class ValidationResult:
     test_results: list = field(default_factory=list)
     feedback: str = ''
     xp_earned: int = 0
+    # 'correct' | 'incorrect' | 'pending' (recorded, but no evaluator available)
+    status: str = ''
+    correct_answer: object = None
+    # Explanation revealed only after the learner has attempted the exercise.
+    explain: str = ''
+
+    def __post_init__(self):
+        if not self.status:
+            self.status = 'correct' if self.all_passed else 'incorrect'
 
 
 class LanguageAdapter(ABC):

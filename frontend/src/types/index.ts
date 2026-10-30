@@ -1,21 +1,22 @@
 export interface Project {
-  id: string;
+  id: number;
   slug: string;
   title: string;
   description: string;
+  thumbnail?: string;
   difficulty: "beginner" | "intermediate" | "advanced";
   technologies: string[];
-  estimatedHours: number;
-  skillsDeveloped: string[];
+  estimated_hours: number;
+  track?: number | null;
+  track_title?: string | null;
   milestones: ProjectMilestone[];
-  status: "available" | "coming-soon";
 }
 
 export interface ProjectMilestone {
-  id: string;
+  id: number;
   title: string;
   description: string;
-  completed: boolean;
+  order: number;
 }
 
 export interface Challenge {
@@ -94,7 +95,7 @@ export interface Course {
   enrolled: boolean;
   enrollment_id?: number;
   resume_lesson?: LessonSummary;
-  progress_percentage: number;
+  progress_percentage?: number;
 }
 
 export interface Chapter {
@@ -124,12 +125,15 @@ export interface LessonSummary {
 export interface LessonDetail extends LessonSummary {
   chapter_title: string;
   course_title: string;
+  course_slug: string;
   learning_objective: string;
   content_body: string;
   video_url: string;
   video_duration_seconds: number;
   is_free_preview: boolean;
   exercises: ExerciseSummary[];
+  prev_lesson: { slug: string; title: string } | null;
+  next_lesson: { slug: string; title: string } | null;
 }
 
 export interface ExerciseSummary {
@@ -158,10 +162,9 @@ export interface ExerciseDetail {
   constraints: string;
   expected_behavior: string;
   starter_code: string;
-  solution_code: string;
   expected_output: string;
   choices: ExerciseChoice[];
-  test_cases: TestCase[];
+  test_cases?: TestCase[];
   xp_reward: number;
   max_attempts: number;
   order: number;
@@ -171,7 +174,8 @@ export interface ExerciseDetail {
 export interface ExerciseChoice {
   id: string;
   text: string;
-  is_correct: boolean;
+  // Correctness is intentionally never sent to clients; grading is server-side.
+  is_correct?: boolean;
 }
 
 export interface TestCase {
@@ -197,6 +201,7 @@ export interface ExerciseResult {
   test_results: TestResult[];
   xp_earned: number;
   correct_answer?: unknown;
+  explain?: string;
   attempt_id: number;
 }
 

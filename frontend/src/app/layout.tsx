@@ -3,6 +3,7 @@ import { Montserrat, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { AuthProvider } from "@/hooks/use-auth";
+import { MotionProvider } from "@/components/motion/reduced-motion";
 
 const montserrat = Montserrat({
   variable: "--font-montserrat",
@@ -48,7 +49,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full flex flex-col">
         <ThemeProvider>
           <AuthProvider>
-            {children}
+            <MotionProvider>
+              {children}
+            </MotionProvider>
           </AuthProvider>
         </ThemeProvider>
       </body>

@@ -21,6 +21,10 @@ that simulates execution. In production, replace with actual sandbox
 (Docker containers, AWS Lambda, or similar).
 """
 
+import os
+import subprocess
+import sys
+import tempfile
 import time
 import logging
 from abc import ABC, abstractmethod
@@ -189,6 +193,144 @@ class DevelopmentSandbox(SandboxService):
         return True
 
 
+class SubprocessPythonSandbox(SandboxService):
+    """
+    Real Python execution for local development and self-hosted deployments.
+
+    Runs each program in a separate `python -I` process with:
+    - a wall-clock timeout (killed and reported as timeout)
+    - captured output with a hard byte cap
+    - isolated mode (-I: ignores site-packages user dirs and env vars)
+    - a temporary working directory that is deleted after the run
+    - stdin supplied from test-case input
+
+    This is process isolation with resource limits, NOT a hardened security
+    boundary. For multi-tenant production deployments, replace with
+    DockerSandbox / a hosted execution service. Restricted to Python.
+    """
+
+    def __init__(
+        self,
+        python_exe: Optional[str] = None,
+        config: Optional[SandboxConfig] = None,
+    ):
+        self.python_exe = python_exe or sys.executable
+        self.config = config or SandboxConfig()
+
+    def _run_one(self, code: str, stdin: str) -> ExecutionResult:
+        start = time.monotonic()
+        tmp_dir = tempfile.mkdtemp(prefix='cy-sandbox-')
+        script_path = os.path.join(tmp_dir, 'main.py')
+        try:
+            with open(script_path, 'w', encoding='utf-8') as fh:
+                fh.write(code)
+            env = dict(os.environ)
+            # Strip our own environment so learner code cannot read secrets.
+            for key in list(env):
+                if key.startswith(('DJANGO_', 'AWS_', 'DATABASE', 'SECRET', 'GIT', 'HOME')) and key != 'HOME':
+                    env.pop(key, None)
+            env['PYTHONIOENCODING'] = 'utf-8'
+            try:
+                proc = subprocess.run(
+                    [self.python_exe, '-I', script_path],
+                    input=stdin,
+                    capture_output=True,
+                    text=True,
+                    encoding='utf-8',
+                    errors='replace',
+                    timeout=self.config.timeout_seconds,
+                    cwd=tmp_dir,
+                    env=env,
+                )
+            except subprocess.TimeoutExpired:
+                return ExecutionResult(
+                    status='timeout',
+                    error=(
+                        f'Execution timed out after '
+                        f'{self.config.timeout_seconds:g} seconds. '
+                        'Check for an infinite loop or a range that is too large.'
+                    ),
+                    execution_time_ms=int((time.monotonic() - start) * 1000),
+                )
+            elapsed = int((time.monotonic() - start) * 1000)
+            out = (proc.stdout or '')[:self.config.max_output_bytes]
+            err = (proc.stderr or '')[:self.config.max_output_bytes]
+            if proc.returncode:
+                return ExecutionResult(
+                    status='error',
+                    output=out,
+                    error=err.strip(),
+                    return_code=proc.returncode,
+                    execution_time_ms=elapsed,
+                )
+            return ExecutionResult(
+                status='success', output=out, error=err.strip(),
+                return_code=0, execution_time_ms=elapsed,
+            )
+        except Exception as exc:  # noqa: BLE001 — never let the runner crash the API
+            return ExecutionResult(status='error', error=f'Sandbox failure: {exc}')
+        finally:
+            try:
+                os.remove(script_path)
+                os.rmdir(tmp_dir)
+            except OSError:
+                pass
+
+    def execute(
+        self,
+        code: str,
+        language: str,
+        config: Optional[SandboxConfig] = None,
+        stdin: str = '',
+    ) -> ExecutionResult:
+        if language != 'python':
+            return ExecutionResult(
+                status='error',
+                error=f'Server-side execution currently supports Python only (got {language!r}).',
+            )
+        if not code.strip():
+            return ExecutionResult(status='error', error='No code provided.')
+        return self._run_one(code, stdin)
+
+    def run_tests(
+        self,
+        code: str,
+        language: str,
+        test_cases: list[dict],
+        config: Optional[SandboxConfig] = None,
+    ) -> list[TestResult]:
+        results: list[TestResult] = []
+        for i, test in enumerate(test_cases):
+            expected = str(test.get('expected_output', '')).strip()
+            stdin = test.get('input', '') if isinstance(test.get('input'), str) else ''
+            run = self._run_one(code, stdin)
+            if run.status in ('error', 'timeout'):
+                results.append(TestResult(
+                    test_number=i + 1,
+                    status='error',
+                    expected=expected,
+                    actual=(run.error or run.output).strip(),
+                    message=run.error or 'Runtime error.',
+                ))
+            elif run.output.strip() == expected:
+                results.append(TestResult(
+                    test_number=i + 1, status='passed',
+                    expected=expected, actual=run.output.strip(),
+                    message='Output matches the expected result.',
+                ))
+            else:
+                results.append(TestResult(
+                    test_number=i + 1, status='failed',
+                    expected=expected, actual=run.output.strip(),
+                    message=f'Expected {expected!r}, got {run.output.strip()!r}.',
+                ))
+        return results
+
+    def health_check(self) -> bool:
+        result = self._run_one('print(6 * 7)', '')
+        return result.status == 'success' and result.output.strip() == '42'
+
+
 class DockerSandbox(SandboxService):
     """
     Production Docker-based sandbox (stub).
@@ -244,11 +386,26 @@ _sandbox: Optional[SandboxService] = None
 def get_sandbox() -> SandboxService:
     """
     Get the configured sandbox service.
-    Defaults to DevelopmentSandbox if not configured.
+
+    Resolution order:
+    - SANDBOX_SERVICE setting ('django.conf.settings.DEV_SANDBOX_ENABLED=False
+      forces the simulated DevelopmentSandbox).
+    - By default a real SubprocessPythonSandbox (isolated process, timeout,
+      output caps) so that Run/Submit genuinely execute and grade code.
     """
     global _sandbox
     if _sandbox is None:
-        _sandbox = DevelopmentSandbox()
+        from django.conf import settings
+        if getattr(settings, 'DEV_SANDBOX_ENABLED', True):
+            _sandbox = SubprocessPythonSandbox(
+                python_exe=getattr(settings, 'SANDBOX_PYTHON_EXE', None) or sys.executable,
+                config=SandboxConfig(
+                    timeout_seconds=getattr(settings, 'SANDBOX_TIMEOUT_SECONDS', 10.0),
+                    max_output_bytes=getattr(settings, 'SANDBOX_MAX_OUTPUT_BYTES', 100_000),
+                ),
+            )
+        else:
+            _sandbox = DevelopmentSandbox()
     return _sandbox
 
 
@@ -264,23 +421,41 @@ def validate_submission(
     selected_answer=None,
 ) -> ValidationResult:
     """
-    High-level validation function called by the API.
+    High-level validation function called by the API. Single source of truth.
     Routes to the appropriate validation strategy based on exercise type.
+
+    Server-side gradeable types (no evaluator needed):
+        multiple_choice, multiple_select, output_prediction,
+        fill_blank (compared against solution_code)
+
+    Code/debugging exercises are executed and graded against test cases in
+    the configured sandbox. When no real evaluator is connected, submissions
+    are recorded with an honest pending result — never a fake pass.
     """
     exercise_type = exercise.exercise_type
-    language = exercise.language
 
     if exercise_type in ('multiple_choice', 'multiple_select'):
-        return _validate_choice(exercise, selected_answer)
+        result = _validate_choice(exercise, selected_answer)
     elif exercise_type == 'output_prediction':
-        return _validate_output_prediction(exercise, selected_answer)
-    elif exercise_type in ('code', 'debugging', 'fill_blank'):
-        return _validate_code_exercise(exercise, code)
+        # The client may send the predicted text either as selected_answer
+        # or as the submitted code string — accept both.
+        answer = selected_answer if selected_answer not in (None, '') else code
+        result = _validate_output_prediction(exercise, answer)
+    elif exercise_type == 'fill_blank':
+        result = _validate_against_solution(exercise, code)
+    elif exercise_type in ('code', 'debugging'):
+        result = _validate_code_exercise(exercise, code)
+    else:
+        return ValidationResult(
+            all_passed=False,
+            status='error',
+            feedback='Unknown exercise type.',
+        )
 
-    return ValidationResult(
-        all_passed=False,
-        feedback='Unknown exercise type.',
-    )
+    # Explanations are only revealed once the learner has submitted an attempt.
+    if exercise.explain:
+        result.explain = exercise.explain
+    return result
 
 
 def _validate_choice(exercise, selected_answer) -> ValidationResult:
@@ -304,13 +479,16 @@ def _validate_choice(exercise, selected_answer) -> ValidationResult:
     if passed:
         return ValidationResult(
             all_passed=True,
+            status='correct',
             feedback='Correct! Well done.',
             xp_earned=exercise.xp_reward,
         )
     else:
         return ValidationResult(
             all_passed=False,
+            status='incorrect',
             feedback='Not quite. Review the concept and try again.',
+            correct_answer=correct_ids,
         )
 
 
@@ -326,60 +504,155 @@ def _validate_output_prediction(exercise, selected_answer) -> ValidationResult:
     if passed:
         return ValidationResult(
             all_passed=True,
+            status='correct',
             feedback='Correct! You predicted the output accurately.',
             xp_earned=exercise.xp_reward,
         )
     else:
         return ValidationResult(
             all_passed=False,
+            status='incorrect',
             feedback='Not quite. Trace through the code step by step.',
+            correct_answer=exercise.expected_output,
         )
+
+
+def _normalize_code(code: str) -> str:
+    """Normalize source for solution comparison: drop comments/blank lines/whitespace."""
+    lines = []
+    for line in code.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+        if '#' in stripped:  # drop trailing inline comment
+            stripped = stripped.split('#', 1)[0].rstrip()
+        lines.append(''.join(stripped.split()))
+    return '\n'.join(lines)
+
+
+def _pending_evaluation(exercise, code) -> ValidationResult:
+    """
+    Honest result when no automated evaluator (sandbox) is available.
+    The submission is recorded, but never reported as passed.
+    """
+    return ValidationResult(
+        all_passed=False,
+        status='pending',
+        test_results=[
+            {'test': 1, 'status': 'pending', 'message': 'Automated evaluation not yet available.'}
+        ],
+        feedback=(
+            'Your submission has been saved. Automated evaluation of runnable '
+            'code is not available yet, so we cannot confirm correctness.'
+        ),
+        xp_earned=0,
+    )
+
+
+def _validate_against_solution(exercise, code) -> ValidationResult:
+    """
+    Validate debugging/fill-blank exercises without an evaluator by comparing
+    the submitted source against the authored solution (whitespace-, comment-
+    and blank-line-insensitive). If no solution exists, return an honest
+    pending result instead of a fake pass.
+    """
+    if not code or not code.strip():
+        return ValidationResult(
+            all_passed=False,
+            status='incorrect',
+            feedback='Please submit your answer first.',
+        )
+
+    if not exercise.solution_code.strip():
+        return _pending_evaluation(exercise, code)
+
+    if _normalize_code(code) == _normalize_code(exercise.solution_code):
+        return ValidationResult(
+            all_passed=True,
+            status='correct',
+            feedback='Correct! Your fix matches the expected solution.',
+            xp_earned=exercise.xp_reward,
+        )
+
+    return ValidationResult(
+        all_passed=False,
+        status='incorrect',
+        feedback='Not quite. Re-read the error and check the line you fixed.',
+    )
 
 
 def _validate_code_exercise(exercise, code) -> ValidationResult:
     """
     Validate code exercises using the sandbox service.
+    A submission is only reported as passed when the sandbox confirms it.
     """
     if not code or code.strip() == exercise.starter_code.strip():
         return ValidationResult(
             all_passed=False,
+            status='incorrect',
             feedback='It looks like you haven\'t made any changes yet. Try writing your solution.',
         )
 
     sandbox = get_sandbox()
-    test_cases = exercise.test_cases or []
+    test_cases = list(exercise.test_cases or [])
+    if not test_cases and exercise.expected_output:
+        test_cases = [{'input': '', 'expected_output': exercise.expected_output}]
 
+    # Without anything to grade against, we cannot confirm correctness.
+    # If an authored solution exists, fall back to honest solution
+    # comparison (this is how debugging/fill-blank style exercises are
+    # graded when no runnable tests are defined). Otherwise record the
+    # submission as an honest pending result — never a fake pass.
     if not test_cases:
-        # No test cases defined — just check that code is non-trivial
-        return ValidationResult(
-            all_passed=True,
-            test_results=[TestResult(test_number=1, status='passed', message='Code submitted.')],
-            feedback='Code submitted successfully.',
-            xp_earned=exercise.xp_reward,
-        )
+        if exercise.solution_code.strip():
+            return _validate_against_solution(exercise, code)
+        return _pending_evaluation(exercise, code)
 
-    # Run tests through sandbox
+    # A real evaluator is required to execute runnable tests.
+    if isinstance(sandbox, DevelopmentSandbox):
+        return _pending_evaluation(exercise, code)
+
+    # Non-Python exercises cannot be executed by the current sandbox; fall
+    # back to solution comparison when an authored solution exists.
+    if exercise.language != 'python':
+        if exercise.solution_code.strip() and _normalize_code(code) == _normalize_code(exercise.solution_code):
+            return ValidationResult(
+                all_passed=True,
+                status='correct',
+                feedback='Correct! Your answer matches the expected solution.',
+                xp_earned=exercise.xp_reward,
+            )
+        return _pending_evaluation(exercise, code)
+
+    # Run tests through the real sandbox
     test_results = sandbox.run_tests(
         code=code,
         language=exercise.language,
         test_cases=test_cases,
     )
 
-    all_passed = all(tr.status == 'passed' for tr in test_results)
-    passed_count = sum(1 for tr in test_results if tr.status == 'passed')
+    all_passed = bool(test_results) and all(tr.status == 'passed' for tr in test_results)
 
-    feedback = ''
     if all_passed:
-        feedback = f'Your solution passed all {len(test_results)} checks.'
+        n = len(test_results)
+        feedback = f'All {n} test{"es" if n != 1 else ""} passed. Great work.'
     else:
-        # Find the first failing test for specific feedback
-        for tr in test_results:
-            if tr.status != 'passed':
-                feedback = f'Test {tr.test_number} failed. {tr.message}'
-                break
+        # First failing test gives specific, honest feedback
+        failure = next((tr for tr in test_results if tr.status != 'passed'), None)
+        if failure is not None:
+            if failure.status == 'error':
+                feedback = f'Your program raised an error on test {failure.test_number}: {failure.message}'
+            else:
+                feedback = (
+                    f'Test {failure.test_number} of {len(test_results)} failed. '
+                    f'Expected output: {failure.expected!r} — your output: {failure.actual!r}'
+                )
+        else:
+            feedback = 'No runnable test cases are defined for this exercise yet.'
 
     return ValidationResult(
         all_passed=all_passed,
+        status='correct' if all_passed else 'incorrect',
         test_results=[
             {'test': tr.test_number, 'status': tr.status, 'message': tr.message}
             for tr in test_results

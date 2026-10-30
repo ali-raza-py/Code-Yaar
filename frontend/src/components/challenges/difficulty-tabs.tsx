@@ -11,9 +11,9 @@ interface DifficultyTabsProps {
 
 const options: Array<{ value: Difficulty; label: string; color?: string }> = [
   { value: "all", label: "All" },
-  { value: "beginner", label: "Beginner", color: "text-emerald-600" },
-  { value: "intermediate", label: "Intermediate", color: "text-amber-600" },
-  { value: "advanced", label: "Advanced", color: "text-rose-600" },
+  { value: "beginner", label: "Beginner", color: "text-difficulty-easy" },
+  { value: "intermediate", label: "Intermediate", color: "text-difficulty-medium" },
+  { value: "advanced", label: "Advanced", color: "text-difficulty-hard" },
 ];
 
 export function DifficultyTabs({ value, onChange }: DifficultyTabsProps) {

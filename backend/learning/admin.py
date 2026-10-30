@@ -51,7 +51,7 @@ class ProjectMilestoneInline(admin.TabularInline):
 class CourseInline(admin.TabularInline):
     model = Course
     extra = 0
-    fields = ['title', 'slug', 'difficulty', 'estimated_hours', 'is_active', 'order']
+    fields = ['title', 'slug', 'difficulty', 'is_active', 'order']
     ordering = ['order']
     prepopulated_fields = {'slug': ('title',)}
 
@@ -102,10 +102,15 @@ class CourseAdmin(admin.ModelAdmin):
             'fields': ('track', 'title', 'subtitle', 'slug', 'description', 'thumbnail')
         }),
         ('Configuration', {
-            'fields': ('difficulty', 'language', 'estimated_hours', 'total_xp', 'instructor', 'prerequisites')
+            'fields': ('difficulty', 'language', 'instructor', 'prerequisites')
         }),
         ('Content', {
             'fields': ('learning_objectives', 'is_free', 'is_active', 'is_published', 'order')
+        }),
+        ('Certification policy', {
+            'fields': ('certification_enabled', 'require_all_lessons',
+                       'require_final_assessment', 'certification_passing_score'),
+            'description': 'Rules used to decide when a verifiable certificate is earned.',
         }),
     )
 
@@ -160,7 +165,7 @@ class ExerciseAdmin(admin.ModelAdmin):
             'fields': ('lesson', 'title', 'slug', 'exercise_type', 'difficulty', 'language')
         }),
         ('Instructions', {
-            'fields': ('instructions', 'context', 'constraints', 'expected_behavior')
+            'fields': ('instructions', 'context', 'constraints', 'expected_behavior', 'explain')
         }),
         ('Code', {
             'fields': ('starter_code', 'solution_code', 'expected_output')
@@ -174,7 +179,7 @@ class ExerciseAdmin(admin.ModelAdmin):
             'classes': ('collapse',),
         }),
         ('Configuration', {
-            'fields': ('order', 'xp_reward', 'max_attempts', 'is_active')
+            'fields': ('order', 'xp_reward', 'max_attempts', 'is_final_assessment', 'is_active')
         }),
     )
 

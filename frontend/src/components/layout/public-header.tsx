@@ -28,10 +28,6 @@ export function PublicHeader() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  useEffect(() => {
-    setMobileOpen(false);
-  }, []);
-
   return (
     <header
       className={cn(

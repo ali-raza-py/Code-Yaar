@@ -14,7 +14,8 @@ interface ErrorStateProps {
   message: string;
   action?: {
     label: string;
-    href: string;
+    href?: string;
+    onRetry?: () => void;
   };
   illustration?: 'network' | 'auth' | 'not-found' | 'server' | 'empty';
 }
@@ -66,12 +67,21 @@ export function ErrorState({ title, message, action, illustration = 'server' }: 
         <h2 className="text-lg font-semibold text-gray-900 mb-2">{title}</h2>
         <p className="text-sm text-gray-600 mb-6">{message}</p>
         {action && (
-          <Link
-            href={action.href}
-            className="inline-flex items-center rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 transition-colors"
-          >
-            {action.label}
-          </Link>
+          action.onRetry ? (
+            <button
+              onClick={action.onRetry}
+              className="inline-flex items-center rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 transition-colors"
+            >
+              {action.label}
+            </button>
+          ) : (
+            <Link
+              href={action.href ?? '/'}
+              className="inline-flex items-center rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 transition-colors"
+            >
+              {action.label}
+            </Link>
+          )
         )}
       </div>
     </div>
@@ -80,12 +90,12 @@ export function ErrorState({ title, message, action, illustration = 'server' }: 
 
 // ─── Predefined Error States ────────────────────────────────────────────────
 
-export function NetworkError() {
+export function NetworkError({ onRetry }: { onRetry?: () => void }) {
   return (
     <ErrorState
       title="Connection lost"
       message="We couldn't reach the server. Please check your internet connection and try again."
-      action={{ label: 'Try again', href: '#' }}
+      action={{ label: 'Try again', onRetry, href: '/' }}
       illustration="network"
     />
   );
@@ -113,12 +123,12 @@ export function NotFoundError({ resource = 'Page' }: { resource?: string }) {
   );
 }
 
-export function ServerError() {
+export function ServerError({ onRetry }: { onRetry?: () => void }) {
   return (
     <ErrorState
       title="Something went wrong"
       message="We're having trouble loading this page. Please try again in a moment."
-      action={{ label: 'Try again', href: '#' }}
+      action={{ label: 'Try again', onRetry, href: '/' }}
       illustration="server"
     />
   );

@@ -1,43 +1,81 @@
-import type { Metadata } from "next";
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { FolderGit2, Clock, ArrowRight } from "lucide-react";
+import { AlertCircle, Check, Clock, FolderGit2, RotateCcw, Search } from "lucide-react";
+import { ApiError, projects as projectsApi } from "@/lib/api";
 import { demoProjects } from "@/data/projects";
+import type { Project } from "@/types";
 
-export const metadata: Metadata = {
-  title: "Projects",
-  description: "Build real systems. Explore projects across all difficulty levels.",
-};
+const DIFFICULTY_TABS = ["all", "beginner", "intermediate", "advanced"] as const;
 
-const categories = [
-  "All",
-  "Python",
-  "JavaScript",
-  "React",
-  "Node.js",
-  "TypeScript",
-  "SQL",
-  "Git",
-  "Docker",
-  "AWS",
-  "Theory",
-  "System Design",
-  "+11",
-];
-
-function DifficultyBadge({ difficulty }: { difficulty: string }) {
-  const colors: Record<string, string> = {
-    beginner: "bg-green-100 text-green-700",
-    intermediate: "bg-orange-100 text-orange-700",
-    advanced: "bg-red-100 text-red-700",
+function DifficultyBadge({ difficulty }: { difficulty: Project["difficulty"] }) {
+  const colors: Record<Project["difficulty"], string> = {
+    beginner: "bg-difficulty-easy-soft text-difficulty-easy",
+    intermediate: "bg-difficulty-medium-soft text-difficulty-medium",
+    advanced: "bg-difficulty-hard-soft text-difficulty-hard",
   };
   return (
-    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${colors[difficulty] || colors.beginner}`}>
-      {difficulty.charAt(0).toUpperCase() + difficulty.slice(1)}
+    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ${colors[difficulty]}`}>
+      {difficulty}
     </span>
   );
 }
 
 export default function ProjectsPage() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<"network" | "auth" | null>(null);
+  const [usingDemoData, setUsingDemoData] = useState(false);
+  const [difficulty, setDifficulty] = useState<(typeof DIFFICULTY_TABS)[number]>("all");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+
+  const load = useCallback(() => {
+    projectsApi
+      .list()
+      .then((live) => {
+        const useDemo = live.length === 0 && process.env.NODE_ENV === "development";
+        setProjects(useDemo ? demoProjects : live);
+        setUsingDemoData(useDemo);
+        setError(null);
+      })
+      .catch((e) => setError(e instanceof ApiError && e.status === 401 ? "auth" : "network"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    // Deferred via await so the effect never sets state synchronously.
+    (async () => { await load(); })();
+  }, [load]);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setSearch(searchInput.trim()), 250);
+    return () => window.clearTimeout(t);
+  }, [searchInput]);
+
+  const technologies = useMemo(
+    () => Array.from(new Set(projects.flatMap((p) => p.technologies))).sort((a, b) => a.localeCompare(b)),
+    [projects]
+  );
+
+  const filtered = useMemo(
+    () =>
+      projects.filter((p) => {
+        if (difficulty !== "all" && p.difficulty !== difficulty) return false;
+        if (search && !`${p.title} ${p.description} ${p.technologies.join(" ")}`.toLowerCase().includes(search.toLowerCase())) return false;
+        return true;
+      }),
+    [projects, difficulty, search]
+  );
+
+  const hasFilters = Boolean(search) || difficulty !== "all";
+  const clearFilters = () => {
+    setSearchInput("");
+    setSearch("");
+    setDifficulty("all");
+  };
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       {/* Dark Banner */}
@@ -50,7 +88,6 @@ export default function ProjectsPage() {
               Apply your knowledge to real scenarios in a practical environment.
             </p>
           </div>
-          {/* Circular diagram */}
           <div className="hidden sm:block">
             <div className="relative h-28 w-28">
               <div className="absolute inset-0 rounded-full border-2 border-dashed border-white/20" />
@@ -71,91 +108,118 @@ export default function ProjectsPage() {
         </div>
       </div>
 
-      {/* Category Filter Tabs */}
-      <div className="mb-6 flex flex-wrap gap-2">
-        {categories.map((cat) => (
+      {/* Difficulty filter tabs */}
+      <div className="mb-4 flex flex-wrap gap-2">
+        {DIFFICULTY_TABS.map((tab) => (
           <button
-            key={cat}
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-              cat === "All"
+            key={tab}
+            onClick={() => setDifficulty(tab)}
+            className={`rounded-lg px-4 py-2 text-sm font-medium capitalize transition-colors ${
+              difficulty === tab
                 ? "bg-[#0f1d32] text-white"
                 : "bg-white text-foreground border border-[var(--color-section-border)] hover:bg-[var(--color-section-light)]"
             }`}
           >
-            {cat}
+            {tab === "all" ? "All" : tab}
           </button>
         ))}
       </div>
 
-      {/* Search + filters */}
+      {/* Search */}
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative">
           <input
             type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search projects..."
+            aria-label="Search projects"
             className="w-64 rounded-lg border border-[var(--color-section-border)] bg-white px-4 py-2 pl-9 text-sm outline-none focus:border-[var(--primary)]"
           />
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         </div>
-        <div className="flex gap-2">
-          <select className="rounded-lg border border-[var(--color-section-border)] bg-white px-4 py-2 text-sm outline-none">
-            <option>Topic</option>
-          </select>
-          <button className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-section-border)] bg-white px-4 py-2 text-sm font-medium">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-            </svg>
-            More filters
-          </button>
-        </div>
+        <p className="text-sm font-semibold text-muted-foreground" aria-live="polite">
+          {loading ? "Loading projects…" : `${filtered.length} project${filtered.length === 1 ? "" : "s"}`}
+        </p>
       </div>
 
+      {usingDemoData && (
+        <p className="mb-4 text-xs text-muted-foreground">
+          <Check aria-hidden="true" className="mr-1 inline h-3.5 w-3.5 text-success" />
+          Development preview using local project examples while the project library is empty.
+        </p>
+      )}
+
+      {error === "network" && (
+        <div role="alert" className="mb-6 flex items-center justify-between gap-4 rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+          <span className="inline-flex items-center gap-2"><AlertCircle aria-hidden="true" className="h-4 w-4" />Could not load the project library.</span>
+          <button type="button" onClick={() => { setLoading(true); setError(null); load(); }} className="rounded font-bold underline underline-offset-2">Try again</button>
+        </div>
+      )}
+      {error === "auth" && (
+        <div role="alert" className="mb-6 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-amber-700">
+          Sign in to view projects. <Link href="/sign-in" className="rounded font-bold underline underline-offset-2">Sign in</Link>
+        </div>
+      )}
+
       {/* Project Grid */}
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {demoProjects.map((project) => (
-          <Link
-            key={project.id}
-            href={`/projects/${project.slug}`}
-            className="group overflow-hidden rounded-xl border border-[var(--color-section-border)] bg-white transition-all hover:border-[var(--primary)] hover:shadow-md"
-          >
-            <div className="h-2 bg-[var(--primary)]" />
-            <div className="p-5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Project
-                </span>
-                <DifficultyBadge difficulty={project.difficulty} />
-              </div>
-              <h3 className="mt-2 text-lg font-bold text-foreground group-hover:text-[var(--primary)]">
-                {project.title}
-              </h3>
-              <p className="mt-1 text-sm text-muted-foreground line-clamp-2">
-                {project.description}
-              </p>
-              <div className="mt-4 flex items-center gap-3 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1">
-                  <Clock className="h-3.5 w-3.5" />
-                  {project.estimatedHours}h
-                </span>
-                <span className="h-1 w-1 rounded-full bg-border" />
-                <span>{project.milestones.length} milestones</span>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {project.technologies.slice(0, 3).map((tech) => (
-                  <span
-                    key={tech}
-                    className="rounded-md bg-[var(--color-section-light)] px-2 py-0.5 text-xs font-medium text-foreground"
-                  >
-                    {tech}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </Link>
-        ))}
-      </div>
+      {loading ? (
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-52 animate-pulse rounded-xl border border-[var(--color-section-border)] bg-white/60" />
+          ))}
+        </div>
+      ) : !error && filtered.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-[var(--color-section-border)] bg-white/50 px-6 py-16 text-center">
+          <h2 className="text-lg font-semibold text-foreground">No projects found</h2>
+          <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
+            {hasFilters
+              ? "No projects match your current filters. Try adjusting your search or difficulty."
+              : "The project library is being prepared. Check back soon for hands-on builds."}
+          </p>
+          {hasFilters && (
+            <button onClick={clearFilters} className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-[#0f1d32] px-4 py-2 text-sm font-semibold text-white">
+              <RotateCcw className="h-4 w-4" /> Clear filters
+            </button>
+          )}
+        </div>
+      ) : (
+        !error && (
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {filtered.map((project) => (
+              <Link
+                key={project.id}
+                href={`/projects/${project.slug}`}
+                className="group overflow-hidden rounded-xl border border-[var(--color-section-border)] bg-white transition-all hover:border-[var(--primary)] hover:shadow-md"
+              >
+                <div className="h-2 bg-[var(--primary)]" />
+                <div className="p-5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Project</span>
+                    <DifficultyBadge difficulty={project.difficulty} />
+                  </div>
+                  <h3 className="mt-2 text-lg font-bold text-foreground group-hover:text-[var(--primary)]">{project.title}</h3>
+                  <p className="mt-1 text-sm text-muted-foreground line-clamp-2">{project.description}</p>
+                  <div className="mt-4 flex items-center gap-3 text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" />{project.estimated_hours}h</span>
+                    <span className="h-1 w-1 rounded-full bg-border" />
+                    <span>{project.milestones.length} milestones</span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {project.technologies.slice(0, 3).map((tech) => (
+                      <span key={tech} className="rounded-md bg-[var(--color-section-light)] px-2 py-0.5 text-xs font-medium text-foreground">{tech}</span>
+                    ))}
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        )
+      )}
+
+      {!loading && !error && technologies.length > 0 && (
+        <p className="mt-6 text-xs text-muted-foreground">Covered technologies: {technologies.join(", ")}.</p>
+      )}
     </div>
   );
 }

@@ -38,7 +38,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const token = getToken();
     if (!token) {
-      setLoading(false);
+      // Deferred microtask so the effect never sets state synchronously.
+      Promise.resolve().then(() => setLoading(false));
       return;
     }
 
