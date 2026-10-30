@@ -1,14 +1,25 @@
 import type { Metadata } from "next";
-import { Montserrat, JetBrains_Mono } from "next/font/google";
+import { Fraunces, Figtree, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { AuthProvider } from "@/hooks/use-auth";
 import { MotionProvider } from "@/components/motion/reduced-motion";
 
-const montserrat = Montserrat({
-  variable: "--font-montserrat",
+// Display serif — a characterful variable face (SOFT/WONK axes unlocked) used
+// for headings, hero type and the brand wordmark. Its academic warmth deliberately
+// echoes the printed certificate so the product and its credentials feel related.
+const fraunces = Fraunces({
+  variable: "--font-fraunces",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800", "900"],
+  axes: ["SOFT", "WONK"],
+  display: "swap",
+});
+
+// Body / UI sans — clean, friendly and highly readable at small sizes; carries
+// every control, label and paragraph so the serif stays reserved for emphasis.
+const figtree = Figtree({
+  variable: "--font-figtree",
+  subsets: ["latin"],
   display: "swap",
 });
 
@@ -43,7 +54,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${montserrat.variable} ${jetbrainsMono.variable} h-full antialiased`}
+      className={`${fraunces.variable} ${figtree.variable} ${jetbrainsMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col">

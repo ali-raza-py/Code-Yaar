@@ -307,7 +307,7 @@ export default function AchievementsPage() {
       {/* ── Detail dialog ── */}
       {active && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/60 p-4"
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/60 p-4"
           role="dialog"
           aria-modal="true"
           aria-label={`${active.achievement.title} badge details`}
@@ -356,7 +356,7 @@ export default function AchievementsPage() {
                 <img
                   src={badgesApi.shareImageUrl(active.credential_id, 'square')}
                   alt={`${active.achievement.title} — Code Yaar Academy share graphic`}
-                  className="w-full rounded-card border border-border"
+                  className="mx-auto block max-h-[60vh] w-auto rounded-card border border-border"
                   loading="lazy"
                 />
               </div>
