@@ -126,16 +126,22 @@ export default function CertificatePanel({ courseSlug, enrolled }: Props) {
           </p>
           <div className="flex flex-wrap gap-2">
             <Link
-              href="/certificates"
+              href={`/certificates/${certificate.public_id}`}
               className="focus-ring inline-flex min-h-9 items-center rounded-lg bg-cta px-4 py-2 text-sm font-semibold text-white hover:bg-cta-hover"
             >
-              View & download
+              View &amp; download
             </Link>
             <Link
-              href={`/verify/${certificate.public_id}`}
+              href={`/verify/certificate/${encodeURIComponent(certificate.credential_id)}`}
               className="focus-ring inline-flex min-h-9 items-center rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted/60"
             >
               Public link
+            </Link>
+            <Link
+              href="/certificates"
+              className="focus-ring inline-flex min-h-9 items-center rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted/60"
+            >
+              All certificates
             </Link>
           </div>
         </div>

@@ -7,6 +7,7 @@ Access model:
 - Public verification returns only minimal, privacy-safe fields.
 """
 
+from django.db.models import Q
 from django.http import FileResponse
 from rest_framework import permissions, status
 from rest_framework.decorators import api_view, permission_classes
@@ -21,6 +22,15 @@ from .serializers import (
     CertificateSummarySerializer, EligibilitySerializer,
     PublicVerificationSerializer,
 )
+
+
+def resolve_certificate(identifier: str) -> Certificate | None:
+    """Look up by public_id or printed credential id — never invent a record."""
+    if not identifier:
+        return None
+    return Certificate.objects.filter(
+        Q(public_id=identifier) | Q(credential_id__iexact=identifier)
+    ).select_related('course').first()
 
 
 class _IsOwnerOrStaff(permissions.BasePermission):
@@ -56,7 +66,7 @@ def course_eligibility(request, slug):
 
 
 @api_view(['POST'])
-@permission_classes([permissions.IsAuthenticated, IsEmailVerified])
+@permission_classes([permissions.IsAuthenticated])
 def issue_certificate(request, slug):
     """Issue a certificate after the server re-verifies completion.
 
@@ -89,12 +99,10 @@ def issue_certificate(request, slug):
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated, _IsOwnerOrStaff])
 def download_certificate(request, public_id):
-    """Serve the certificate PDF to its owner (or staff)."""
-    certificate = Certificate.objects.filter(public_id=public_id).first()
+    """Serve the certificate PDF or PNG to its owner (or staff)."""
+    certificate = resolve_certificate(public_id)
     if not certificate:
         return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-    # Function-based views do not run object permissions automatically, so the
-    # owner/staff check is applied explicitly here.
     if not (request.user == certificate.user or request.user.is_staff):
         return Response({'detail': 'Not allowed.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -107,15 +115,16 @@ def download_certificate(request, public_id):
         snapshot=services._snapshot(certificate),
     )
 
-    if certificate.pdf_file:
+    fmt = (request.query_params.get('format') or 'pdf').lower()
+    if fmt == 'png':
+        from .png import render_certificate_png
+        buf = render_certificate_png(certificate)
         return FileResponse(
-            certificate.pdf_file.open('rb'),
-            as_attachment=True,
-            filename=f'code-yaar-{certificate.credential_id}.pdf',
-            content_type='application/pdf',
+            buf, as_attachment=True,
+            filename=f'code-yaar-{certificate.credential_id}.png',
+            content_type='image/png',
         )
 
-    # PDF missing (e.g. generation failed at issuance) — render on demand.
     from .pdf import render_certificate_pdf
     buf = render_certificate_pdf(certificate)
     return FileResponse(
@@ -129,7 +138,7 @@ def download_certificate(request, public_id):
 @permission_classes([permissions.AllowAny])
 def verify_certificate(request, public_id):
     """Public verification. Query Django and reflect the real record only."""
-    certificate = Certificate.objects.filter(public_id=public_id).first()
+    certificate = resolve_certificate(public_id)
     if not certificate:
         return Response(
             {'valid': False, 'found': False,
@@ -139,4 +148,22 @@ def verify_certificate(request, public_id):
     data = PublicVerificationSerializer(certificate).data
     data['found'] = True
     data['public_id'] = certificate.public_id
+    data['kind'] = 'certificate'
     return Response(data)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def public_certificate_image(request, public_id):
+    """Public PNG rendering for Open Graph / link previews.
+
+    Served only for still-valid certificates — revoked or superseded records
+    404 so a stale credential can never be promoted by social scrapers. The
+    image shows exactly what the public verification page already shows.
+    """
+    certificate = resolve_certificate(public_id)
+    if not certificate or not certificate.is_valid:
+        return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+    from .png import render_certificate_png
+    buf = render_certificate_png(certificate)
+    return FileResponse(buf, content_type='image/png')

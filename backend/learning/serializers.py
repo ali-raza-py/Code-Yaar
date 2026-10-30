@@ -476,10 +476,15 @@ class XPTransactionSerializer(serializers.ModelSerializer):
 
 class AchievementSerializer(serializers.ModelSerializer):
     earned = serializers.SerializerMethodField()
+    level_label = serializers.SerializerMethodField()
+    category_label = serializers.SerializerMethodField()
 
     class Meta:
         model = Achievement
-        fields = ['id', 'slug', 'title', 'description', 'icon', 'category', 'xp_bonus', 'earned']
+        fields = [
+            'id', 'slug', 'title', 'description', 'icon', 'category',
+            'category_label', 'xp_bonus', 'earned', 'level_label',
+        ]
 
     def get_earned(self, obj):
         request = self.context.get('request')
@@ -487,14 +492,29 @@ class AchievementSerializer(serializers.ModelSerializer):
             return UserAchievement.objects.filter(user=request.user, achievement=obj).exists()
         return False
 
+    def get_level_label(self, obj):
+        from .badge_art import level_label
+        return level_label(obj)
+
+    def get_category_label(self, obj):
+        return obj.get_category_display()
+
 
 class UserAchievementSerializer(serializers.ModelSerializer):
     achievement = AchievementSerializer(read_only=True)
+    verification_url = serializers.SerializerMethodField()
+    is_valid = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = UserAchievement
-        fields = ['id', 'achievement', 'earned_at']
-        read_only_fields = ['earned_at']
+        fields = [
+            'id', 'achievement', 'earned_at', 'public_id', 'credential_id',
+            'recipient_name', 'status', 'is_valid', 'verification_url',
+        ]
+        read_only_fields = ['earned_at', 'public_id', 'credential_id']
+
+    def get_verification_url(self, obj):
+        return obj.verification_url()
 
 
 # ─── Certification Serializers ──────────────────────────────────────────────

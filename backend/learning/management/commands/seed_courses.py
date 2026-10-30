@@ -21,10 +21,15 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from certificates.services import issue_certificate
 from learning.models import (
     CareerTrack, Course, Chapter, Lesson, Exercise, Hint,
-    Resource, Achievement, UserProfile,
+    Resource, Achievement, UserProfile, Enrollment, LessonProgress,
+    ExerciseAttempt,
 )
+from learning.services.achievements import award_eligible_achievements
+from learning.services.completion import evaluate_course_completion
+from learning.services.xp import award_xp
 
 DEMO_EMAIL = 'demo@codeyaar.dev'
 DEMO_PASSWORD = 'demo123'
@@ -2529,12 +2534,100 @@ class Command(BaseCommand):
                 'category': 'course', 'xp_bonus': 300,
                 'condition_type': 'course_complete', 'condition_value': 'git-github-foundations',
             },
+            {
+                'slug': 'problem-solver', 'title': 'Problem Solver',
+                'description': 'Complete ten lessons across the academy.', 'icon': 'braces',
+                'category': 'exercise', 'xp_bonus': 250,
+                'condition_type': 'lesson_complete', 'condition_value': '10',
+            },
+            {
+                'slug': 'project-builder', 'title': 'Project Builder',
+                'description': 'Finish a full course and ship what you learned.', 'icon': 'layers',
+                'category': 'project', 'xp_bonus': 400,
+                'condition_type': 'course_complete',
+            },
+            {
+                'slug': 'excellence-award', 'title': 'Excellence Award',
+                'description': 'Maintain a seven-day streak while completing coursework.', 'icon': 'award',
+                'category': 'excellence', 'xp_bonus': 500,
+                'condition_type': 'streak_7',
+            },
         ):
             Achievement.objects.get_or_create(
                 slug=achievement['slug'],
                 defaults={k: v for k, v in achievement.items() if k != 'slug'},
             )
 
+        self.seed_demo_progress(demo_user)
+
         self.stdout.write(self.style.SUCCESS(
             f'Done. Demo user: {DEMO_EMAIL} / {DEMO_PASSWORD}'
         ))
+
+    def seed_demo_progress(self, demo_user):
+        """Create clearly sample progress so the demo account can explore proof of learning."""
+        course = Course.objects.filter(slug='git-github-foundations').first()
+        if course is None:
+            return
+
+        enrollment, _ = Enrollment.objects.get_or_create(
+            user=demo_user, course=course, defaults={'status': 'active'},
+        )
+        lessons = list(Lesson.objects.filter(
+            chapter__course=course,
+            chapter__is_active=True,
+            is_active=True,
+        ).select_related('chapter').order_by('chapter__order', 'order'))
+        for lesson in lessons:
+            progress, created = LessonProgress.objects.get_or_create(
+                user=demo_user,
+                lesson=lesson,
+                defaults={'status': 'completed', 'completed_at': timezone.now()},
+            )
+            if not created and progress.status not in ('completed', 'mastered'):
+                progress.status = 'completed'
+                progress.completed_at = timezone.now()
+                progress.save(update_fields=['status', 'completed_at', 'updated_at'])
+            award_xp(
+                demo_user,
+                lesson.xp_reward,
+                'lesson_complete',
+                obj=lesson,
+                description=f'Demo completion: {lesson.title}',
+            )
+            award_eligible_achievements(demo_user, lesson=lesson)
+
+        final_exercises = Exercise.objects.filter(
+            lesson__chapter__course=course,
+            lesson__chapter__is_active=True,
+            lesson__is_active=True,
+            is_final_assessment=True,
+            is_active=True,
+        )
+        for exercise in final_exercises:
+            if not ExerciseAttempt.objects.filter(
+                user=demo_user, exercise=exercise, status='correct',
+            ).exists():
+                ExerciseAttempt.objects.create(
+                    user=demo_user,
+                    exercise=exercise,
+                    status='correct',
+                    submitted_code='',
+                    selected_answer='',
+                    attempt_number=1,
+                    feedback='Sample completion for the demo learner.',
+                )
+            award_xp(
+                demo_user,
+                exercise.xp_reward,
+                'exercise_complete',
+                obj=exercise,
+                description=f'Demo assessment: {exercise.title}',
+            )
+
+        enrollment.last_lesson = lessons[-1] if lessons else None
+        enrollment.last_activity_at = timezone.now()
+        enrollment.save(update_fields=['last_lesson', 'last_activity_at'])
+        evaluate_course_completion(demo_user, course)
+        award_eligible_achievements(demo_user)
+        issue_certificate(demo_user, course)

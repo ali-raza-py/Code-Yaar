@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, Loader2, MailCheck, MailWarning } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button-variants";
-import { auth, ApiError, describeResendError } from "@/lib/api";
+import { auth, ApiError, sendResend } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
 
 /**
@@ -28,23 +28,16 @@ export default function VerifyEmailPage() {
 
   // Shared by both resend entry points: a failed request is shown as a failure
   // instead of being reported as "on its way".
-  const sendResend = async (email: string) => {
+  const sendResendHere = async (email: string) => {
     setResend("sending");
     setResendError(null);
-    try {
-      const result = await auth.resendVerification(email);
-      if (result.verification_email_sent === false) {
-        setResend("idle");
-        setResendError(
-          "The server could not hand the message to the mail service. Check the API's SMTP settings and try again."
-        );
-        return;
-      }
-      setResend("sent");
-    } catch (caught) {
+    const outcome = await sendResend(email);
+    if (!outcome.sent) {
       setResend("idle");
-      setResendError(describeResendError(caught));
+      setResendError(outcome.reason);
+      return;
     }
+    setResend("sent");
   };
 
   useEffect(() => {
@@ -117,7 +110,7 @@ export default function VerifyEmailPage() {
           email={user?.email}
           state={resend}
           error={resendError}
-          onSend={sendResend}
+          onSend={sendResendHere}
         />
         <Link
           href="/sign-in"
@@ -141,7 +134,7 @@ export default function VerifyEmailPage() {
         email={user?.email}
         state={resend}
         error={resendError}
-        onSend={sendResend}
+        onSend={sendResendHere}
       />
       <Link
         href="/sign-in"

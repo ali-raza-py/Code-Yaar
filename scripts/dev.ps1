@@ -3,10 +3,11 @@
     Start the Code Yaar API (Django) and web app (Next.js) together.
 
 .DESCRIPTION
-    Runs Django on -BackendPort inside its own "Code Yaar API" window so the
-    verification and password-reset emails printed by the console email backend
-    stay readable, waits until /api/health/ answers, then runs `next dev` in this
-    window. When the frontend stops, the API process tree is stopped with it.
+    Runs Django on -BackendPort inside its own "Code Yaar API" window so
+    tracebacks, mail warnings and — when the console email backend is configured
+    — the verification and password-reset emails stay readable, waits until
+    /api/health/ answers, then runs `next dev` in this window. When the frontend
+    stops, the API process tree is stopped with it.
 
     Backend CORS and FRONTEND_URL are derived from the actual ports being used,
     so `localhost` and `127.0.0.1` on either side always match and the browser
@@ -87,14 +88,26 @@ function Test-PortOpen([int]$Port) {
     }
 }
 
+# PID of the process listening on a port, or 0. Get-NetTCPConnection can
+# return nothing for a live listener, so netstat is the second opinion.
+function Get-PortOwnerPid([int]$Port) {
+    $connection = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($connection) { return [int]$connection.OwningProcess }
+    $line = netstat -ano -p tcp |
+        Where-Object { $_ -match "^\s*TCP\s+\S+:$Port\s+\S+\s+LISTENING\s+(\d+)\s*$" } |
+        Select-Object -First 1
+    if ($line -and $line -match "LISTENING\s+(\d+)") { return [int]$Matches[1] }
+    return 0
+}
+
 # Describes whatever is listening on a port, or $null when the port is free.
 function Get-PortOwner([int]$Port) {
     if (-not (Test-PortOpen $Port)) { return $null }
-    $connection = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-    if (-not $connection) { return 'another process' }
-    $process = Get-Process -Id $connection.OwningProcess -ErrorAction SilentlyContinue
-    if (-not $process) { return "pid $($connection.OwningProcess)" }
+    $ownerPid = Get-PortOwnerPid $Port
+    if ($ownerPid -eq 0) { return 'another process' }
+    $process = Get-Process -Id $ownerPid -ErrorAction SilentlyContinue
+    if (-not $process) { return "pid $ownerPid" }
     return "$($process.ProcessName) (pid $($process.Id))"
 }
 
@@ -111,6 +124,38 @@ function Test-CorsOrigin([string]$Origin) {
     } catch {
         return $false
     }
+}
+
+# The banner used to promise that verification emails appear in the API window.
+# That is only true for the console backend; with SMTP configured the mail
+# leaves the machine and the window shows nothing, so the hint reports the
+# transport backend/.env actually resolves to. Never echo the password.
+function Get-MailDeliveryHint {
+    $envFile = Join-Path $backendDir '.env'
+    $values = @{}
+    if (Test-Path $envFile) {
+        foreach ($line in @(Get-Content $envFile -ErrorAction SilentlyContinue)) {
+            if ($line -match '^\s*([A-Z0-9_]+)\s*=\s*(.*)$') {
+                $values[$Matches[1]] = $Matches[2].Trim().Trim('"').Trim("'")
+            }
+        }
+    }
+    $backend = $values['EMAIL_BACKEND']
+    if (-not $backend) { return 'EMAIL_BACKEND is unset in backend/.env; auth emails will not send' }
+    if ($backend -match 'console') {
+        return "verification and reset emails print in the 'Code Yaar API' window (console backend; nothing is delivered)"
+    }
+    if ($backend -match 'smtp') {
+        if (-not $values['EMAIL_HOST_PASSWORD']) {
+            return 'SMTP is selected but EMAIL_HOST_PASSWORD is empty in backend/.env; no email can be sent'
+        }
+        # PS 5.1 has no null-coalescing operator, so pick the sender explicitly.
+        $sender = $values['DEFAULT_FROM_EMAIL']
+        if (-not $sender) { $sender = $values['EMAIL_HOST_USER'] }
+        if (-not $sender) { $sender = 'the configured sender' }
+        return "verification and reset emails are sent over SMTP as $sender; test with: python manage.py mail_check <address>"
+    }
+    return "auth emails use $backend"
 }
 
 # runserver's autoreloader runs the server in child processes, so stopping it
@@ -143,21 +188,58 @@ function Find-ChainRoot([int]$ProcessId, [scriptblock]$InChain) {
 }
 
 # One dev.ps1 run is one API window; PIDs are recorded so the finally block
-# always reaches it, even if the returned process object went stale.
+# always reaches it, even if Start-Process's returned process went stale.
 $script:apiWindowPids = @()
 
-# Stops the 'Code Yaar API' windows an earlier dev.ps1 launched (and a crash
-# or a killed terminal left behind): only windows carrying this launcher's
-# console title signature are touched. A server started by hand is not.
-function Stop-StaleApiWindows {
-    $stale = @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -like '*Code Yaar API*' } |
-        Sort-Object ProcessId -Unique)
-    foreach ($window in $stale) {
-        Write-Note "stopping leftover 'Code Yaar API' window pid $($window.ProcessId)"
-        Stop-ProcessTree -ProcessId ([int]$window.ProcessId)
+# The API window records the PID of the dev.ps1 run that spawned it, so a later
+# run can tell its own orphaned windows (launcher gone: safe to stop, otherwise
+# the port stays blocked) from the window of a launcher that is still running
+# (never touched - that session is simply in use, and the port check says so).
+function Get-WindowLauncherPid($Window) {
+    $match = [regex]::Match([string]$Window.CommandLine, "CODE_YAAR_LAUNCHER\s*=\s*'?([0-9]+)'?")
+    if (-not $match.Success) { return 0 }
+    return [int]$match.Groups[1].Value
+}
+
+# Stops the API windows this launcher tagged and waits until the sockets are
+# free: Windows can hold a listening socket for a moment after the owner dies,
+# and a killed server's autoreloader can re-spawn a worker in between, so the
+# sweep repeats until the port answers nothing or the deadline passes.
+function Stop-TaggedApiWindows([int]$LauncherPid) {
+    $deadline = (Get-Date).AddSeconds(10)
+    while ((Get-Date) -lt $deadline) {
+        $windows = @(Get-LaunchedApiWindows -LauncherPid $LauncherPid)
+        $portOpen = (Test-PortOpen $BackendPort) -or (Test-PortOpen $FrontendPort)
+        if ($windows.Count -eq 0 -and -not $portOpen) { return }
+        foreach ($window in $windows) {
+            Stop-ProcessTree -ProcessId ([int]$window.ProcessId)
+        }
+        Start-Sleep -Milliseconds 250
     }
-    return ($stale.Count -gt 0)
+}
+
+# All windows tagged by *this* launcher, used by the finally block: the
+# launcher is still alive there, so 'launcher dead' alone would miss them.
+function Get-LaunchedApiWindows([int]$LauncherPid) {
+    Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like '*WindowTitle*' -and (Get-WindowLauncherPid $_) -eq $LauncherPid }
+}
+
+# Stops the API windows left behind by launchers that are no longer running
+# (a crash or a closed terminal): their port would otherwise stay blocked.
+function Stop-OrphanedApiWindows {
+    $orphans = @()
+    $windows = Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" -ErrorAction SilentlyContinue
+    foreach ($window in @($windows | Where-Object { $_.CommandLine -like '*WindowTitle*' })) {
+        $launcherPid = Get-WindowLauncherPid $window
+        if ($launcherPid -eq 0) { continue }
+        if (Get-Process -Id $launcherPid -ErrorAction SilentlyContinue) { continue }
+        $orphans += $window
+    }
+    foreach ($launcherPid in @($orphans | ForEach-Object { Get-WindowLauncherPid $_ } | Sort-Object -Unique)) {
+        Write-Note "stopping orphaned 'Code Yaar API' window of dead launcher $launcherPid"
+        Stop-TaggedApiWindows -LauncherPid ([int]$launcherPid)
+    }
 }
 
 function Wait-ForApi([string]$Url, [int]$TimeoutSeconds = 60) {
@@ -184,26 +266,49 @@ function Initialize-EnvFile([string]$Directory, [string]$Target, [string]$Templa
     }
 }
 
+# All ancestors of this launcher. -Force may stop a listener, but never one
+# that is a child of this very terminal: stopping that tree would kill the
+# session the user is typing in, so such a server must be stopped by hand.
+$script:launcherChain = @($PID)
+$ancestor = Get-CimInstance Win32_Process -Filter "ProcessId = $PID" -ErrorAction SilentlyContinue
+while ($ancestor -and $ancestor.ParentProcessId -and $ancestor.ParentProcessId -ne 0) {
+    $ancestor = Get-CimInstance Win32_Process -Filter "ProcessId = $($ancestor.ParentProcessId)" -ErrorAction SilentlyContinue
+    if (-not $ancestor) { break }
+    $script:launcherChain += [int]$ancestor.ProcessId
+    if ($script:launcherChain.Count -gt 20) { break }
+}
+
+# True when the process is this launcher or one of its parents.
+function Test-OwnedByLauncher([int]$ProcessId) {
+    return ($script:launcherChain -contains $ProcessId)
+}
+
 # ── Pre-flight: ports ───────────────────────────────────────────────────────
 if ($BackendPort -eq $FrontendPort) {
     Stop-WithError 'the API and the app cannot share a port; pass -FrontendPort.'
 }
-# A dev.ps1 API window that survived a crash blocks the port forever; those
-# windows are always reclaimed. With -Force, any other listener (for example a
-# hand-started runserver) is stopped too; without it the launcher refuses and
-# says who holds the port.
-Stop-StaleApiWindows | Out-Null
+# A dev.ps1 API window whose launcher died blocks the port forever; those
+# orphans are always reclaimed. A window whose launcher is still running is
+# another active session and is never killed. With -Force, any other listener
+# (for example a hand-started runserver) is stopped too; without it the
+# launcher refuses and names what holds the port.
+Stop-OrphanedApiWindows
 foreach ($port in @($BackendPort, $FrontendPort)) {
     $owner = Get-PortOwner $port
     if ($owner) {
         if (-not $Force) {
+            if ($owner -like '*powershell*') {
+                Stop-WithError "port $port is held by $owner from another dev.ps1 run whose window is still open. Press Ctrl+C in that window, or pass -BackendPort / -FrontendPort."
+            }
             Stop-WithError "port $port is already in use by $owner. Stop it (Ctrl+C in its window), re-run with -Force, or pass -BackendPort / -FrontendPort."
         }
         Write-Note "-Force: port $port is held by $owner; stopping it"
-        $connection = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-        if ($connection) {
-            $listenerPid = [int]$connection.OwningProcess
+        $ownerPid = Get-PortOwnerPid $port
+        if ($ownerPid -ne 0 -and (Test-OwnedByLauncher $ownerPid)) {
+            Stop-WithError "port $port is served by this same terminal ($owner), so -Force will not kill the window you are typing in. Press Ctrl+C there to stop that server, then rerun, or pass a free -BackendPort / -FrontendPort."
+        }
+        if ($ownerPid -ne 0) {
+            $listenerPid = $ownerPid
             $listener = Get-CimInstance Win32_Process -Filter "ProcessId = $listenerPid" -ErrorAction SilentlyContinue
             if ($listener -and $listener.CommandLine -like '*runserver*') {
                 # Stop the outermost runserver of the chain (the autoreloader
@@ -231,6 +336,9 @@ foreach ($port in @($BackendPort, $FrontendPort)) {
             $stoppedRoots = @()
             foreach ($candidate in $candidates) {
                 $rootServer = Find-ChainRoot -ProcessId ([int]$candidate.ProcessId) -InChain { param($p) $p.CommandLine -like '*runserver*' }
+                if ((Test-OwnedByLauncher ([int]$candidate.ProcessId)) -or (Test-OwnedByLauncher ([int]$rootServer.ProcessId))) {
+                    Stop-WithError "port $port is served by this same terminal, so -Force will not kill the window you are typing in. Press Ctrl+C there to stop that server, then rerun, or pass a free -BackendPort / -FrontendPort."
+                }
                 if ($stoppedRoots -notcontains $rootServer.ProcessId) {
                     $stoppedRoots += $rootServer.ProcessId
                     Stop-ProcessTree -ProcessId ([int]$rootServer.ProcessId)
@@ -309,13 +417,15 @@ try {
 }
 
 # ── Start the API in its own window ─────────────────────────────────────────
-$startedAt = (Get-Date).AddSeconds(-2)
 Write-Step "Starting the API on http://127.0.0.1:$BackendPort"
 # Kept in a separate console so console-backend emails (verification and reset
 # links) are visible, and so a traceback is readable instead of scrolling away.
-$apiCommand = "`$Host.UI.RawUI.WindowTitle = 'Code Yaar API'; & '$python' 'manage.py' 'runserver' '127.0.0.1:$BackendPort'"
+# The launcher PID is written into the window's command line as a literal value
+# (outer quotes, backslash-escaped) so it survives the -Command quoting; a later
+# run reads it back to tell this run's orphaned windows from live sessions'.
+$apiCommand = "$([char]34)`$Host.UI.RawUI.WindowTitle = 'Code Yaar API'; `$env:CODE_YAAR_LAUNCHER = '$PID'; & '$python' 'manage.py' 'runserver' '127.0.0.1:$BackendPort'$([char]34)"
 $apiProcess = Start-Process -FilePath 'powershell.exe' `
-    -ArgumentList "-NoLogo -NoExit -Command `"$apiCommand`"" `
+    -ArgumentList "-NoLogo -NoExit -Command $apiCommand" `
     -WorkingDirectory $backendDir -PassThru
 $script:apiWindowPids += $apiProcess.Id
 
@@ -337,7 +447,7 @@ try {
     Write-Host '  Admin   ' -NoNewline; Write-Host "http://127.0.0.1:$BackendPort/admin/" -ForegroundColor Green
     Write-Host '  Health  ' -NoNewline; Write-Host "http://127.0.0.1:$BackendPort/api/health/" -ForegroundColor Green
     Write-Host ''
-    Write-Note "verification and reset emails print in the 'Code Yaar API' window"
+    Write-Note (Get-MailDeliveryHint)
     Write-Note 'press Ctrl+C here to stop both servers'
     Write-Host ''
 
@@ -351,11 +461,16 @@ try {
     Write-Step 'Stopping the API'
     # The window runs with -NoExit and Django's autoreloader re-spawns its
     # server child whenever it is killed alone, so the whole tree of every
-    # window this run launched must be stopped, window included.
+    # window this run launched is stopped, window included. Windows are looked
+    # up by this launcher's PID, not by title, so another live dev.ps1 session
+    # on a different port keeps its own API window. The sweep repeats until the
+    # sockets are free, so a worker re-spawned between checks is caught too.
+    Stop-TaggedApiWindows -LauncherPid $PID
     foreach ($windowPid in $script:apiWindowPids) {
         Stop-ProcessTree -ProcessId ([int]$windowPid)
     }
     # Ctrl+C does not always unwind a pipeline cleanly in Windows PowerShell,
-    # so any window still carrying this run's API title is stopped as well.
-    Stop-StaleApiWindows | Out-Null
+    # so a tagged window that had already dropped out of the list above is
+    # reclaimed here as well. Windows of other live launchers are not touched.
+    Stop-OrphanedApiWindows
 }

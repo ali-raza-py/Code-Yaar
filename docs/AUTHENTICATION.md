@@ -59,7 +59,7 @@ All routes are mounted under `/api/auth/` and require JSON bodies.
 | GET | `me/` | Bearer | — | `200` user + profile payload |
 | PATCH | `me/` | Bearer | any of `username, email, first_name, last_name, full_name, bio, avatar, institution, education_level, github_url, linkedin_url` | `200` updated payload + `email_changed`, `verification_email_sent` |
 | POST | `verify-email/` | public | `token` | `200 {detail, user}`; repeating a link for an already-verified account answers `200 {code: "already_verified"}` |
-| POST | `resend-verification/` | optional Bearer | `email` (omit when signed in) | `200 {detail}` — generic |
+| POST | `resend-verification/` | optional Bearer | `email` (omit when signed in) | `200 {detail, email_delivery_enabled}` — `detail` generic; `verification_email_sent` added **only** when the caller is the signed-in owner of that address |
 | POST | `password-reset/` | public | `email` | `200 {detail}` — generic |
 | POST | `password-reset/confirm/` | public | `token, password, confirm_password` | `200 {detail}` |
 | POST | `change-password/` | Bearer | `current_password, new_password, confirm_password` | `200 {detail, access, expires_in}` + new refresh cookie |
@@ -136,12 +136,31 @@ The sync is additive — it never strips permissions an operator granted by hand
   accepting account passwords for SMTP — so `EMAIL_HOST_PASSWORD` has to be
   filled in before the first send. Until it is, sending fails and the API
   reports `verification_email_sent: false` (the account is still created).
+- "Sent" means **the transport accepted the message for delivery**, not merely
+  that nothing raised. `services/auth._send_email` checks the return value of
+  `send_messages()` and refuses to call a rendering-only transport a delivery:
+  when `EMAIL_BACKEND` is one of `RENDER_ONLY_BACKENDS` (console, dummy,
+  filebased) the mail is printed or filed but never leaves the server, so the
+  service returns `False`, the audit row records `delivered: false`, a warning
+  naming the backend module is logged, and the API reports
+  `verification_email_sent: false`. Never trust a `200` here as "the inbox got
+  it" — the flag, the `AuthenticationAuditLog` and `mail_check --connect` are
+  the evidence.
 - `python manage.py mail_check <address>` prints the resolved transport and
   sends a real test message through the exact same path as the auth emails, and
   translates SMTP errors (bad password, blocked port, wrong TLS) into a hint.
+  `mail_check` without an address only reports configuration; `--connect` proves
+  the TLS handshake and login without sending anything.
+- Because resend is usually **anonymous** (there is no session after `403
+  email_not_verified`), the endpoint cannot tell that caller about the account
+  without becoming an address oracle. It instead answers a question about the
+  deployment: `email_delivery_enabled` is `services.auth.mail_transport_ready()`
+  — false when the transport only renders mail or when SMTP has no login — and
+  is identical for every caller, known address or not.
 - For offline work set `EMAIL_BACKEND` back to
   `django.core.mail.backends.console.EmailBackend`: the message, including the
-  link, is then printed to the API window and nothing leaves the machine.
+  link, is then printed to the API window and nothing leaves the machine — and
+  every auth endpoint says so rather than pretending otherwise.
 - Verification is enforced at sign-in while `AUTH_REQUIRE_EMAIL_VERIFICATION`
   is on: a correct password on an unverified account returns `403
   email_not_verified` and the sign-in screen offers a resend. Registration
@@ -176,6 +195,12 @@ Rules that keep this coherent:
 5. **Guards are UX, not security.** `RequireAuth` wraps `(app)/layout.tsx` and
    redirects to `/sign-in?next=…`; the API rejects unauthenticated requests
    regardless of what the browser renders.
+6. **"On its way" is earned, not assumed.** Every screen that can ask for
+   verification mail (sign-in, sign-up, verify-email, settings) calls the single
+   `sendResend()` helper in `lib/api.ts` and renders its outcome. A
+   `{ sent: false }` — transport unable to deliver, the send refused, a `429`
+   translated into a whole-minute wait, or no API reachable — is shown as a
+   failure, never as success.
 
 `proxy.ts` is intentionally a pass-through: the refresh cookie is scoped to the
 API origin, so a proxy on the frontend origin can never read it.

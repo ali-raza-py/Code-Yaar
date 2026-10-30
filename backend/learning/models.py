@@ -559,9 +559,13 @@ class SnippetRun(models.Model):
 # Repeated merit (e.g. several streak bonuses) is intentionally not awarded for
 # these; the database itself refuses a second award row. Module level because a
 # nested `Meta` body is executed with module globals as its only outer scope —
-# it cannot see attributes defined in the class body around it.
+# it cannot see attributes defined in the class body around it. Iteration order
+# of a frozenset of strings is randomised per process, so migration authoring
+# must go through `sorted()`; otherwise every `makemigrations` run sees a
+# different `action__in` list and emits a spurious remove/recreate pair.
 UNIQUE_AWARD_ACTIONS = frozenset({
     'lesson_complete', 'exercise_complete', 'chapter_complete', 'course_complete',
+    'achievement_bonus',
 })
 
 
@@ -573,6 +577,7 @@ class XPTransaction(models.Model):
         ('chapter_complete', 'Chapter Complete'),
         ('course_complete', 'Course Complete'),
         ('hint_used', 'Hint Used'),
+        ('achievement_bonus', 'Achievement Bonus'),
         ('streak_bonus', 'Streak Bonus'),
         ('manual_adjustment', 'Manual Adjustment'),
     ]
@@ -604,7 +609,7 @@ class XPTransaction(models.Model):
             # never produce a second XP award for the same completion.
             models.UniqueConstraint(
                 fields=['user', 'action', 'content_type', 'object_id'],
-                condition=models.Q(action__in=list(UNIQUE_AWARD_ACTIONS))
+                condition=models.Q(action__in=sorted(UNIQUE_AWARD_ACTIONS))
                              & ~models.Q(content_type__isnull=True)
                              & ~models.Q(object_id__isnull=True),
                 name='unique_xp_award_per_user_action_reference',
@@ -621,6 +626,8 @@ class Achievement(models.Model):
         ('exercise', 'Exercise Mastery'),
         ('skill', 'Skill'),
         ('special', 'Special'),
+        ('excellence', 'Excellence Award'),
+        ('project', 'Project Builder'),
     ]
 
     slug = models.SlugField(max_length=100, unique=True)
@@ -642,8 +649,18 @@ class Achievement(models.Model):
         ordering = ['category', 'title']
 
 
+def _generate_badge_public_id() -> str:
+    import secrets
+    return secrets.token_urlsafe(20)
+
+
 class UserAchievement(models.Model):
     """An achievement earned by a user."""
+
+    class Status(models.TextChoices):
+        ACTIVE = 'active', 'Active'
+        REVOKED = 'revoked', 'Revoked'
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -655,6 +672,14 @@ class UserAchievement(models.Model):
         related_name='user_achievements'
     )
     earned_at = models.DateTimeField(auto_now_add=True)
+    public_id = models.CharField(
+        max_length=40, unique=True, editable=False, default=_generate_badge_public_id,
+    )
+    credential_id = models.CharField(max_length=32, unique=True, editable=False)
+    recipient_name = models.CharField(max_length=250, blank=True, default='')
+    status = models.CharField(
+        max_length=12, choices=Status.choices, default=Status.ACTIVE,
+    )
 
     def __str__(self):
         return f"{self.user.username} earned {self.achievement.title}"
@@ -662,6 +687,33 @@ class UserAchievement(models.Model):
     class Meta:
         unique_together = ['user', 'achievement']
         ordering = ['-earned_at']
+
+    @property
+    def is_valid(self) -> bool:
+        return self.status == self.Status.ACTIVE
+
+    def verification_url(self) -> str:
+        return f"{settings.SITE_URL}/verify/badge/{self.credential_id}"
+
+    def save(self, *args, **kwargs):
+        if not self.public_id:
+            self.public_id = _generate_badge_public_id()
+        if not self.credential_id:
+            self.credential_id = self._mint_credential_id()
+        if not self.recipient_name:
+            full = (self.user.get_full_name() or '').strip()
+            self.recipient_name = full or self.user.username
+        super().save(*args, **kwargs)
+
+    def _mint_credential_id(self) -> str:
+        import secrets
+        from django.utils import timezone
+        year = timezone.localdate().year
+        while True:
+            token = secrets.token_hex(3).upper()
+            candidate = f'CY-BDG-{year}-{token}'
+            if not UserAchievement.objects.filter(credential_id=candidate).exists():
+                return candidate
 
 
 class Project(models.Model):

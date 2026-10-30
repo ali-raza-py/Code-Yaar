@@ -22,6 +22,7 @@ import {
   Menu,
   Settings,
   Swords,
+  Trophy,
   User,
   X,
 } from "lucide-react";
@@ -80,6 +81,7 @@ const navGroups: NavGroup[] = [
 
 const secondaryItems: NavItem[] = [
   { href: "/leaderboard", label: "Leaderboard", icon: Medal, badge: "NEW" },
+  { href: "/achievements", label: "Achievements", icon: Trophy },
   { href: "/certificates", label: "Certificates", icon: Award },
   { href: "/profile", label: "Profile", icon: User },
   { href: "/settings", label: "Settings", icon: Settings },
@@ -90,15 +92,21 @@ function isNavItemActive(
   pathname: string,
   searchParams: URLSearchParams
 ) {
-  if (pathname !== item.href.split("?")[0]) return false;
+  const base = item.href.split("?")[0];
 
-  if (!item.query) {
-    return !searchParams.has("mode") && !searchParams.has("view");
+  if (item.query) {
+    // Query-driven items only match their exact path.
+    if (pathname !== base) return false;
+    return Object.entries(item.query).every(
+      ([key, value]) => searchParams.get(key) === value
+    );
   }
 
-  return Object.entries(item.query).every(
-    ([key, value]) => searchParams.get(key) === value
-  );
+  // Plain items also match nested pages (e.g. a certificate detail view),
+  // so the sidebar always shows where you are.
+  const matches = pathname === base || pathname.startsWith(`${base}/`);
+  if (!matches) return false;
+  return !searchParams.has("mode") && !searchParams.has("view");
 }
 
 function SidebarLink({

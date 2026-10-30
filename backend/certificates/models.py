@@ -142,7 +142,12 @@ class Certificate(models.Model):
         return self.status == self.Status.ACTIVE
 
     def verification_url(self) -> str:
-        return f"{settings.SITE_URL}/verify/{self.public_id}/"
+        """Public page keyed by the human-readable credential id.
+
+        Older links that used `public_id` still resolve through the same
+        verification endpoint and a frontend redirect.
+        """
+        return f"{settings.SITE_URL}/verify/certificate/{self.credential_id}"
 
     def save(self, *args, **kwargs):
         if not self.credential_id:

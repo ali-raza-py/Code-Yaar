@@ -15,7 +15,7 @@ Tests cover:
 - Sandbox service
 """
 
-from django.test import TestCase, Client
+from django.test import TestCase, Client, override_settings
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from rest_framework.test import APIClient
@@ -32,6 +32,7 @@ from .services.language_adapter import (
 from .services.sandbox import (
     DevelopmentSandbox, validate_submission, SandboxConfig,
 )
+from .services.xp import award_xp, deduct_xp
 
 
 # ─── Model Tests ─────────────────────────────────────────────────────────────
@@ -99,6 +100,11 @@ class ExerciseModelTest(TestCase):
 
 # ─── Enrollment Tests ────────────────────────────────────────────────────────
 
+# Exercises and enrollment run behind the verified-email gate in production;
+# these suites test the flows themselves (the gate has dedicated coverage in
+# tests_auth.py), so they run with the requirement lifted — same convention
+# as tests_auth.AuthAPITestCase.
+@override_settings(AUTH_REQUIRE_EMAIL_VERIFICATION=False)
 class EnrollmentAPITest(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -190,6 +196,30 @@ class LessonCompletionAPITest(TestCase):
         self.assertEqual(
             XPTransaction.objects.filter(user=self.user, action='lesson_complete').count(), 1
         )
+        self.assertEqual(UserProfile.objects.get(user=self.user).xp_points, 50)
+
+    def test_first_lesson_badge_and_bonus_are_awarded_once(self):
+        badge = Achievement.objects.create(
+            slug='first-lesson-test', title='First Steps',
+            description='Complete one lesson.', icon='trophy', category='course',
+            xp_bonus=25, condition_type='lesson_complete', condition_value='1',
+        )
+
+        first = self.client.post(f'/api/lessons/{self.lesson.id}/complete/')
+        second = self.client.post(f'/api/lessons/{self.lesson.id}/complete/')
+
+        self.assertEqual(first.data['xp_awarded'], 50)
+        self.assertEqual(second.data['xp_awarded'], 0)
+        earned = UserAchievement.objects.get(user=self.user, achievement=badge)
+        self.assertTrue(earned.credential_id.startswith('CY-BDG-'))
+        self.assertTrue(earned.public_id)
+        self.assertEqual(
+            XPTransaction.objects.filter(
+                user=self.user, action='achievement_bonus', object_id=badge.id,
+            ).count(),
+            1,
+        )
+        self.assertEqual(UserProfile.objects.get(user=self.user).xp_points, 75)
 
     def test_lesson_with_unsolved_exercises_stays_in_progress(self):
         Exercise.objects.create(
@@ -268,6 +298,7 @@ class ExerciseActionPermissionTest(TestCase):
 
 # ─── Exercise Submission Tests ───────────────────────────────────────────────
 
+@override_settings(AUTH_REQUIRE_EMAIL_VERIFICATION=False)
 class ExerciseSubmissionTest(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -384,6 +415,15 @@ class HintSystemTest(TestCase):
             reveals_solution=True, xp_penalty=50,
         )
 
+    def test_repeated_hint_request_deducts_xp_only_once(self):
+        first = self.client.get(f'/api/exercises/{self.exercise.id}/hint/')
+        second = self.client.get(f'/api/exercises/{self.exercise.id}/hint/')
+
+        self.assertEqual(first.data['xp_penalty'], 10)
+        self.assertEqual(second.data['xp_penalty'], 10)
+        self.assertEqual(UserProfile.objects.get(user=self.user).xp_points, 490)
+        self.assertEqual(XPTransaction.objects.filter(user=self.user, action='hint_used').count(), 1)
+
     def test_get_hint(self):
         response = self.client.get(f'/api/exercises/{self.exercise.id}/hint/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -394,6 +434,91 @@ class HintSystemTest(TestCase):
         self.client.get(f'/api/exercises/{self.exercise.id}/hint/')
         updated_xp = UserProfile.objects.get(user=self.user).xp_points
         self.assertLess(updated_xp, initial_xp)
+
+    def test_repeated_hint_request_deducts_xp_only_once(self):
+        first = self.client.get(f'/api/exercises/{self.exercise.id}/hint/')
+        second = self.client.get(f'/api/exercises/{self.exercise.id}/hint/')
+
+        self.assertEqual(first.data['xp_penalty'], 10)
+        self.assertEqual(second.data['xp_penalty'], 10)
+        self.assertEqual(UserProfile.objects.get(user=self.user).xp_points, 490)
+        self.assertEqual(XPTransaction.objects.filter(user=self.user, action='hint_used').count(), 1)
+
+
+class XPServiceTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='xpuser', password='pass123')
+        self.track = CareerTrack.objects.create(slug='xp', title='XP', description='XP')
+        self.course = Course.objects.create(
+            slug='xp-course', title='XP Course', description='', track=self.track,
+        )
+        self.chapter = Chapter.objects.create(course=self.course, title='Chapter', slug='chapter')
+        self.lesson = Lesson.objects.create(
+            chapter=self.chapter, title='Lesson', slug='lesson', xp_reward=650,
+        )
+
+    def test_award_xp_updates_balance_level_and_is_idempotent(self):
+        first = award_xp(self.user, 650, 'lesson_complete', obj=self.lesson)
+        duplicate = award_xp(self.user, 650, 'lesson_complete', obj=self.lesson)
+
+        profile = UserProfile.objects.get(user=self.user)
+        self.assertEqual(first.amount, 650)
+        self.assertIsNone(duplicate)
+        self.assertEqual(profile.xp_points, 650)
+        self.assertEqual(profile.level, 2)
+
+    def test_deduction_is_capped_at_balance_and_updates_level(self):
+        award_xp(self.user, 650, 'lesson_complete', obj=self.lesson)
+        transaction = deduct_xp(self.user, 900, 'hint_used', obj=self.lesson)
+
+        profile = UserProfile.objects.get(user=self.user)
+        self.assertEqual(transaction.amount, -650)
+        self.assertEqual(profile.xp_points, 0)
+        self.assertEqual(profile.level, 1)
+
+    def test_same_hint_penalty_is_deducted_once(self):
+        hint = Hint.objects.create(
+            exercise=self.lesson.exercises.create(
+                title='Exercise', slug='exercise', exercise_type='code',
+                instructions='Solve it.', solution_code='pass',
+            ),
+            content='Hint', order=1, xp_penalty=10,
+        )
+        award_xp(self.user, 100, 'lesson_complete', obj=self.lesson)
+
+        first = deduct_xp(self.user, 10, 'hint_used', obj=hint)
+        duplicate = deduct_xp(self.user, 10, 'hint_used', obj=hint)
+
+        profile = UserProfile.objects.get(user=self.user)
+        self.assertEqual(first.amount, -10)
+        self.assertIsNone(duplicate)
+        self.assertEqual(profile.xp_points, 90)
+
+
+class ProfileAchievementsAPITest(TestCase):
+    def test_profile_returns_earned_and_locked_badges(self):
+        user = User.objects.create_user(username='badges', password='pass123')
+        UserProfile.objects.create(user=user)
+        earned = Achievement.objects.create(
+            slug='earned-test', title='First Steps', description='A completed milestone.',
+            icon='trophy', category='course', condition_type='lesson_complete',
+        )
+        locked = Achievement.objects.create(
+            slug='locked-test', title='Week Warrior', description='Learn for seven days.',
+            icon='fire', category='streak', condition_type='streak_7',
+        )
+        UserAchievement.objects.create(user=user, achievement=earned)
+        client = APIClient()
+        client.force_authenticate(user=user)
+
+        response = client.get('/api/profile/stats/')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        badges = {badge['id']: badge for badge in response.data['achievements']}
+        self.assertTrue(badges[earned.id]['earned'])
+        self.assertIsNotNone(badges[earned.id]['earned_at'])
+        self.assertFalse(badges[locked.id]['earned'])
+        self.assertIsNone(badges[locked.id]['earned_at'])
 
 
 # ─── Language Adapter Tests ──────────────────────────────────────────────────
@@ -618,6 +743,7 @@ class CourseAPITest(TestCase):
 
 # ─── Auth API Tests ──────────────────────────────────────────────────────────
 
+@override_settings(AUTH_REQUIRE_EMAIL_VERIFICATION=False)
 class AuthAPITest(TestCase):
     def setUp(self):
         self.client = APIClient()

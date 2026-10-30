@@ -40,6 +40,7 @@ from .services.auth import (
     get_profile,
     issue_email_verification,
     issue_password_reset,
+    mail_transport_ready,
     refresh_token_from_request,
     reset_password,
     revoke_refresh_tokens,
@@ -445,6 +446,10 @@ class ResendVerificationView(APIView):
         # flag, which keeps the endpoint useless for address enumeration.
         if sent is not None and request.user.is_authenticated and user == request.user:
             payload['verification_email_sent'] = sent
+        # The transport is a property of the deployment, not of any account, so
+        # this is the same for every caller and leaks nothing: it is what lets the
+        # sign-in screen stop claiming "on its way" when no mail can leave.
+        payload['email_delivery_enabled'] = mail_transport_ready()
         return Response(payload)
 
 

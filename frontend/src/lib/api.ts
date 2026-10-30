@@ -176,6 +176,36 @@ export function describeResendError(caught: unknown): string {
   return caught.message || 'The verification email could not be sent. Please try again.';
 }
 
+/**
+ * Turn a failed credential-download response into an actionable error.
+ *
+ * Downloads stream through `authorizedFetch`, so a non-2xx here almost always
+ * means the session lapsed mid-flight (401/403) or the API is unreachable
+ * (status 0) — both read as a baffling "Download failed" unless named plainly.
+ */
+async function readDownloadError(res: Response, format: string): Promise<ApiError> {
+  const err = await readError(res);
+  if (err.status === 401 || err.status === 403) {
+    return new ApiError(
+      err.status,
+      'Your session has expired. Please sign in again to download this file.',
+      undefined,
+      'auth_expired'
+    );
+  }
+  if (err.status === 0) {
+    return new ApiError(0, `Can't reach the server to build the ${format}. Check your connection and try again.`);
+  }
+  return err;
+}
+
+// Wording shared by every screen that asks for verification mail, so a transport
+// problem always reads the same way instead of being paraphrased per page.
+export const MAIL_DISABLED_MESSAGE =
+  "This server can't send email right now — its mail settings need to be fixed before any link can arrive.";
+export const MAIL_REFUSED_MESSAGE =
+  "The server could not hand the message to the mail service. Check the API's SMTP settings and try again.";
+
 // DRF paginates list endpoints globally (PageNumberPagination): they return
 // { count, next, previous, results } rather than a bare array. Normalize so
 // callers always get a plain array.
@@ -228,9 +258,9 @@ export function ensureCsrfToken(): Promise<string> {
 
 let refreshInFlight: Promise<string | null> | null = null;
 
-async function performRefresh(): Promise<string | null> {
+async function performRefreshOnce(): Promise<{ token: string | null; rejected: boolean }> {
   const token = await ensureCsrfToken();
-  if (!token) return null;
+  if (!token) return { token: null, rejected: false };
 
   const res = await fetchOrThrow(`${API_BASE}/auth/token/refresh/`, {
     method: 'POST',
@@ -239,17 +269,33 @@ async function performRefresh(): Promise<string | null> {
   });
 
   if (!res.ok) {
-    if (res.status === 401 || res.status === 403) {
-      // The API already cleared its cookie; mirror that locally.
-      clearToken();
-    }
-    return null;
+    // 401/403 means the API rejected the refresh cookie outright.
+    return { token: null, rejected: res.status === 401 || res.status === 403 };
   }
 
   const data = (await res.json()) as { access?: string };
   accessToken = data.access ?? null;
   markSessionHint();
-  return accessToken;
+  return { token: accessToken, rejected: false };
+}
+
+async function performRefresh(): Promise<string | null> {
+  // With rotating refresh tokens shared across tabs, one tab's refresh can
+  // race another's rotation and momentarily hit a just-blacklisted cookie.
+  // A short bounded retry lets the settled cookie answer, so a healthy
+  // session is not torn down by a transient collision.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { token, rejected } = await performRefreshOnce();
+    if (token) return token;
+    if (!rejected) return null; // transport / CSRF problem — retrying won't help
+    if (attempt === 0) {
+      await new Promise((r) => setTimeout(r, 350));
+      csrfToken = null; // force a fresh CSRF token tied to the settled cookie
+    }
+  }
+  // Both attempts were rejected: the cookie is genuinely gone. Mirror that.
+  clearToken();
+  return null;
 }
 
 /**
@@ -498,13 +544,14 @@ export const auth = {
 
   /** Signed-in callers may omit the email (their own address is used). */
   resendVerification: (email?: string) =>
-    request<{ detail: string; verification_email_sent?: boolean }>(
-      '/auth/resend-verification/',
-      {
-        method: 'POST',
-        body: JSON.stringify(email ? { email } : {}),
-      }
-    ),
+    request<{
+      detail: string;
+      verification_email_sent?: boolean;
+      email_delivery_enabled?: boolean;
+    }>('/auth/resend-verification/', {
+      method: 'POST',
+      body: JSON.stringify(email ? { email } : {}),
+    }),
 
   requestPasswordReset: (email: string) =>
     request<{ detail: string }>('/auth/password-reset/', {
@@ -527,6 +574,32 @@ export const auth = {
   updateProfile: (data: Record<string, unknown>) =>
     request<MePayload>('/auth/me/', { method: 'PATCH', body: JSON.stringify(data) }),
 };
+
+export type ResendOutcome = { sent: true } | { sent: false; reason: string };
+
+/**
+ * The single resend path every screen must use: the request, the API's own
+ * admission about the mail transport, and the error mapping. Resend is usually
+ * anonymous — after a `403 email_not_verified` there is no session — and the
+ * endpoint stays vague about the account, so `email_delivery_enabled` (a fact
+ * about the deployment, identical for every caller) is what stops the button
+ * from promising a link this server is incapable of sending.
+ */
+export async function sendResend(email?: string): Promise<ResendOutcome> {
+  let result: Awaited<ReturnType<typeof auth.resendVerification>>;
+  try {
+    result = await auth.resendVerification(email);
+  } catch (caught) {
+    return { sent: false, reason: describeResendError(caught) };
+  }
+  if (result.email_delivery_enabled === false) {
+    return { sent: false, reason: MAIL_DISABLED_MESSAGE };
+  }
+  if (result.verification_email_sent === false) {
+    return { sent: false, reason: MAIL_REFUSED_MESSAGE };
+  }
+  return { sent: true };
+}
 
 /**
  * Re-establish an in-memory access token from the refresh cookie.
@@ -777,6 +850,17 @@ export interface ProfileStatsData {
     description: string;
     created_at: string;
   }>;
+  achievements: Array<{
+    id: number;
+    slug: string;
+    title: string;
+    description: string;
+    icon: string;
+    category: string;
+    xp_bonus: number;
+    earned: boolean;
+    earned_at: string | null;
+  }>;
   skills: Array<{
     id: number;
     name: string;
@@ -818,6 +902,10 @@ export interface CertificateSummary {
   is_valid: boolean;
   verification_url: string;
   pdf_url: string;
+  png_url: string;
+  /** Base64 PNG of the QR code that encodes `verification_url`. */
+  qr_data_url: string;
+  issuer: string;
 }
 
 export interface CertificateRequirement {
@@ -852,6 +940,60 @@ export interface PublicVerification {
   revoked?: boolean;
   superseded?: boolean;
   detail?: string;
+  issuer?: string;
+  verification_url?: string;
+  qr_data_url?: string;
+  final_score?: number | null;
+}
+
+// ─── Badges (earned achievements) ──────────────────────────────────────────
+
+export interface AchievementDefinition {
+  id: number;
+  slug: string;
+  title: string;
+  description: string;
+  icon: string;
+  category: string;
+  category_label: string;
+  xp_bonus: number;
+  earned: boolean;
+  level_label: string;
+}
+
+/** One badge actually earned by the signed-in learner. */
+export interface EarnedBadge {
+  id: number;
+  achievement: AchievementDefinition;
+  earned_at: string;
+  public_id: string;
+  credential_id: string;
+  recipient_name: string;
+  status: 'active' | 'revoked';
+  is_valid: boolean;
+  verification_url: string;
+}
+
+/** Public, privacy-safe badge verification payload. */
+export interface BadgeVerification {
+  valid: boolean;
+  found: boolean;
+  kind: 'badge';
+  public_id?: string;
+  credential_id?: string;
+  recipient_name?: string;
+  title?: string;
+  description?: string;
+  category?: string;
+  category_label?: string;
+  level_label?: string;
+  skill_name?: string;
+  issued_at?: string | null;
+  issuer?: string;
+  status?: string;
+  revoked?: boolean;
+  verification_url?: string;
+  detail?: string;
 }
 
 export const certificates = {
@@ -870,25 +1012,81 @@ export const certificates = {
   verify: (publicId: string) =>
     request<PublicVerification>(`/certificates/verify/${encodeURIComponent(publicId)}/`),
 
-  // Download is owner-restricted and bearer-authenticated, so stream the PDF
+  // Download is owner-restricted and bearer-authenticated, so stream the file
   // through fetch with the Authorization header and hand the blob to the
   // browser rather than navigating to the URL directly.
-  download: async (publicId: string): Promise<void> => {
+  download: async (publicId: string, format: 'pdf' | 'png' = 'pdf'): Promise<void> => {
     const res = await authorizedFetch(
-      `/certificates/${encodeURIComponent(publicId)}/download/`
+      `/certificates/${encodeURIComponent(publicId)}/download/?format=${format}`
     );
     if (!res.ok) {
-      throw await readError(res);
+      throw await readDownloadError(res, format.toUpperCase());
     }
     const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `code-yaar-${publicId}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    triggerBlobDownload(blob, `code-yaar-${publicId}.${format}`);
+  },
+};
+
+/** Hand a fetched blob to the browser as a real file download. */
+function triggerBlobDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// ─── Badges ────────────────────────────────────────────────────────────────
+
+/** Unauthenticated badge verification against the real earned-achievement row. */
+export const badges = {
+  myAchievements: async (): Promise<EarnedBadge[]> => {
+    const data = await request<Paginated<EarnedBadge>>('/my-achievements/');
+    return unwrapList(data);
+  },
+
+  verify: (identifier: string) =>
+    request<BadgeVerification>(`/badges/verify/${encodeURIComponent(identifier)}/`),
+
+  // Owner-restricted download of the official vector/raster badge artwork.
+  download: async (
+    identifier: string,
+    format: 'png' | 'svg' = 'png'
+  ): Promise<void> => {
+    const res = await authorizedFetch(
+      `/badges/${encodeURIComponent(identifier)}/download/?format=${format}`
+    );
+    if (!res.ok) throw await readDownloadError(res, format.toUpperCase());
+    triggerBlobDownload(await res.blob(), `code-yaar-${identifier}.${format}`);
+  },
+
+  /**
+   * Public badge artwork URL (used for previews and Open Graph images).
+   * Served by Django from the real record — never a placeholder.
+   */
+  publicImageUrl: (identifier: string): string =>
+    `${API_BASE}/badges/verify/${encodeURIComponent(identifier)}/image.png`,
+
+  /**
+   * Public LinkedIn-ready achievement graphic (badge + branding + verify URL).
+   * `square` = 1200×1200 (default), `wide` = 1200×627 link-preview card.
+   */
+  shareImageUrl: (identifier: string, preset: 'square' | 'wide' = 'square'): string =>
+    `${API_BASE}/badges/verify/${encodeURIComponent(
+      identifier
+    )}/share.png?preset=${preset}`,
+
+  /** Download the LinkedIn share graphic as a standalone PNG file. */
+  downloadShareImage: async (
+    identifier: string,
+    preset: 'square' | 'wide' = 'square'
+  ): Promise<void> => {
+    const res = await fetch(badges.shareImageUrl(identifier, preset));
+    if (!res.ok) throw await readError(res);
+    triggerBlobDownload(await res.blob(), `code-yaar-${identifier}-share-${preset}.png`);
   },
 };
 

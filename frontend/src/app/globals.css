@@ -823,3 +823,74 @@
   border-color: var(--color-cta-green);
   color: var(--color-cta-green-fg);
 }
+
+/* ─── Certificate export & print ───────────────────────────────────────────
+   Printing the viewer emits exactly one A4-landscape page: everything except
+   the certificate sheet is dropped, layout chrome is collapsed so the sheet
+   starts at the page origin, and the 1123 × 794 px canvas equals 297 × 210 mm
+   at 96 dpi. Backgrounds and borders are preserved for a faithful export. */
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 0;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Drop every element that is neither the certificate itself nor an ancestor
+     of it (sidebars, headers, footers, toolbars, page furniture). */
+  body
+    *:not(:has(.certificate-print-root)):not(.certificate-print-root *) {
+    display: none !important;
+  }
+
+  /* Collapse the remaining layout chain: no padding, offsets, tints or
+     animations between the page origin and the sheet. */
+  body :has(.certificate-print-root) {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+    background-image: none !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .certificate-print-root {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .certificate-print-root .cy-cert-viewport {
+    border: 0 !important;
+    background: none !important;
+    background-image: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    border-radius: 0 !important;
+    height: auto !important;
+  }
+
+  .certificate-print-root .cy-cert-box,
+  .certificate-print-root .cy-cert-scale {
+    width: 1123px !important;
+    height: 794px !important;
+    transform: none !important;
+  }
+
+  .cy-no-print {
+    display: none !important;
+  }
+}

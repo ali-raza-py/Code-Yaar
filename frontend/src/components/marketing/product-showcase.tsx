@@ -52,8 +52,8 @@ const features = [
 
 const codeLines = [
   <><span className="text-violet-600 dark:text-violet-300">const</span> <span className="text-sky-700 dark:text-sky-300">projects</span> = [</>,
-  <>  <span className="text-emerald-700 dark:text-emerald-300">"portfolio"</span>,</>,
-  <>  <span className="text-emerald-700 dark:text-emerald-300">"weather-app"</span>,</>,
+  <>  <span className="text-emerald-700 dark:text-emerald-300">&quot;portfolio&quot;</span>,</>,
+  <>  <span className="text-emerald-700 dark:text-emerald-300">&quot;weather-app&quot;</span>,</>,
   <>];</>,
 ];
 
@@ -179,7 +179,7 @@ function PracticePreview() {
           <div className="flex items-center gap-2"><span className="rounded bg-emerald-50 px-2 py-1 text-[9px] font-semibold text-emerald-800 dark:bg-emerald-300/10 dark:text-emerald-200">EASY</span><span className="text-[9px] text-forest-muted">Arrays · 10 XP</span></div>
           <h3 className="mt-4 font-serif text-lg text-forest-ink dark:text-slate-100">Find the first match</h3>
           <p className="mt-2 text-[11px] leading-5 text-forest-muted">Write a function that returns the first number greater than <code className="rounded bg-forest-bg px-1 font-mono text-[10px]">target</code>, or <code className="rounded bg-forest-bg px-1 font-mono text-[10px]">-1</code> if none exists.</p>
-          <div className="mt-4 rounded border border-forest-border bg-[#f7faf7] p-3 dark:border-white/10 dark:bg-white/[0.025]"><p className="font-mono text-[9px] text-forest-muted">findNext([2, 5, 8], 5)</p><p className="mt-1 font-mono text-[10px] text-forest-ink dark:text-slate-200">// returns 8</p></div>
+          <div className="mt-4 rounded border border-forest-border bg-[#f7faf7] p-3 dark:border-white/10 dark:bg-white/[0.025]"><p className="font-mono text-[9px] text-forest-muted">findNext([2, 5, 8], 5)</p><p className="mt-1 font-mono text-[10px] text-forest-ink dark:text-slate-200">{"// returns 8"}</p></div>
           <div className="mt-4 flex items-center justify-between text-[9px] text-forest-muted"><span>YOUR PROGRESS</span><span>4 of 8</span></div>
           <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-forest-bg dark:bg-white/10"><div className="h-full w-1/2 rounded-full bg-forest-accent" /></div>
         </div>

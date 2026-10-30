@@ -27,3 +27,8 @@ frontend/.turbo/
 *.swp
 .DS_Store
 Thumbs.db
+
+# Throwaway diagnostics from local debugging; never commit these
+.tmp_*
+.tmp-*
+*.tmp.log

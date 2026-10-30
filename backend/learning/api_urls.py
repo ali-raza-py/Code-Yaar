@@ -25,6 +25,12 @@ urlpatterns = [
     # Profile stats
     path('profile/stats/', api_views.profile_stats_view, name='api-profile-stats'),
 
+    # Public badge verification + owner downloads
+    path('badges/verify/<str:identifier>/', api_views.verify_badge, name='badge-verify'),
+    path('badges/verify/<str:identifier>/image.png', api_views.public_badge_image, name='badge-verify-image'),
+    path('badges/verify/<str:identifier>/share.png', api_views.public_badge_share_image, name='badge-verify-share-image'),
+    path('badges/<str:identifier>/download/', api_views.download_badge, name='badge-download'),
+
     # Leaderboard
     path('leaderboard/', api_views.leaderboard_view, name='api-leaderboard'),
 
@@ -99,6 +105,9 @@ urlpatterns = [
         api_views.ExerciseViewSet.as_view({'get': 'hint'}),
         name='exercise-hint',
     ),
+
+    # Certificate issuance, download, and public verification
+    path('', include('certificates.urls')),
 
     # Router URLs
     path('', include(router.urls)),

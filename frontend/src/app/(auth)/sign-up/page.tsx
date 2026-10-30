@@ -9,7 +9,7 @@ import { buttonVariants } from "@/components/ui/button-variants";
 import { useAuth } from "@/hooks/use-auth";
 import { FormError, FormField, FormSuccess } from "@/components/auth/form-field";
 import { RedirectIfAuthenticated } from "@/components/auth/require-auth";
-import { auth, describeResendError } from "@/lib/api";
+import { sendResend } from "@/lib/api";
 interface FormState {
   full_name: string;
   username: string;
@@ -124,20 +124,13 @@ export default function SignUpPage() {
                   onClick={async () => {
                     setResendState("sending");
                     setResendError(null);
-                    try {
-                      const result = await auth.resendVerification(created.email);
-                      if (result.verification_email_sent === false) {
-                        setResendState("idle");
-                        setResendError(
-                          "The server could not hand the message to the mail service. Check the API's SMTP settings and try again."
-                        );
-                        return;
-                      }
-                      setResendState("sent");
-                    } catch (caught) {
+                    const outcome = await sendResend(created.email);
+                    if (!outcome.sent) {
                       setResendState("idle");
-                      setResendError(describeResendError(caught));
+                      setResendError(outcome.reason);
+                      return;
                     }
+                    setResendState("sent");
                   }}
                   className="text-xs font-medium text-primary transition-colors hover:text-primary/80 disabled:opacity-60"
                 >

@@ -4,7 +4,8 @@ from rest_framework.response import Response
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import F, Sum, Count
+from django.db.models import F, Sum, Count, Q
+from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
@@ -17,6 +18,7 @@ from .models import (
 )
 from .services.sandbox import get_sandbox
 from .services.xp import award_xp, deduct_xp
+from .services.achievements import award_eligible_achievements
 from .services.completion import evaluate_course_completion
 from .permissions import IsEmailVerified
 from .serializers import (
@@ -55,26 +57,11 @@ class LeaderboardEntrySerializer(serializers.Serializer):
 
 def _award_lesson_xp(user, lesson):
     """Award lesson-completion XP exactly once (guarded by XPTransaction)."""
-    already = XPTransaction.objects.filter(
-        user=user,
-        action='lesson_complete',
-        content_type=ContentType.objects.get_for_model(lesson),
-        object_id=lesson.id,
-    ).exists()
-    if already or lesson.xp_reward <= 0:
-        return 0
-    XPTransaction.objects.create(
-        user=user,
-        amount=lesson.xp_reward,
-        action='lesson_complete',
+    transaction = award_xp(
+        user, lesson.xp_reward, 'lesson_complete', obj=lesson,
         description=f'Lesson completed: {lesson.title}',
-        content_type=ContentType.objects.get_for_model(lesson),
-        object_id=lesson.id,
     )
-    profile, _ = UserProfile.objects.get_or_create(user=user)
-    profile.xp_points += lesson.xp_reward
-    profile.save()
-    return lesson.xp_reward
+    return transaction.amount if transaction else 0
 
 
 # ─── Sandbox snippet execution (lesson code blocks) ──────────────────────
@@ -300,6 +287,7 @@ class LessonViewSet(viewsets.ReadOnlyModelViewSet):
         # Re-evaluate strict, server-side course completion now that lesson
         # state may have changed.
         evaluate_course_completion(user, lesson.chapter.course)
+        award_eligible_achievements(user, lesson=lesson)
 
         remaining = max(total_exercises - solved_exercises, 0)
         return Response({
@@ -470,6 +458,7 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
                 xp_awarded = self._award_xp(request.user, exercise, attempt)
                 self._update_lesson_progress(request.user, exercise.lesson)
                 evaluate_course_completion(request.user, exercise.lesson.chapter.course)
+                award_eligible_achievements(request.user, lesson=exercise.lesson)
 
         return Response({
             'status': result['status'],
@@ -502,7 +491,7 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
         # Deduct XP penalty if hint is used (authenticated learners only)
         if request.user.is_authenticated and next_hint.xp_penalty > 0:
             deduct_xp(
-                request.user, next_hint.xp_penalty, 'hint_used', obj=exercise,
+                request.user, next_hint.xp_penalty, 'hint_used', obj=next_hint,
                 description=f'Hint used on {exercise.title}',
             )
 
@@ -738,6 +727,110 @@ class UserAchievementViewSet(viewsets.ReadOnlyModelViewSet):
         return UserAchievement.objects.filter(user=self.request.user).select_related('achievement')
 
 
+def resolve_badge(identifier: str) -> UserAchievement | None:
+    if not identifier:
+        return None
+    return (
+        UserAchievement.objects.filter(
+            Q(public_id=identifier) | Q(credential_id__iexact=identifier)
+        )
+        .select_related('achievement', 'user')
+        .first()
+    )
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def verify_badge(request, identifier):
+    """Public badge verification against the real earned-achievement row."""
+    badge = resolve_badge(identifier)
+    if not badge:
+        return Response(
+            {'valid': False, 'found': False, 'kind': 'badge',
+             'detail': 'No badge matches this identifier.'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    achievement = badge.achievement
+    from .badge_art import level_label, palette_for
+    _, _, category_label = palette_for(achievement)
+    return Response({
+        'valid': badge.is_valid,
+        'found': True,
+        'kind': 'badge',
+        'public_id': badge.public_id,
+        'credential_id': badge.credential_id,
+        'recipient_name': badge.recipient_name,
+        'title': achievement.title,
+        'description': achievement.description,
+        'category': achievement.category,
+        'category_label': category_label,
+        'level_label': level_label(achievement),
+        'skill_name': achievement.title,
+        'issued_at': badge.earned_at.isoformat() if badge.earned_at else None,
+        'issuer': 'Code Yaar Academy',
+        'status': badge.status,
+        'revoked': badge.status == UserAchievement.Status.REVOKED,
+        'verification_url': badge.verification_url(),
+    })
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def download_badge(request, identifier):
+    """Serve official badge SVG or PNG to the owner (or staff)."""
+    badge = resolve_badge(identifier)
+    if not badge:
+        return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+    if not (request.user == badge.user or request.user.is_staff):
+        return Response({'detail': 'Not allowed.'}, status=status.HTTP_403_FORBIDDEN)
+    from .badge_art import render_badge_png, render_badge_svg
+    fmt = (request.query_params.get('format') or 'png').lower()
+    if fmt == 'svg':
+        svg = render_badge_svg(badge)
+        response = HttpResponse(svg, content_type='image/svg+xml')
+        response['Content-Disposition'] = (
+            f'attachment; filename="code-yaar-{badge.credential_id}.svg"'
+        )
+        return response
+    buf = render_badge_png(badge)
+    return FileResponse(
+        buf, as_attachment=True,
+        filename=f'code-yaar-{badge.credential_id}.png',
+        content_type='image/png',
+    )
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def public_badge_image(request, identifier):
+    """Public PNG for Open Graph / verification pages. 404 if unknown."""
+    badge = resolve_badge(identifier)
+    if not badge or not badge.is_valid:
+        return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+    from .badge_art import render_badge_png
+    buf = render_badge_png(badge)
+    return FileResponse(buf, content_type='image/png')
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def public_badge_share_image(request, identifier):
+    """Public LinkedIn-ready achievement graphic (badge + branding + verify URL).
+
+    ``?preset=square`` (default, 1200×1200) or ``?preset=wide`` (1200×627).
+    Rendered from the real earned-achievement row; 404 if unknown/invalid.
+    """
+    badge = resolve_badge(identifier)
+    if not badge or not badge.is_valid:
+        return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+    from .badge_share_art import render_badge_share_png
+    preset = (request.query_params.get('preset') or 'square').lower()
+    if preset not in ('square', 'wide'):
+        preset = 'square'
+    buf = render_badge_share_png(badge, preset)
+    return FileResponse(buf, content_type='image/png')
+
+
 # ─── Certification & Skill Views ────────────────────────────────────────────
 
 class CertificationViewSet(viewsets.ReadOnlyModelViewSet):
@@ -881,7 +974,37 @@ def profile_stats_view(request):
     achievements_earned = UserAchievement.objects.filter(
         user=user
     ).select_related('achievement').count()
-    total_achievements = Achievement.objects.filter(is_active=True).count()
+    all_achievements = Achievement.objects.filter(is_active=True)
+    total_achievements = all_achievements.count()
+    from .badge_art import level_label, palette_for
+    earned_records = {
+        item.achievement_id: item
+        for item in UserAchievement.objects.filter(
+            user=user, achievement__is_active=True,
+        )
+    }
+    achievements_data = []
+    for achievement in all_achievements:
+        record = earned_records.get(achievement.id)
+        _, _, category_label = palette_for(achievement)
+        achievements_data.append({
+            'id': achievement.id,
+            'slug': achievement.slug,
+            'title': achievement.title,
+            'description': achievement.description,
+            'icon': achievement.icon,
+            'category': achievement.category,
+            'category_label': category_label,
+            'level_label': level_label(achievement),
+            'xp_bonus': achievement.xp_bonus,
+            'earned': record is not None,
+            'earned_at': record.earned_at.isoformat() if record else None,
+            'public_id': record.public_id if record else None,
+            'credential_id': record.credential_id if record else None,
+            'recipient_name': record.recipient_name if record else None,
+            'verification_url': record.verification_url() if record else None,
+            'status': record.status if record else None,
+        })
 
     # Skills
     skills = UserSkill.objects.filter(user=user).select_related('skill')
@@ -953,6 +1076,7 @@ def profile_stats_view(request):
         },
         'xp_breakdown': xp_breakdown,
         'xp_history': xp_history,
+        'achievements': achievements_data,
         'skills': skills_data,
         'certifications': certs_data,
         'active_enrollments': active_enrollments_data,

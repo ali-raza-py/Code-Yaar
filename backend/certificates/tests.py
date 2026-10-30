@@ -8,6 +8,7 @@ from rest_framework.test import APIClient
 from learning.models import (
     CareerTrack, Course, Chapter, Lesson, Exercise,
     Enrollment, LessonProgress, ExerciseAttempt,
+    Certification as LearningCertification, UserCertification,
 )
 from . import services
 from .models import Certificate, CertificateEvent
@@ -112,6 +113,19 @@ class IssuanceTests(CertificateFactoryMixin, TestCase):
         self.assertEqual(
             Certificate.objects.filter(user=self.user, course=self.course).count(), 1)
 
+    def test_issue_syncs_profile_certification_record(self):
+        cert = services.issue_certificate(self.user, self.course)
+
+        learning_cert = LearningCertification.objects.get(
+            track=self.course.track,
+            title=f'{self.course.title} Certificate',
+        )
+        self.assertTrue(UserCertification.objects.filter(
+            user=self.user,
+            certification=learning_cert,
+            credential_id=cert.credential_id,
+        ).exists())
+
     def test_issue_blocks_when_ineligible(self):
         user2 = User.objects.create_user('partial', password='p')
         Enrollment.objects.create(user=user2, course=self.course)
@@ -119,9 +133,10 @@ class IssuanceTests(CertificateFactoryMixin, TestCase):
             services.issue_certificate(user2, self.course)
         self.assertFalse(Certificate.objects.filter(user=user2).exists())
 
-    def test_verification_url_contains_public_id(self):
+    def test_verification_url_contains_credential_id(self):
         cert = services.issue_certificate(self.user, self.course)
-        self.assertIn(cert.public_id, cert.verification_url())
+        self.assertIn(cert.credential_id, cert.verification_url())
+        self.assertIn('/verify/certificate/', cert.verification_url())
 
 
 class RevocationReissueTests(CertificateFactoryMixin, TestCase):
@@ -237,6 +252,28 @@ class CertificateAPITests(CertificateFactoryMixin, TestCase):
         allowed = {
             'valid', 'found', 'public_id', 'credential_id', 'student_name',
             'course_title', 'issued_at', 'completion_verified_at', 'status',
-            'revoked', 'superseded',
+            'revoked', 'superseded', 'issuer', 'verification_url',
+            'qr_data_url', 'final_score', 'kind',
         }
         self.assertTrue(set(resp.data.keys()) <= allowed, set(resp.data.keys()) - allowed)
+        self.assertNotIn('email', resp.data)
+        self.assertNotIn('user', resp.data)
+
+    def test_verify_accepts_credential_id(self):
+        self.complete_lessons(self.user, self.lessons)
+        self.pass_assessment(self.user, self.assessments, 4)
+        cert = services.issue_certificate(self.user, self.course)
+        resp = self.client.get(f'/api/certificates/verify/{cert.credential_id}/')
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertTrue(resp.data['valid'])
+
+    def test_png_download_is_owner_restricted(self):
+        self.complete_lessons(self.user, self.lessons)
+        self.pass_assessment(self.user, self.assessments, 4)
+        cert = services.issue_certificate(self.user, self.course)
+        self.client.force_authenticate(user=self.user)
+        ok = self.client.get(f'/api/certificates/{cert.public_id}/download/?format=png')
+        self.assertEqual(ok.status_code, status.HTTP_200_OK)
+        self.assertEqual(ok.get('Content-Type'), 'image/png')
+        # FileResponse streams its body; join it before asserting the magic bytes.
+        self.assertTrue(b''.join(ok.streaming_content).startswith(b'\x89PNG'))

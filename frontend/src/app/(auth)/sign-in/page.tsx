@@ -7,7 +7,7 @@ import { motion } from "framer-motion";
 import { ArrowRight, FlaskConical, MailWarning } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
-import { auth, describeResendError } from "@/lib/api";
+import { sendResend } from "@/lib/api";
 import { FormError, FormField } from "@/components/auth/form-field";
 import { RedirectIfAuthenticated, readNextPath } from "@/components/auth/require-auth";
 
@@ -115,22 +115,16 @@ export default function SignInPage() {
                       if (!verifyTarget) return;
                       setResend("sending");
                       setResendError(null);
-                      try {
-                        const result = await auth.resendVerification(verifyTarget);
-                        if (result.verification_email_sent === false) {
-                          // The API reached its mail transport and the transport
-                          // refused the message: say so rather than claim success.
-                          setResend("idle");
-                          setResendError(
-                            "The server could not hand the message to the mail service. Check the API's SMTP settings and try again."
-                          );
-                          return;
-                        }
-                        setResend("sent");
-                      } catch (caught) {
+                      const outcome = await sendResend(verifyTarget);
+                      if (!outcome.sent) {
+                        // Reached the API and still no mail: the transport
+                        // refused it, the sender is unconfigured, or the request
+                        // failed. None of those is "on its way".
                         setResend("idle");
-                        setResendError(describeResendError(caught));
+                        setResendError(outcome.reason);
+                        return;
                       }
+                      setResend("sent");
                     }}
                     className="text-left text-xs font-semibold text-primary transition-colors hover:text-primary/80 disabled:opacity-60"
                   >

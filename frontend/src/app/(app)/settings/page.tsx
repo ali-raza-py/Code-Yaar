@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, MailWarning, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { ApiError, auth } from "@/lib/api";
+import { ApiError, auth, sendResend } from "@/lib/api";
 
 type Tab = "account" | "profile" | "password" | "preferences";
 
@@ -97,6 +97,7 @@ export default function SettingsPage() {
 
   // Email verification
   const [resendState, setResendState] = useState<"idle" | "sending" | "sent">("idle");
+  const [resendError, setResendError] = useState<string | null>(null);
 
   // Preferences stay local to this browser; they are not account data.
   const [prefs, setPrefs] = useState({
@@ -256,13 +257,16 @@ export default function SettingsPage() {
 
   const handleResendVerification = useCallback(async () => {
     setResendState("sending");
-    try {
-      await auth.resendVerification();
-    } catch {
-      /* the API always answers generically; nothing useful to surface */
-    } finally {
-      setResendState("sent");
+    setResendError(null);
+    // Signed in, so the API does report whether this send reached the mail
+    // service — "Link sent" has to be earned rather than assumed.
+    const outcome = await sendResend();
+    if (!outcome.sent) {
+      setResendState("idle");
+      setResendError(outcome.reason);
+      return;
     }
+    setResendState("sent");
   }, []);
 
   const handleSavePrefs = useCallback(() => {
@@ -322,18 +326,25 @@ export default function SettingsPage() {
               </p>
             </div>
           </div>
-          {resendState === "sent" ? (
-            <span className="text-xs font-medium text-amber-800">Link sent — check your inbox.</span>
-          ) : (
-            <button
-              type="button"
-              onClick={handleResendVerification}
-              disabled={resendState === "sending"}
-              className="shrink-0 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 transition-colors hover:bg-amber-100 disabled:opacity-60"
-            >
-              {resendState === "sending" ? "Sending…" : "Resend link"}
-            </button>
-          )}
+          <div className="flex shrink-0 flex-col items-start gap-1.5">
+            {resendState === "sent" ? (
+              <span className="text-xs font-medium text-amber-800">Link sent — check your inbox.</span>
+            ) : (
+              <button
+                type="button"
+                onClick={handleResendVerification}
+                disabled={resendState === "sending"}
+                className="shrink-0 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 transition-colors hover:bg-amber-100 disabled:opacity-60"
+              >
+                {resendState === "sending" ? "Sending…" : "Resend link"}
+              </button>
+            )}
+            {resendError && (
+              <p className="text-xs font-medium text-destructive" role="alert">
+                {resendError}
+              </p>
+            )}
+          </div>
         </div>
       )}
 

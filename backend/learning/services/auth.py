@@ -383,6 +383,30 @@ RENDER_ONLY_BACKENDS = frozenset({
 })
 
 
+def mail_transport_ready():
+    """True when auth email can actually leave this server right now.
+
+    This describes the configured transport, never the account being asked
+    about, so it is safe to hand to anonymous callers: every request gets the
+    same answer, and no address, name or credential is involved. Without it the
+    resend endpoint — which is deliberately vague about accounts — could only
+    report success, and a server whose mail is disabled would look healthy to
+    the sign-in screen that cannot authenticate and therefore cannot be told
+    about a specific delivery failure.
+    """
+    backend = mailers.default
+    backend_name = type(backend).__module__
+    if backend_name in RENDER_ONLY_BACKENDS:
+        return False
+    if backend_name == 'django.core.mail.backends.smtp':
+        # SMTP without a login is always refused, and nothing raises until the
+        # message is opened, so the credentials are checked up front.
+        return bool(
+            getattr(backend, 'username', '') and getattr(backend, 'password', '')
+        )
+    return True
+
+
 def _send_email(subject, body, recipient):
     if not recipient:
         logger.warning('Skipping auth email "%s": no recipient address', subject)

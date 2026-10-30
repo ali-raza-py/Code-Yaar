@@ -22,6 +22,11 @@ urlpatterns = [
         name='verify',
     ),
     path(
+        'certificates/verify/<str:public_id>/image.png',
+        views.public_certificate_image,
+        name='verify-image',
+    ),
+    path(
         'certificates/<str:public_id>/download/',
         views.download_certificate,
         name='download',

@@ -14,15 +14,36 @@ that:
 """
 
 import logging
+from datetime import timedelta
 
 from django.contrib.contenttypes.models import ContentType
 from django.db import IntegrityError, transaction
 from django.db.models import F
 from django.db.models.functions import Greatest
+from django.utils import timezone
 
 from ..models import UserProfile, XPTransaction
 
 logger = logging.getLogger(__name__)
+XP_PER_LEVEL = 500
+
+
+def _update_profile_progress(profile, *, record_activity=False):
+    profile.refresh_from_db(fields=['xp_points', 'level', 'streak_days', 'last_active_at'])
+    level = max(1, profile.xp_points // XP_PER_LEVEL + 1)
+    updates = {'level': level}
+
+    if record_activity:
+        now = timezone.now()
+        today = timezone.localdate(now)
+        previous_day = timezone.localtime(profile.last_active_at).date() if profile.last_active_at else None
+        if previous_day != today:
+            profile.streak_days = profile.streak_days + 1 if previous_day == today - timedelta(days=1) else 1
+            profile.last_active_at = now
+            updates.update(streak_days=profile.streak_days, last_active_at=now)
+
+    if profile.level != level or len(updates) > 1:
+        UserProfile.objects.filter(pk=profile.pk).update(**updates)
 
 
 @transaction.atomic
@@ -42,6 +63,8 @@ def award_xp(user, amount: int, action: str, *, obj=None,
     if amount <= 0:
         return None
 
+    UserProfile.objects.get_or_create(user=user)
+    profile = UserProfile.objects.select_for_update().get(user=user)
     content_type = ContentType.objects.get_for_model(obj) if obj is not None else None
     object_id = obj.pk if obj is not None else None
 
@@ -53,14 +76,17 @@ def award_xp(user, amount: int, action: str, *, obj=None,
         return None
 
     try:
-        xp_tx = XPTransaction.objects.create(
-            user=user,
-            amount=amount,
-            action=action,
-            description=description,
-            content_type=content_type,
-            object_id=object_id,
-        )
+        # Isolate a conflicting insert in a savepoint so the surrounding
+        # transaction remains usable after PostgreSQL rejects a duplicate.
+        with transaction.atomic():
+            xp_tx = XPTransaction.objects.create(
+                user=user,
+                amount=amount,
+                action=action,
+                description=description,
+                content_type=content_type,
+                object_id=object_id,
+            )
     except IntegrityError:
         # Lost a race against an identical concurrent award — the winner has
         # already recorded (and applied) the transaction. Never award twice.
@@ -72,6 +98,7 @@ def award_xp(user, amount: int, action: str, *, obj=None,
         return None
 
     UserProfile.objects.filter(user=user).update(xp_points=F('xp_points') + amount)
+    _update_profile_progress(profile, record_activity=True)
     return xp_tx
 
 
@@ -89,15 +116,39 @@ def deduct_xp(user, amount: int, action: str, *, obj=None,
     content_type = ContentType.objects.get_for_model(obj) if obj is not None else None
     object_id = obj.pk if obj is not None else None
 
-    xp_tx = XPTransaction.objects.create(
-        user=user,
-        amount=-amount,
-        action=action,
-        description=description,
-        content_type=content_type,
-        object_id=object_id,
-    )
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+    profile = UserProfile.objects.select_for_update().get(pk=profile.pk)
+    is_unique_deduction = action == 'hint_used' and content_type is not None and object_id is not None
+    if (action in XPTransaction.UNIQUE_AWARD_ACTIONS or is_unique_deduction) and XPTransaction.objects.filter(
+        user=user, action=action, content_type=content_type, object_id=object_id,
+    ).exists():
+        return None
+
+    actual_deduction = min(amount, profile.xp_points)
+    if actual_deduction <= 0:
+        return None
+
+    try:
+        with transaction.atomic():
+            xp_tx = XPTransaction.objects.create(
+                user=user,
+                amount=-actual_deduction,
+                action=action,
+                description=description,
+                content_type=content_type,
+                object_id=object_id,
+            )
+    except IntegrityError:
+        logger.info(
+            'Suppressed duplicate XP deduction: user=%s action=%s ref=%s:%s',
+            getattr(user, 'pk', user), action,
+            getattr(content_type, 'model', None), object_id,
+        )
+        return None
+
     UserProfile.objects.filter(user=user).update(
-        xp_points=Greatest(F('xp_points') - amount, 0),
+        xp_points=Greatest(F('xp_points') - actual_deduction, 0),
     )
+    _update_profile_progress(profile)
+    return xp_tx
     return xp_tx

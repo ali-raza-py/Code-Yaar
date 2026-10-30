@@ -305,6 +305,12 @@ else:
 
 # Django REST Framework
 REST_FRAMEWORK = {
+    # The `format` query parameter is reserved by the download endpoints
+    # (certificates/badges use `?format=pdf|png|svg`) to pick a file type, so it
+    # must NOT double as DRF's content-negotiation override — otherwise DRF tries
+    # to find a renderer named "pdf", fails, and returns 404 before the view
+    # runs. Representation is negotiated purely via the Accept header instead.
+    'URL_FORMAT_OVERRIDE': None,
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
         'rest_framework.authentication.SessionAuthentication',

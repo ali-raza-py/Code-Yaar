@@ -9,7 +9,15 @@ from dataclasses import dataclass, field
 from django.db import transaction
 from django.utils import timezone
 
-from learning.models import Course, Enrollment, Exercise, Lesson, LessonProgress
+from learning.models import (
+    Course,
+    Enrollment,
+    Exercise,
+    Lesson,
+    LessonProgress,
+    Certification as LearningCertification,
+    UserCertification,
+)
 
 from .models import Certificate, CertificateEvent
 
@@ -145,6 +153,25 @@ class CertificateNotEligible(Exception):
         super().__init__('Certificate requirements not met.')
 
 
+def _sync_profile_certification(user, course: Course, certificate: Certificate) -> None:
+    """Keep the learner-facing certification record aligned with the real issued certificate."""
+    learning_cert, _ = LearningCertification.objects.get_or_create(
+        track=course.track,
+        title=f'{course.title} Certificate',
+        defaults={
+            'description': f'Certificate of completion for {course.title}.',
+            'badge_icon': '',
+            'passing_score': course.certification_passing_score,
+            'is_active': True,
+        },
+    )
+    UserCertification.objects.update_or_create(
+        user=user,
+        certification=learning_cert,
+        defaults={'credential_id': certificate.credential_id},
+    )
+
+
 @transaction.atomic
 def issue_certificate(user, course: Course, *, issued_by=None,
                       automatically: bool = True) -> Certificate:
@@ -169,6 +196,7 @@ def issue_certificate(user, course: Course, *, issued_by=None,
         status__in=[Certificate.Status.ACTIVE, Certificate.Status.SUPERSEDED],
     ).first()
     if existing:
+        _sync_profile_certification(user, course, existing)
         return existing
 
     student_name = (
@@ -196,6 +224,7 @@ def issue_certificate(user, course: Course, *, issued_by=None,
         reason='Course completion requirements verified.',
         snapshot=_snapshot(certificate),
     )
+    _sync_profile_certification(user, course, certificate)
 
     # Generate the PDF (best effort — a rendering failure must not un-issue
     # the record, which remains verifiable from the database regardless).

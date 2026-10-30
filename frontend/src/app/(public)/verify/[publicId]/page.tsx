@@ -2,135 +2,119 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import { ApiError, certificates as certificatesApi, type PublicVerification } from '@/lib/api';
+import { useParams, useRouter } from 'next/navigation';
+import { ApiError, badges as badgesApi, certificates as certificatesApi } from '@/lib/api';
 
-function formatDate(iso: string | undefined | null) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
-}
+type Resolution =
+  | { kind: 'pending' }
+  | { kind: 'certificate'; id: string }
+  | { kind: 'badge'; id: string }
+  | { kind: 'missing' }
+  | { kind: 'unavailable' };
 
-export default function VerifyCertificatePage() {
+/**
+ * Legacy `/verify/<id>` links resolve here: look the identifier up in both
+ * registries and forward to the canonical, metadata-rich route
+ * (`/verify/certificate/<id>` or `/verify/badge/<id>`). If the identifier
+ * belongs to neither registry we say so instead of pretending it is valid.
+ */
+export default function LegacyVerificationResolver() {
   const params = useParams<{ publicId: string }>();
+  const router = useRouter();
   const publicId = params.publicId;
-  const [data, setData] = useState<PublicVerification | null>(null);
-  const [notFound, setNotFound] = useState(false);
-  const [networkIssue, setNetworkIssue] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [resolution, setResolution] = useState<Resolution>({ kind: 'pending' });
 
   useEffect(() => {
     if (!publicId) return;
     let cancelled = false;
     (async () => {
       try {
-        const res = await certificatesApi.verify(publicId);
-        if (!cancelled) setData(res);
+        const cert = await certificatesApi.verify(publicId);
+        if (cancelled) return;
+        if (cert.found && cert.credential_id) {
+          setResolution({ kind: 'certificate', id: cert.credential_id });
+          router.replace(`/verify/certificate/${encodeURIComponent(cert.credential_id)}`);
+          return;
+        }
+      } catch (e) {
+        if (e instanceof ApiError && e.status !== 404) {
+          if (!cancelled) setResolution({ kind: 'unavailable' });
+          return;
+        }
+      }
+
+      try {
+        const badge = await badgesApi.verify(publicId);
+        if (cancelled) return;
+        if (badge.found && badge.credential_id) {
+          setResolution({ kind: 'badge', id: badge.credential_id });
+          router.replace(`/verify/badge/${encodeURIComponent(badge.credential_id)}`);
+          return;
+        }
+        if (!cancelled) setResolution({ kind: 'missing' });
       } catch (e) {
         if (cancelled) return;
-        if (e instanceof ApiError && e.status === 404) setNotFound(true);
-        else setNetworkIssue(true);
-      } finally {
-        if (!cancelled) setLoading(false);
+        if (e instanceof ApiError && e.status === 404) setResolution({ kind: 'missing' });
+        else setResolution({ kind: 'unavailable' });
       }
     })();
     return () => { cancelled = true; };
-  }, [publicId]);
+  }, [publicId, router]);
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-16 sm:px-6">
-      <div className="mb-6 text-center">
-        <h1 className="text-3xl font-bold tracking-tight text-foreground">
-          Certificate Verification
-        </h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          This page reflects the Code-Yaar registry at the moment you loaded it.
-        </p>
-      </div>
+    <div className="mx-auto max-w-2xl px-4 py-16 text-center sm:px-6">
+      <div className="card-hairline p-10">
+        {resolution.kind === 'pending' && (
+          <>
+            <div className="mx-auto h-10 w-10 animate-spin rounded-full border-2 border-muted border-t-primary" />
+            <p className="mt-4 text-sm text-muted-foreground">
+              Checking the Code Yaar credential registry…
+            </p>
+          </>
+        )}
 
-      {loading ? (
-        <div className="card-hairline animate-pulse p-10">
-          <div className="mx-auto h-24 w-24 rounded-full bg-muted" />
-          <div className="mx-auto mt-6 h-4 w-2/3 rounded bg-muted" />
-          <div className="mx-auto mt-3 h-4 w-1/2 rounded bg-muted" />
-        </div>
-      ) : networkIssue ? (
-        <div className="card-hairline p-10 text-center">
-          <h2 className="text-lg font-semibold text-foreground">Verification service unreachable</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Could not contact the certificate registry. Please try again later.
+        {resolution.kind === 'certificate' || resolution.kind === 'badge' ? (
+          <p className="text-sm text-muted-foreground">
+            Credential found — opening the verification page…
           </p>
-        </div>
-      ) : notFound || !data ? (
-        <div className="card-hairline border-red-300 p-10 text-center">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-50 text-3xl">
-            ✕
-          </div>
-          <h2 className="mt-4 text-lg font-semibold text-foreground">Certificate not found</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            No certificate exists with identifier{' '}
-            <span className="font-mono">{publicId}</span>. It may have been entered
-            incorrectly — or it was never issued by Code-Yaar.
-          </p>
-        </div>
-      ) : !data.valid ? (
-        <div className="card-hairline border-red-300 p-10 text-center">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-50 text-3xl">
-            {data.revoked ? '⊘' : '↻'}
-          </div>
-          <h2 className="mt-4 text-lg font-semibold text-foreground">
-            {data.revoked ? 'Certificate revoked' : 'Certificate superseded'}
-          </h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {data.student_name} · {data.course_title}
-          </p>
-          <p className="mt-3 text-sm text-muted-foreground">
-            {data.revoked
-              ? 'This certificate was withdrawn by the issuing body and is no longer valid.'
-              : 'This certificate was replaced by a corrected re-issuance. Use the latest credential.'}
-          </p>
-        </div>
-      ) : (
-        <div className="card-hairline p-10 text-center">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-success/10 text-3xl text-success">
-            ✓
-          </div>
-          <h2 className="mt-4 text-xl font-bold text-foreground">Certificate is valid</h2>
-          <p className="mt-1 text-xs font-medium uppercase tracking-wide text-success">
-            Verified by Code-Yaar Academy
-          </p>
+        ) : null}
 
-          <div className="mt-8 rounded-card border border-border bg-background p-6 text-left">
-            <p className="text-sm text-muted-foreground">This certifies that</p>
-            <p className="mt-1 text-xl font-bold text-foreground">{data.student_name}</p>
-            <p className="mt-3 text-sm text-muted-foreground">has successfully completed</p>
-            <p className="mt-1 text-lg font-semibold text-foreground">{data.course_title}</p>
+        {resolution.kind === 'missing' && (
+          <>
+            <h1 className="text-xl font-bold text-foreground">Credential not found</h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              No certificate or badge matches{' '}
+              <span className="font-mono">{publicId}</span>. It may have been
+              mistyped, or it was never issued by Code Yaar Academy.
+            </p>
+          </>
+        )}
 
-            <dl className="mt-6 grid grid-cols-1 gap-3 border-t border-border pt-4 text-sm sm:grid-cols-2">
-              <div>
-                <dt className="text-muted-foreground">Credential ID</dt>
-                <dd className="mt-0.5 font-mono text-foreground">{data.credential_id}</dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">Issue date</dt>
-                <dd className="mt-0.5 text-foreground">{formatDate(data.issued_at)}</dd>
-              </div>
-            </dl>
-          </div>
+        {resolution.kind === 'unavailable' && (
+          <>
+            <h1 className="text-xl font-bold text-foreground">
+              Verification service unavailable
+            </h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              We could not reach the Code Yaar registry. Please try again shortly.
+            </p>
+          </>
+        )}
 
-          <p className="mt-6 break-all font-mono text-xs text-muted-foreground">
-            {publicId}
-          </p>
+        <div className="mt-6 flex flex-wrap justify-center gap-3">
+          <Link
+            href="/"
+            className="focus-ring inline-flex min-h-10 items-center rounded-lg bg-cta px-4 py-2 text-sm font-semibold text-white hover:bg-cta-hover"
+          >
+            Code Yaar home
+          </Link>
+          <Link
+            href="/learn?view=courses"
+            className="focus-ring inline-flex min-h-10 items-center rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted"
+          >
+            Explore courses
+          </Link>
         </div>
-      )}
-
-      <div className="mt-8 text-center">
-        <Link href="/" className="text-sm font-medium text-primary hover:underline">
-          ← Back to Code-Yaar
-        </Link>
       </div>
     </div>
   );

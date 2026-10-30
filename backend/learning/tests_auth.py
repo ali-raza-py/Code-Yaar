@@ -9,8 +9,10 @@ of the authentication layer.
 """
 
 import re
+import sys
 from datetime import timedelta
 from io import StringIO
+from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth.models import Group, User
@@ -28,7 +30,7 @@ from .models import (
     Enrollment, PasswordResetToken, UserProfile, hash_auth_token,
 )
 from .services.auth import (
-    ADMIN_GROUP, INSTRUCTOR_GROUP, STUDENT_GROUP, user_role,
+    ADMIN_GROUP, INSTRUCTOR_GROUP, STUDENT_GROUP, mail_transport_ready, user_role,
 )
 
 PASSWORD = 'Learn-Python-2026!'
@@ -44,6 +46,11 @@ def extract_token(message, path):
     return match.group(1) if match else None
 
 
+# The verification gate follows the mail transport in `settings.py`, so a
+# developer's real `.env` (SMTP + App Password) would arm it inside the test run
+# and change what registration and login return. Tests therefore pin the policy
+# explicitly; `EnforcedVerificationTests` opts back in to exercise the gate.
+@override_settings(AUTH_REQUIRE_EMAIL_VERIFICATION=False)
 class AuthAPITestCase(TestCase):
     """Shared client helpers for the authentication endpoints."""
 
@@ -770,11 +777,24 @@ class RBACTests(AuthAPITestCase):
 
 class ThrottleTests(AuthAPITestCase):
     def test_login_is_rate_limited(self):
+        from unittest import mock
+        from rest_framework.throttling import SimpleRateThrottle
+
         User.objects.create_user(username='throttled', password=PASSWORD)
 
-        statuses = []
-        for _ in range(11):
-            statuses.append(self.sign_in('throttled', 'Wrong-Password-9!').status_code)
+        # Freeze the throttle's clock: the 10/min window ages entries by wall
+        # time, so on a loaded machine the eleven requests could straddle the
+        # 60s duration and drop history early. A fixed timer makes the count
+        # exact while still exercising the real cache-backed counter.
+        frozen = {'now': 1_700_000_000.0}
+        with mock.patch.object(
+            SimpleRateThrottle, 'timer', classmethod(lambda cls: frozen['now'])
+        ):
+            statuses = []
+            for _ in range(11):
+                statuses.append(
+                    self.sign_in('throttled', 'Wrong-Password-9!').status_code
+                )
 
         self.assertEqual(statuses[:10], [status.HTTP_401_UNAUTHORIZED] * 10)
         self.assertEqual(statuses[10], status.HTTP_429_TOO_MANY_REQUESTS)
@@ -953,3 +973,150 @@ class MailCheckCommandTests(TestCase):
 
         self.assertIn('password', str(caught.exception))
         self.assertEqual(len(mail.outbox), 0)
+
+
+# ─── Delivery honesty ───────────────────────────────────────────────────────
+
+
+@override_settings(
+    MAILERS={
+        'default': {
+            'BACKEND': 'django.core.mail.backends.console.EmailBackend',
+        },
+    }
+)
+class RenderOnlyBackendTests(AuthAPITestCase):
+    """A transport that only prints must never be reported as delivered.
+
+    This is the failure that makes an email outage invisible: the console
+    backend returns "1 message sent" because nothing raised, so a naive
+    implementation records success while no mail ever leaves the machine.
+    """
+
+    def send(self, **kwargs):
+        """Run a request with the console backend's stdout noise swallowed."""
+        with patch.object(sys, 'stdout', new_callable=StringIO):
+            return self.register(**kwargs)
+
+    def test_registration_reports_that_no_mail_left_the_server(self):
+        response = self.send()
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertIs(response.data['verification_email_sent'], False)
+        # The locmem outbox stays empty because nothing was captured: the
+        # message went to a terminal, not to a mail server.
+        self.assertEqual(len(mail.outbox), 0)
+
+        event = AuthenticationAuditLog.objects.filter(
+            event=AuthenticationAuditLog.Event.EMAIL_VERIFICATION_SENT
+        ).latest('id')
+        self.assertIs(event.metadata['delivered'], False)
+
+    def test_resend_reports_the_delivery_failure_to_the_account_owner(self):
+        signed = self.send()
+        self.use_access(signed.data['access'])
+
+        with patch.object(sys, 'stdout', new_callable=StringIO):
+            response = self.client.post(
+                '/api/auth/resend-verification/', {}, format='json'
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertIs(response.data['verification_email_sent'], False)
+
+    def test_anonymous_resend_admits_that_no_mail_can_leave(self):
+        """The sign-in button resends anonymously.
+
+        It can never be handed `verification_email_sent` — that would make the
+        endpoint an account oracle — so without a transport-level answer it can
+        only ever report success, which is how a console-backend server kept
+        telling the screen "a link is on its way" while printing it locally.
+        """
+        self.signed_in()
+
+        with patch.object(sys, 'stdout', new_callable=StringIO):
+            response = self.client.post(
+                '/api/auth/resend-verification/',
+                {'email': 'tlearner@example.com'},
+                format='json',
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertIs(response.data['email_delivery_enabled'], False)
+        self.assertNotIn('verification_email_sent', response.data)
+
+
+class ResendDeliveryReportingTests(AuthAPITestCase):
+    """Who is told what, without turning the endpoint into an oracle."""
+
+    def test_the_account_owner_is_told_whether_the_mail_was_delivered(self):
+        signed = self.signed_in()
+        self.use_access(signed.data['access'])
+
+        response = self.client.post(
+            '/api/auth/resend-verification/', {}, format='json'
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertIs(response.data['verification_email_sent'], True)
+        self.assertIs(response.data['email_delivery_enabled'], True)
+        self.assertEqual(len(mail.outbox), 2)
+
+    def test_anonymous_callers_never_receive_the_delivery_flag(self):
+        self.signed_in()
+        mail.outbox.clear()
+
+        response = self.client.post(
+            '/api/auth/resend-verification/',
+            {'email': 'tlearner@example.com'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        self.assertNotIn('verification_email_sent', response.data)
+
+        # An unknown address gets the byte-identical answer, so the response
+        # cannot be used to probe which emails are registered.
+        unknown = self.client.post(
+            '/api/auth/resend-verification/',
+            {'email': 'nobody-else@example.com'},
+            format='json',
+        )
+        self.assertEqual(unknown.status_code, status.HTTP_200_OK)
+        self.assertEqual(unknown.data, response.data)
+
+
+class MailTransportReadinessTests(AuthAPITestCase):
+    """`mail_transport_ready()` describes the deployment, never the account."""
+
+    def test_render_only_transports_are_not_ready(self):
+        for backend, options in (
+            ('django.core.mail.backends.console.EmailBackend', {}),
+            ('django.core.mail.backends.dummy.EmailBackend', {}),
+            ('django.core.mail.backends.filebased.EmailBackend',
+             {'file_path': 'test-rendered-emails'}),
+        ):
+            with self.subTest(backend=backend), override_settings(
+                MAILERS={'default': {'BACKEND': backend, 'OPTIONS': options}}
+            ):
+                self.assertFalse(mail_transport_ready())
+
+    def test_smtp_without_a_login_is_not_ready(self):
+        with override_settings(MAILERS={'default': {
+            'BACKEND': 'django.core.mail.backends.smtp.EmailBackend',
+            'OPTIONS': {'host': 'localhost', 'port': 587},
+        }}):
+            self.assertFalse(mail_transport_ready())
+
+    def test_smtp_with_a_login_is_ready(self):
+        with override_settings(MAILERS={'default': {
+            'BACKEND': 'django.core.mail.backends.smtp.EmailBackend',
+            'OPTIONS': {'host': 'localhost', 'port': 587,
+                        'username': 'sender@example.com', 'password': 'secret'},
+        }}):
+            self.assertTrue(mail_transport_ready())
+
+    def test_the_test_transport_counts_as_ready(self):
+        # locmem captures messages for assertions instead of printing them, so
+        # the suite must not read its own sends as failures.
+        self.assertTrue(mail_transport_ready())

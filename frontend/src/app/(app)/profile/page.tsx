@@ -2,11 +2,28 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { Award, BookOpen, Braces, Flame, GraduationCap, Medal, Sparkles, Star } from 'lucide-react';
 import { profileStats, ApiError, type ProfileStatsData } from '@/lib/api';
 import { NetworkError } from '@/components/learning/workspace/error-states';
 
 const PROFICIENCY_LABELS = ['', 'Novice', 'Beginner', 'Intermediate', 'Advanced', 'Expert'];
 const PROFICIENCY_COLORS = ['', 'bg-muted text-muted-foreground', 'bg-info/10 text-info', 'bg-success/15 text-success', 'bg-primary/10 text-primary', 'bg-warning/15 text-warning'];
+const BADGE_ICONS = {
+  course: GraduationCap,
+  chapter: BookOpen,
+  streak: Flame,
+  exercise: Braces,
+  skill: Sparkles,
+  special: Award,
+} as const;
+const BADGE_TONES = {
+  course: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+  chapter: 'bg-sky-500/10 text-sky-700 dark:text-sky-300',
+  streak: 'bg-orange-500/10 text-orange-700 dark:text-orange-300',
+  exercise: 'bg-violet-500/10 text-violet-700 dark:text-violet-300',
+  skill: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
+  special: 'bg-primary/10 text-primary',
+} as const;
 
 export default function ProfilePage() {
   const [data, setData] = useState<ProfileStatsData | null>(null);
@@ -86,7 +103,10 @@ export default function ProfilePage() {
         )}
 
         <div className="flex-1">
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">{displayName}</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">{displayName}</h1>
+            {user.username === 'demo' && <span className="rounded-pill border border-info/25 bg-info/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-info">Demo account · sample records</span>}
+          </div>
           <p className="text-sm text-muted-foreground">
             @{user.username} · {profile.role === 'mentor' ? 'Mentor' : 'Student'} · Member since {memberSince}
           </p>
@@ -146,24 +166,50 @@ export default function ProfilePage() {
       {/* Tab Content */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
-          {/* Achievements */}
+          {/* Achievement badges */}
           <section>
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-base font-semibold text-foreground">Achievements</h2>
-              <span className="text-xs text-muted-foreground">{stats.achievements_earned} / {stats.total_achievements} earned</span>
+              <h2 className="text-base font-semibold text-foreground">Achievement badges</h2>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-muted-foreground">{stats.achievements_earned} / {stats.total_achievements} earned</span>
+                <Link href="/achievements" className="focus-ring rounded text-xs font-semibold text-primary hover:underline">View My Achievements</Link>
+                <Link href="/certificates" className="focus-ring rounded text-xs font-semibold text-primary hover:underline">Certificates</Link>
+              </div>
             </div>
-            {stats.achievements_earned > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {Array.from({ length: stats.achievements_earned }).map((_, i) => (
-                  <div key={i} className="flex h-10 w-10 items-center justify-center rounded-full bg-warning/15 text-warning" title="Achievement earned">
-                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 18.75h-9m9 0a3 3 0 013 3h-15a3 3 0 013-3m9 0v-3.375c0-.621-.503-1.125-1.125-1.125h-.871M7.5 18.75v-3.375c0-.621.504-1.125 1.125-1.125h.872m5.007 0H9.497m5.007 0a7.454 7.454 0 01-.982-3.172M9.497 14.25a7.454 7.454 0 00.981-3.172M5.25 4.236c-.982.143-1.954.317-2.916.52A6.003 6.003 0 007.73 9.728M5.25 4.236V4.5c0 2.108.966 3.99 2.48 5.228M5.25 4.236V2.721C7.456 2.41 9.71 2.25 12 2.25c2.291 0 4.545.16 6.75.47v1.516M18.75 4.236c.982.143 1.954.317 2.916.52A6.003 6.003 0 0116.27 9.728M18.75 4.236V4.5c0 2.108-.966 3.99-2.48 5.228" />
-                    </svg>
-                  </div>
-                ))}
+            <p className="mb-3 text-xs text-muted-foreground">Verified learning milestones earned in your Code Yaar journey.</p>
+            {data.achievements.length > 0 ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {data.achievements.map((badge) => {
+                  const Icon = BADGE_ICONS[badge.category as keyof typeof BADGE_ICONS] ?? Medal;
+                  const tone = BADGE_TONES[badge.category as keyof typeof BADGE_TONES] ?? 'bg-muted text-muted-foreground';
+                  return (
+                    <article key={badge.id} className={`flex min-w-0 items-start gap-3 rounded-card border p-3 transition-colors ${badge.earned ? 'border-border bg-card' : 'border-border/70 bg-muted/30 opacity-75'}`}>
+                      <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg ${badge.earned ? tone : 'bg-muted text-muted-foreground'}`}>
+                        <Icon className="h-5 w-5" aria-hidden="true" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                          <h3 className="text-sm font-semibold text-foreground">{badge.title}</h3>
+                          <span className={`text-[10px] font-semibold uppercase tracking-wide ${badge.earned ? 'text-success' : 'text-muted-foreground'}`}>{badge.earned ? 'Earned' : 'Locked'}</span>
+                        </div>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">{badge.description}</p>
+                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+                          <span className="capitalize">{badge.category}</span>
+                          {badge.xp_bonus > 0 && <span className="inline-flex items-center gap-1"><Star className="h-3 w-3 text-warning" /> {badge.xp_bonus} XP</span>}
+                          {badge.earned_at && <time dateTime={badge.earned_at}>Earned {new Date(badge.earned_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</time>}
+                        </div>
+                        {badge.earned && (
+                          <Link href="/achievements" className="focus-ring mt-2 inline-block text-[11px] font-semibold text-primary hover:underline">
+                            View badge &amp; share →
+                          </Link>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">No achievements earned yet. Complete courses and challenges to unlock badges!</p>
+              <p className="text-sm text-muted-foreground">No badges are available yet.</p>
             )}
           </section>
 
