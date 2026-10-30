@@ -19,7 +19,7 @@ after an attempt.
 
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
-from rest_framework.authtoken.models import Token
+from django.utils import timezone
 
 from learning.models import (
     CareerTrack, Course, Chapter, Lesson, Exercise, Hint,
@@ -2456,8 +2456,17 @@ class Command(BaseCommand):
         if demo_created:
             demo_user.set_password(DEMO_PASSWORD)
             demo_user.save()
-        UserProfile.objects.get_or_create(user=demo_user)
-        Token.objects.get_or_create(user=demo_user)
+        if not demo_user.email:
+            demo_user.email = DEMO_EMAIL
+            demo_user.save(update_fields=['email'])
+
+        # The demo account is pre-verified so it can be used immediately, even
+        # when AUTH_REQUIRE_EMAIL_VERIFICATION is switched on.
+        demo_profile, _ = UserProfile.objects.get_or_create(user=demo_user)
+        if not demo_profile.email_verified:
+            demo_profile.email_verified = True
+            demo_profile.email_verified_at = timezone.now()
+            demo_profile.save(update_fields=['email_verified', 'email_verified_at'])
 
         tracks = {}
         for track_spec in (

@@ -12,6 +12,7 @@ import ExercisePanel from '@/components/learning/workspace/exercise-panel';
 import CodeEditor from '@/components/learning/workspace/code-editor';
 import OutputPanel from '@/components/learning/workspace/output-panel';
 import XPBadge from '@/components/learning/workspace/xp-badge';
+import CertificatePanel from '@/components/learning/certificate-panel';
 
 const EDITOR_FILENAMES: Record<string, string> = {
   python: 'main.py',
@@ -21,6 +22,22 @@ const EDITOR_FILENAMES: Record<string, string> = {
 };
 
 type PageError = 'network' | 'not_found' | null;
+
+/**
+ * Run an API call, retrying once when the server cannot be reached at all.
+ * The dev API restarts whenever a backend file is saved, so the first request
+ * after a save can be refused; a second attempt hides that blip instead of
+ * telling the learner the server is down.
+ */
+async function withTransportRetry<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (reason) {
+    if (!(reason instanceof ApiError) || reason.status !== 0) throw reason;
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    return call();
+  }
+}
 
 function Workspace() {
   const params = useParams<{ slug: string }>();
@@ -53,7 +70,8 @@ function Workspace() {
   const [completing, setCompleting] = useState(false);
   const [activeExerciseId, setActiveExerciseId] = useState<number | null>(null);
 
-  // Layout state
+  // Layout state — course navigation starts collapsed so the lesson and the
+  // workspace get the full width; the header button opens it on demand.
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [cursor, setCursor] = useState({ line: 1, col: 1 });
   const [editorPct, setEditorPct] = useState(62);
@@ -66,7 +84,7 @@ function Workspace() {
     const mq = window.matchMedia('(min-width: 1024px)');
     const onChange = () => {
       setIsDesktop(mq.matches);
-      setSidebarOpen(mq.matches); // drawer closed on mobile, expanded on desktop
+      if (mq.matches) setSidebarOpen(true);
     };
     onChange();
     mq.addEventListener('change', onChange);
@@ -213,8 +231,10 @@ function Workspace() {
     setOutput('Running…');
     setResult(null);
     try {
-      const runResult = await exercisesApi.run(exercise.id, code);
-      setOutput(runResult.error ? runResult.error : runResult.output);
+      const runResult = await withTransportRetry(() => exercisesApi.run(exercise.id, code));
+      // A program may legitimately print nothing; say so instead of leaving
+      // the panel on its "run your code" placeholder.
+      setOutput(runResult.error || runResult.output || '(no output)');
     } catch (reason) {
       setOutput('');
       setNotice(reason instanceof ApiError
@@ -319,7 +339,7 @@ function Workspace() {
   // ── Lesson snippet "Run" buttons → real sandbox execution ───────────────
   const runSnippet = useCallback(async (snippet: string, lang: string) => {
     if (!user) throw new Error('Sign in to run code.');
-    const res = await sandbox.execute(snippet, lang as 'python');
+    const res = await withTransportRetry(() => sandbox.execute(snippet, lang as 'python'));
     const combined = `${res.output}${res.error ? `\n${res.error}` : ''}`.trim();
     return combined || '(no output)';
   }, [user]);
@@ -547,6 +567,14 @@ function Workspace() {
                     )}
                   </div>
                 </div>
+                {/* Certificate status belongs at the end of the course, next to
+                    the final quiz that gates it. */}
+                {(activeChapter?.is_final_assessment === true ||
+                  course.progress_percentage === 100) && (
+                  <div className="mx-auto max-w-3xl px-6 pb-8">
+                    <CertificatePanel courseSlug={course.slug} enrolled={course.enrolled} />
+                  </div>
+                )}
               </>
             ) : (
               <div className="flex h-full items-center justify-center p-8">

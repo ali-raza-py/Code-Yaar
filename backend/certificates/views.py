@@ -13,6 +13,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from learning.models import Course
+from learning.permissions import IsEmailVerified
 
 from . import services
 from .models import Certificate
@@ -55,7 +56,7 @@ def course_eligibility(request, slug):
 
 
 @api_view(['POST'])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([permissions.IsAuthenticated, IsEmailVerified])
 def issue_certificate(request, slug):
     """Issue a certificate after the server re-verifies completion.
 

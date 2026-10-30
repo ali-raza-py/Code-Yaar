@@ -108,6 +108,8 @@ export interface Chapter {
   lessons: LessonSummary[];
   progress_percentage: number;
   exercise_count?: number;
+  // True for the closing quiz chapter, which the sidebar always shows last.
+  is_final_assessment?: boolean;
 }
 
 export interface LessonSummary {

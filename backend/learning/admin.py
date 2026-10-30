@@ -1,11 +1,17 @@
 from django.contrib import admin
+from django.contrib.auth import get_user_model
+from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+
 from .models import (
     UserProfile, CareerTrack, Course, Chapter, Lesson, Exercise, Hint,
     Resource, Project, ProjectMilestone, Challenge, Enrollment,
     LessonProgress, ExerciseAttempt, XPTransaction, Achievement,
     UserAchievement, Progress, Certification, UserCertification,
-    Skill, UserSkill,
+    Skill, UserSkill, EmailVerificationToken, PasswordResetToken,
+    AuthenticationAuditLog,
 )
+
+User = get_user_model()
 
 
 # ─── Inlines ────────────────────────────────────────────────────────────────
@@ -73,10 +79,92 @@ class ResourceInline(admin.TabularInline):
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ['user', 'role', 'xp_points', 'level', 'streak_days', 'created_at']
-    list_filter = ['role', 'level']
-    search_fields = ['user__username', 'user__email', 'bio']
+    list_display = [
+        'user', 'role', 'email_verified', 'xp_points', 'level',
+        'streak_days', 'institution', 'created_at',
+    ]
+    list_filter = ['role', 'email_verified', 'education_level', 'level']
+    search_fields = [
+        'user__username', 'user__email', 'user__first_name', 'user__last_name',
+        'institution', 'bio',
+    ]
     raw_id_fields = ['user']
+    readonly_fields = ['email_verified_at', 'created_at', 'updated_at']
+    fieldsets = (
+        ('Account', {'fields': ('user', 'role', 'email_verified', 'email_verified_at')}),
+        ('Student profile', {
+            'fields': (
+                'avatar', 'bio', 'institution', 'education_level',
+                'github_url', 'linkedin_url',
+            ),
+        }),
+        ('Progress', {
+            'fields': ('xp_points', 'streak_days', 'level', 'last_active_at'),
+        }),
+        ('Timestamps', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
+    )
+
+
+class StudentProfileInline(admin.StackedInline):
+    """Edit the platform profile from the standard user page."""
+
+    model = UserProfile
+    can_delete = False
+    verbose_name_plural = 'Student profile'
+    fields = (
+        'role', 'avatar', 'bio', 'institution', 'education_level',
+        'github_url', 'linkedin_url', 'email_verified', 'email_verified_at',
+        'xp_points', 'streak_days', 'level', 'last_active_at',
+    )
+    readonly_fields = ['email_verified_at', 'xp_points', 'streak_days', 'level', 'last_active_at']
+
+
+if admin.site.is_registered(User):
+    admin.site.unregister(User)
+
+
+@admin.register(User)
+class UserAdmin(BaseUserAdmin):
+    """Account admin with verification and role visibility.
+
+    Passwords stay hashed behind Django's standard widget; token hashes are
+    never shown anywhere in the admin.
+    """
+
+    inlines = [StudentProfileInline]
+    list_display = [
+        'username', 'email', 'full_name_display', 'role_display',
+        'email_verified_display', 'is_active', 'is_staff', 'date_joined',
+    ]
+    list_filter = BaseUserAdmin.list_filter + (
+        'profile__email_verified', 'profile__role',
+    )
+    search_fields = ['username', 'email', 'first_name', 'last_name']
+    actions = ['activate_accounts', 'deactivate_accounts']
+
+    @admin.display(description='Name', ordering='first_name')
+    def full_name_display(self, obj):
+        return obj.get_full_name().strip() or '—'
+
+    @admin.display(description='Role', ordering='profile__role')
+    def role_display(self, obj):
+        profile = getattr(obj, 'profile', None)
+        return profile.get_role_display() if profile else 'Student'
+
+    @admin.display(description='Email verified', boolean=True, ordering='profile__email_verified')
+    def email_verified_display(self, obj):
+        profile = getattr(obj, 'profile', None)
+        return bool(profile and profile.email_verified)
+
+    @admin.action(description='Activate selected accounts')
+    def activate_accounts(self, request, queryset):
+        updated = queryset.update(is_active=True)
+        self.message_user(request, f'{updated} account(s) activated.')
+
+    @admin.action(description='Deactivate selected accounts')
+    def deactivate_accounts(self, request, queryset):
+        updated = queryset.exclude(pk=request.user.pk).update(is_active=False)
+        self.message_user(request, f'{updated} account(s) deactivated.')
 
 
 @admin.register(CareerTrack)
@@ -313,3 +401,57 @@ class UserSkillAdmin(admin.ModelAdmin):
     list_filter = ['proficiency', 'skill__category']
     search_fields = ['user__username', 'skill__name']
     raw_id_fields = ['user', 'skill']
+
+
+# ─── Authentication models ──────────────────────────────────────────────────
+
+
+class SingleUseTokenAdmin(admin.ModelAdmin):
+    """Verification/reset tokens — hashes are deliberately never displayed."""
+
+    list_display = ['user', 'created_at', 'expires_at', 'used_at', 'status']
+    list_filter = ['created_at', 'used_at']
+    search_fields = ['user__username', 'user__email']
+    raw_id_fields = ['user']
+    readonly_fields = ['user', 'created_at', 'expires_at', 'used_at']
+    date_hierarchy = 'created_at'
+
+    @admin.display(description='Status')
+    def status(self, obj):
+        if obj.used_at:
+            return 'Used'
+        return 'Expired' if obj.is_expired else 'Active'
+
+    def has_add_permission(self, request):
+        return False
+
+
+@admin.register(EmailVerificationToken)
+class EmailVerificationTokenAdmin(SingleUseTokenAdmin):
+    pass
+
+
+@admin.register(PasswordResetToken)
+class PasswordResetTokenAdmin(SingleUseTokenAdmin):
+    pass
+
+
+@admin.register(AuthenticationAuditLog)
+class AuthenticationAuditLogAdmin(admin.ModelAdmin):
+    """Read-only trail of authentication events for abuse investigations."""
+
+    list_display = ['created_at', 'event', 'user', 'identifier', 'ip_address']
+    list_filter = ['event', 'created_at']
+    search_fields = ['user__username', 'user__email', 'identifier', 'ip_address']
+    raw_id_fields = ['user']
+    readonly_fields = [
+        'user', 'event', 'identifier', 'ip_address', 'user_agent',
+        'metadata', 'created_at',
+    ]
+    date_hierarchy = 'created_at'
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

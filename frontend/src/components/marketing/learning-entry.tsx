@@ -8,6 +8,7 @@ import {
   Target,
 } from "lucide-react";
 import { CourseResumeCard } from "@/components/marketing/course-resume-card";
+import { ProductShowcase } from "@/components/marketing/product-showcase";
 import { TracksStrip } from "@/components/marketing/tracks-strip";
 
 const goals = [
@@ -60,6 +61,8 @@ export function LearningEntry() {
           <CourseResumeCard />
         </div>
       </section>
+
+      <ProductShowcase />
 
       <section className="mx-auto max-w-7xl px-5 py-16 sm:px-8 lg:px-10 lg:py-20">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">

@@ -1,0 +1,593 @@
+﻿..\.venv\Scripts\python.exe : Creating test database for alias 'default'...
+At line:1 char:36
++ ... ar\backend; ..\.venv\Scripts\python.exe manage.py test learning certi ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Creating test d...as 'default'... 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+....F.F.............FF.......FFFFFF.........................EEE.E...........FFF
+FF..EEEEEEEEEEEEEE....F.........F..EEEEEEE.......F.F...............
+======================================================================
+ERROR: test_changes_password_and_starts_a_new_session (learning.tests_auth.Chan
+gePasswordTests.test_changes_password_and_starts_a_new_session)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 638, in 
+setUp
+    self.raw_refresh = self.cookie_value(self.register_response)
+                       ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 105, in 
+cookie_value
+    return response.cookies[name].value
+           ~~~~~~~~~~~~~~~~^^^^^^
+KeyError: 'cy_refresh'
+
+======================================================================
+ERROR: test_rejects_password_mismatch 
+(learning.tests_auth.ChangePasswordTests.test_rejects_password_mismatch)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 638, in 
+setUp
+    self.raw_refresh = self.cookie_value(self.register_response)
+                       ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 105, in 
+cookie_value
+    return response.cookies[name].value
+           ~~~~~~~~~~~~~~~~^^^^^^
+KeyError: 'cy_refresh'
+
+======================================================================
+ERROR: test_requires_the_current_password 
+(learning.tests_auth.ChangePasswordTests.test_requires_the_current_password)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 638, in 
+setUp
+    self.raw_refresh = self.cookie_value(self.register_response)
+                       ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 105, in 
+cookie_value
+    return response.cookies[name].value
+           ~~~~~~~~~~~~~~~~^^^^^^
+KeyError: 'cy_refresh'
+
+======================================================================
+ERROR: test_resend_for_signed_in_user_issues_a_new_token (learning.tests_auth.E
+mailVerificationTests.test_resend_for_signed_in_user_issues_a_new_token)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 504, in 
+test_resend_for_signed_in_user_issues_a_new_token
+    self.use_access(self.register_response.data['access'])
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+KeyError: 'access'
+
+======================================================================
+ERROR: test_changing_email_resets_verification 
+(learning.tests_auth.MeTests.test_changing_email_resets_verification)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 298, in 
+setUp
+    self.use_access(self.register_response.data['access'])
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+KeyError: 'access'
+
+======================================================================
+ERROR: test_duplicate_username_is_rejected 
+(learning.tests_auth.MeTests.test_duplicate_username_is_rejected)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 298, in 
+setUp
+    self.use_access(self.register_response.data['access'])
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+KeyError: 'access'
+
+======================================================================
+ERROR: test_rejects_invalid_education_level 
+(learning.tests_auth.MeTests.test_rejects_invalid_education_level)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 298, in 
+setUp
+    self.use_access(self.register_response.data['access'])
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+KeyError: 'access'
+
+======================================================================
+ERROR: test_requires_authentication 
+(learning.tests_auth.MeTests.test_requires_authentication)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 298, in 
+setUp
+    self.use_access(self.register_response.data['access'])
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+KeyError: 'access'
+
+======================================================================
+ERROR: test_returns_nested_and_flat_profile_fields 
+(learning.tests_auth.MeTests.test_returns_nested_and_flat_profile_fields)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 298, in 
+setUp
+    self.use_access(self.register_response.data['access'])
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+KeyError: 'access'
+
+======================================================================
+ERROR: test_role_cannot_be_changed_via_profile_api 
+(learning.tests_auth.MeTests.test_role_cannot_be_changed_via_profile_api)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 298, in 
+setUp
+    self.use_access(self.register_response.data['access'])
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+KeyError: 'access'
+
+======================================================================
+ERROR: test_staff_flags_cannot_be_changed_via_profile_api (learning.tests_auth.
+MeTests.test_staff_flags_cannot_be_changed_via_profile_api)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 298, in 
+setUp
+    self.use_access(self.register_response.data['access'])
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+KeyError: 'access'
+
+======================================================================
+ERROR: test_updates_editable_profile_fields 
+(learning.tests_auth.MeTests.test_updates_editable_profile_fields)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 298, in 
+setUp
+    self.use_access(self.register_response.data['access'])
+                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+KeyError: 'access'
+
+======================================================================
+ERROR: test_confirmation_changes_the_password_and_revokes_sessions (learning.te
+sts_auth.PasswordResetTests.test_confirmation_changes_the_password_and_revokes_
+sessions)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 538, in 
+setUp
+    self.raw_refresh = self.cookie_value(self.register_response)
+                       ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 105, in 
+cookie_value
+    return response.cookies[name].value
+           ~~~~~~~~~~~~~~~~^^^^^^
+KeyError: 'cy_refresh'
+
+======================================================================
+ERROR: test_expired_token_is_rejected 
+(learning.tests_auth.PasswordResetTests.test_expired_token_is_rejected)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 538, in 
+setUp
+    self.raw_refresh = self.cookie_value(self.register_response)
+                       ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 105, in 
+cookie_value
+    return response.cookies[name].value
+           ~~~~~~~~~~~~~~~~^^^^^^
+KeyError: 'cy_refresh'
+
+======================================================================
+ERROR: test_request_emails_a_single_use_token 
+(learning.tests_auth.PasswordResetTests.test_request_emails_a_single_use_token)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 538, in 
+setUp
+    self.raw_refresh = self.cookie_value(self.register_response)
+                       ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 105, in 
+cookie_value
+    return response.cookies[name].value
+           ~~~~~~~~~~~~~~~~^^^^^^
+KeyError: 'cy_refresh'
+
+======================================================================
+ERROR: test_request_is_generic_for_known_and_unknown_addresses (learning.tests_
+auth.PasswordResetTests.test_request_is_generic_for_known_and_unknown_addresses
+)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 538, in 
+setUp
+    self.raw_refresh = self.cookie_value(self.register_response)
+                       ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 105, in 
+cookie_value
+    return response.cookies[name].value
+           ~~~~~~~~~~~~~~~~^^^^^^
+KeyError: 'cy_refresh'
+
+======================================================================
+ERROR: test_token_cannot_be_reused 
+(learning.tests_auth.PasswordResetTests.test_token_cannot_be_reused)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 538, in 
+setUp
+    self.raw_refresh = self.cookie_value(self.register_response)
+                       ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 105, in 
+cookie_value
+    return response.cookies[name].value
+           ~~~~~~~~~~~~~~~~^^^^^^
+KeyError: 'cy_refresh'
+
+======================================================================
+ERROR: test_weak_new_password_is_rejected 
+(learning.tests_auth.PasswordResetTests.test_weak_new_password_is_rejected)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 538, in 
+setUp
+    self.raw_refresh = self.cookie_value(self.register_response)
+                       ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 105, in 
+cookie_value
+    return response.cookies[name].value
+           ~~~~~~~~~~~~~~~~^^^^^^
+KeyError: 'cy_refresh'
+
+======================================================================
+ERROR: test_csrf_endpoint_returns_the_cookie_value 
+(learning.tests_auth.SessionTests.test_csrf_endpoint_returns_the_cookie_value)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 393, in 
+setUp
+    self.raw_refresh = self.cookie_value(self.register_response)
+                       ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 105, in 
+cookie_value
+    return response.cookies[name].value
+           ~~~~~~~~~~~~~~~~^^^^^^
+KeyError: 'cy_refresh'
+
+======================================================================
+ERROR: test_logout_requires_the_csrf_header 
+(learning.tests_auth.SessionTests.test_logout_requires_the_csrf_header)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 393, in 
+setUp
+    self.raw_refresh = self.cookie_value(self.register_response)
+                       ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 105, in 
+cookie_value
+    return response.cookies[name].value
+           ~~~~~~~~~~~~~~~~^^^^^^
+KeyError: 'cy_refresh'
+
+======================================================================
+ERROR: test_logout_revokes_the_refresh_token 
+(learning.tests_auth.SessionTests.test_logout_revokes_the_refresh_token)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 393, in 
+setUp
+    self.raw_refresh = self.cookie_value(self.register_response)
+                       ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 105, in 
+cookie_value
+    return response.cookies[name].value
+           ~~~~~~~~~~~~~~~~^^^^^^
+KeyError: 'cy_refresh'
+
+======================================================================
+ERROR: test_refresh_requires_the_cookie 
+(learning.tests_auth.SessionTests.test_refresh_requires_the_cookie)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 393, in 
+setUp
+    self.raw_refresh = self.cookie_value(self.register_response)
+                       ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 105, in 
+cookie_value
+    return response.cookies[name].value
+           ~~~~~~~~~~~~~~~~^^^^^^
+KeyError: 'cy_refresh'
+
+======================================================================
+ERROR: test_refresh_requires_the_csrf_header 
+(learning.tests_auth.SessionTests.test_refresh_requires_the_csrf_header)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 393, in 
+setUp
+    self.raw_refresh = self.cookie_value(self.register_response)
+                       ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 105, in 
+cookie_value
+    return response.cookies[name].value
+           ~~~~~~~~~~~~~~~~^^^^^^
+KeyError: 'cy_refresh'
+
+======================================================================
+ERROR: test_refresh_rotates_the_cookie_and_never_leaks_it (learning.tests_auth.
+SessionTests.test_refresh_rotates_the_cookie_and_never_leaks_it)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 393, in 
+setUp
+    self.raw_refresh = self.cookie_value(self.register_response)
+                       ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 105, in 
+cookie_value
+    return response.cookies[name].value
+           ~~~~~~~~~~~~~~~~^^^^^^
+KeyError: 'cy_refresh'
+
+======================================================================
+ERROR: test_rotated_token_is_blacklisted 
+(learning.tests_auth.SessionTests.test_rotated_token_is_blacklisted)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 393, in 
+setUp
+    self.raw_refresh = self.cookie_value(self.register_response)
+                       ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 105, in 
+cookie_value
+    return response.cookies[name].value
+           ~~~~~~~~~~~~~~~~^^^^^^
+KeyError: 'cy_refresh'
+
+======================================================================
+FAIL: test_login (learning.tests.AuthAPITest.test_login)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests.py", line 647, in 
+test_login
+    self.assertEqual(response.status_code, status.HTTP_200_OK)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 403 != 200
+
+======================================================================
+FAIL: test_register (learning.tests.AuthAPITest.test_register)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests.py", line 636, in 
+test_register
+    self.assertIn('access', response.data)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'access' not found in {'user': {'id': 1, 'username': 
+'newuser', 'email': 'new@example.com', 'first_name': 'New', 'last_name': 
+'User', 'full_name': 'New User', 'date_joined': '2026-10-30T07:09:41.213626Z', 
+'role': 'student', 'email_verified': False}, 'verification_email_sent': True}
+
+======================================================================
+FAIL: test_duplicate_enrollment 
+(learning.tests.EnrollmentAPITest.test_duplicate_enrollment)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests.py", line 123, in 
+test_duplicate_enrollment
+    self.assertEqual(response.status_code, status.HTTP_200_OK)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 403 != 200
+
+======================================================================
+FAIL: test_enroll_in_course 
+(learning.tests.EnrollmentAPITest.test_enroll_in_course)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests.py", line 117, in 
+test_enroll_in_course
+    self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 403 != 201
+
+======================================================================
+FAIL: test_attempt_recorded 
+(learning.tests.ExerciseSubmissionTest.test_attempt_recorded)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests.py", line 342, in 
+test_attempt_recorded
+    self.assertEqual(ExerciseAttempt.objects.filter(user=self.user, 
+exercise=self.exercise).count(), 1)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1
+
+======================================================================
+FAIL: test_correct_mcq_submission 
+(learning.tests.ExerciseSubmissionTest.test_correct_mcq_submission)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests.py", line 303, in 
+test_correct_mcq_submission
+    self.assertEqual(response.status_code, status.HTTP_200_OK)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 403 != 200
+
+======================================================================
+FAIL: test_incorrect_mcq_submission 
+(learning.tests.ExerciseSubmissionTest.test_incorrect_mcq_submission)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests.py", line 313, in 
+test_incorrect_mcq_submission
+    self.assertEqual(response.status_code, status.HTTP_200_OK)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 403 != 200
+
+======================================================================
+FAIL: test_multiple_attempts_tracked 
+(learning.tests.ExerciseSubmissionTest.test_multiple_attempts_tracked)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests.py", line 356, in 
+test_multiple_attempts_tracked
+    self.assertEqual(attempts.count(), 2)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 2
+
+======================================================================
+FAIL: test_xp_awarded_on_correct 
+(learning.tests.ExerciseSubmissionTest.test_xp_awarded_on_correct)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests.py", line 324, in 
+test_xp_awarded_on_correct
+    self.assertGreater(profile.xp_points, 0)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 not greater than 0
+
+======================================================================
+FAIL: test_xp_transaction_created 
+(learning.tests.ExerciseSubmissionTest.test_xp_transaction_created)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests.py", line 332, in 
+test_xp_transaction_created
+    self.assertTrue(
+    ~~~~~~~~~~~~~~~^
+        XPTransaction.objects.filter(user=self.user, 
+action='exercise_complete').exists()
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^
+    )
+    ^
+AssertionError: False is not true
+Found 146 test(s).
+System check identified no issues (0 silenced).
+Created demo learner demo@codeyaar.dev / demo123
+Academy seed complete: 5 courses, 32 chapters, 45 lessons, 92 exercises (created 174, updated 0).
+Academy seed complete: 5 courses, 32 chapters, 45 lessons, 92 exercises (created 0, updated 174).
+  Created Expense Tracker API: 6 milestones (intermediate, ~12h)
+  Created Budget Dashboard: 6 milestones (intermediate, ~16h)
+  Created CI Pipeline & Release Automation: 6 milestones (advanced, ~10h)
+Done. 3 active projects.
+  Updated Expense Tracker API: 6 milestones (intermediate, ~12h)
+  Updated Budget Dashboard: 6 milestones (intermediate, ~16h)
+  Updated CI Pipeline & Release Automation: 6 milestones (advanced, ~10h)
+Done. 3 active projects.
+
+======================================================================
+FAIL: test_login_accepts_the_legacy_username_key 
+(learning.tests_auth.LoginTests.test_login_accepts_the_legacy_username_key)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 257, in 
+test_login_accepts_the_legacy_username_key
+    self.assertEqual(response.status_code, status.HTTP_200_OK)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 403 != 200
+
+======================================================================
+FAIL: test_login_creates_a_missing_profile 
+(learning.tests_auth.LoginTests.test_login_creates_a_missing_profile)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 287, in 
+test_login_creates_a_missing_profile
+    self.assertEqual(response.status_code, status.HTTP_200_OK)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 403 != 200
+
+======================================================================
+FAIL: test_login_updates_last_login 
+(learning.tests_auth.LoginTests.test_login_updates_last_login)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 263, in 
+test_login_updates_last_login
+    self.assertIsNotNone(self.user.last_login)
+    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: unexpectedly None
+
+======================================================================
+FAIL: test_login_with_email_is_case_insensitive 
+(learning.tests_auth.LoginTests.test_login_with_email_is_case_insensitive)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 249, in 
+test_login_with_email_is_case_insensitive
+    self.assertEqual(response.status_code, status.HTTP_200_OK)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 403 != 200
+
+======================================================================
+FAIL: test_login_with_username 
+(learning.tests_auth.LoginTests.test_login_with_username)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 241, in 
+test_login_with_username
+    self.assertEqual(response.status_code, status.HTTP_200_OK)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 403 != 200
+
+======================================================================
+FAIL: test_verification_gate_is_off_by_default 
+(learning.tests_auth.RBACTests.test_verification_gate_is_off_by_default)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 765, in 
+test_verification_gate_is_off_by_default
+    self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 403 != 201
+
+======================================================================
+FAIL: test_registration_creates_a_student_account (learning.tests_auth.Registra
+tionTests.test_registration_creates_a_student_account)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\learning\tests_auth.py", line 121, in 
+test_registration_creates_a_student_account
+    self.assertIn('access', response.data)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'access' not found in {'user': {'id': 1, 'username': 
+'tlearner', 'email': 'tlearner@example.com', 'first_name': 'Test', 
+'last_name': 'Learner', 'full_name': 'Test Learner', 'date_joined': 
+'2026-10-30T07:11:04.718465Z', 'role': 'student', 'email_verified': False}, 
+'verification_email_sent': True}
+
+======================================================================
+FAIL: test_issue_and_verify_flow 
+(certificates.tests.CertificateAPITests.test_issue_and_verify_flow)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\certificates\tests.py", line 186, in 
+test_issue_and_verify_flow
+    self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 403 != 201
+
+======================================================================
+FAIL: test_issue_requires_eligibility 
+(certificates.tests.CertificateAPITests.test_issue_requires_eligibility)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\HP\Code-Yaar\backend\certificates\tests.py", line 179, in 
+test_issue_requires_eligibility
+    self.assertEqual(resp.status_code, status.HTTP_412_PRECONDITION_FAILED)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 403 != 412
+
+----------------------------------------------------------------------
+Ran 146 tests in 158.535s
+
+FAILED (failures=19, errors=25)
+Destroying test database for alias 'default'...
+

@@ -9,6 +9,8 @@ import {
   Award,
   BookOpen,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ClipboardCheck,
   Code2,
   Dumbbell,
@@ -211,6 +213,7 @@ function SidebarPanel({
   onToggleGroup,
   onNavigate,
   onSignOut,
+  onCollapse,
 }: {
   pathname: string;
   searchParams: URLSearchParams;
@@ -218,6 +221,8 @@ function SidebarPanel({
   onToggleGroup: (label: string) => void;
   onNavigate: () => void;
   onSignOut: () => void;
+  /** Present on desktop only; the mobile drawer closes with its own button. */
+  onCollapse?: () => void;
 }) {
   const { user } = useAuth();
   const displayName = user?.first_name || user?.username || "Your profile";
@@ -237,6 +242,16 @@ function SidebarPanel({
           />
         </div>
         <span className="text-sm font-bold tracking-tight">Code-Yaar</span>
+        {onCollapse && (
+          <button
+            type="button"
+            onClick={onCollapse}
+            aria-label="Collapse navigation"
+            className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-white/70 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]"
+          >
+            <ChevronLeft aria-hidden="true" className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
       <nav
@@ -321,7 +336,13 @@ function SidebarPanel({
   );
 }
 
-export function AppSidebar() {
+export function AppSidebar({
+  collapsed,
+  onToggle,
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -356,16 +377,32 @@ export function AppSidebar() {
 
   return (
     <>
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-[272px] md:flex">
-        <SidebarPanel
-          pathname={pathname}
-          searchParams={searchParams}
-          expandedGroups={expandedGroups}
-          onToggleGroup={toggleGroup}
-          onNavigate={closeMobile}
-          onSignOut={handleSignOut}
-        />
-      </aside>
+      {collapsed ? (
+        // Wrapper owns the responsive display so the hidden handle is never a
+        // focus target on mobile, where the header button handles navigation.
+        <div className="fixed left-0 top-1/2 z-40 hidden -translate-y-1/2 md:block">
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-label="Open navigation"
+            className="flex h-16 w-6 items-center justify-center rounded-r-lg bg-[var(--sidebar-bg)] text-white shadow-lg transition-colors hover:bg-[var(--sidebar-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]"
+          >
+            <ChevronRight aria-hidden="true" className="h-4 w-4" />
+          </button>
+        </div>
+      ) : (
+        <aside className="fixed inset-y-0 left-0 z-40 hidden w-[272px] md:flex">
+          <SidebarPanel
+            pathname={pathname}
+            searchParams={searchParams}
+            expandedGroups={expandedGroups}
+            onToggleGroup={toggleGroup}
+            onNavigate={closeMobile}
+            onSignOut={handleSignOut}
+            onCollapse={onToggle}
+          />
+        </aside>
+      )}
 
       <header className="fixed inset-x-0 top-0 z-30 flex h-14 items-center border-b border-[var(--color-section-border)] bg-white px-4 md:hidden">
         <button

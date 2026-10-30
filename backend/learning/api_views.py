@@ -1,10 +1,9 @@
 from rest_framework import serializers, viewsets, permissions, status, filters
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.response import Response
-from rest_framework.authtoken.models import Token
-from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import F, Sum, Count
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -17,8 +16,10 @@ from .models import (
     Skill, UserSkill,
 )
 from .services.sandbox import get_sandbox
+from .services.xp import award_xp, deduct_xp
+from .services.completion import evaluate_course_completion
+from .permissions import IsEmailVerified
 from .serializers import (
-    UserSerializer, RegisterSerializer, UserProfileSerializer,
     CareerTrackSerializer, CareerTrackListSerializer,
     CourseListSerializer, CourseDetailSerializer,
     ChapterListSerializer, ChapterDetailSerializer,
@@ -118,55 +119,6 @@ def execute_snippet_view(request):
     })
 
 
-# ─── Auth Views ─────────────────────────────────────────────────────────────
-
-@api_view(['POST'])
-@permission_classes([permissions.AllowAny])
-def register_view(request):
-    """Register a new user and return auth token."""
-    serializer = RegisterSerializer(data=request.data)
-    serializer.is_valid(raise_exception=True)
-    user = serializer.save()
-    token, _ = Token.objects.get_or_create(user=user)
-    return Response({
-        'token': token.key,
-        'user': UserSerializer(user).data,
-    }, status=status.HTTP_201_CREATED)
-
-
-@api_view(['POST'])
-@permission_classes([permissions.AllowAny])
-def login_view(request):
-    """Authenticate user and return auth token."""
-    from django.contrib.auth import authenticate
-    username = request.data.get('username')
-    password = request.data.get('password')
-    user = authenticate(username=username, password=password)
-    if user is None:
-        return Response(
-            {'error': 'Invalid credentials'},
-            status=status.HTTP_401_UNAUTHORIZED
-        )
-    token, _ = Token.objects.get_or_create(user=user)
-    return Response({
-        'token': token.key,
-        'user': UserSerializer(user).data,
-    })
-
-
-@api_view(['GET', 'PUT', 'PATCH'])
-@permission_classes([permissions.IsAuthenticated])
-def profile_view(request):
-    """Get or update the current user's profile."""
-    profile, _ = UserProfile.objects.get_or_create(user=request.user)
-    if request.method == 'GET':
-        return Response(UserProfileSerializer(profile).data)
-    serializer = UserProfileSerializer(profile, data=request.data, partial=True)
-    serializer.is_valid(raise_exception=True)
-    serializer.save()
-    return Response(serializer.data)
-
-
 # ─── Content ViewSets ───────────────────────────────────────────────────────
 
 class CareerTrackViewSet(viewsets.ReadOnlyModelViewSet):
@@ -208,7 +160,11 @@ class CourseViewSet(viewsets.ReadOnlyModelViewSet):
             qs = qs.filter(language=language)
         return qs
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    @action(
+        detail=True,
+        methods=['post'],
+        permission_classes=[permissions.IsAuthenticated, IsEmailVerified],
+    )
     def enroll(self, request, slug=None):
         """Enroll the current user in a course."""
         course = self.get_object()
@@ -247,8 +203,18 @@ class ChapterViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class LessonViewSet(viewsets.ReadOnlyModelViewSet):
-    """List and retrieve lessons."""
+    """List and retrieve lessons; completing one is the only write action."""
     permission_classes = [permissions.AllowAny]
+    # These routes are wired with explicit `as_view({'post': ...})` mappings in
+    # api_urls.py, which drop the per-action kwargs a router would apply, so the
+    # requirement is resolved from `self.action` instead.
+    action_permissions = {
+        'complete': [permissions.IsAuthenticated],
+    }
+
+    def get_permissions(self):
+        classes = self.action_permissions.get(self.action, self.permission_classes)
+        return [permission() for permission in classes]
 
     def get_serializer_class(self):
         if self.action == 'retrieve':
@@ -271,7 +237,7 @@ class LessonViewSet(viewsets.ReadOnlyModelViewSet):
 
         return qs
 
-    def get_object(self, queryset=None):
+    def get_object(self):
         """
         The course-scoped retrieve URL captures the lesson ``slug`` while the
         completion route captures ``pk``; DRF's default lookup only knows
@@ -283,9 +249,9 @@ class LessonViewSet(viewsets.ReadOnlyModelViewSet):
             )
             self.check_object_permissions(self.request, obj)
             return obj
-        return super().get_object(queryset)
+        return super().get_object()
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=True, methods=['post'])
     def complete(self, request, pk=None):
         """
         Mark a lesson complete from the reading view.
@@ -331,6 +297,10 @@ class LessonViewSet(viewsets.ReadOnlyModelViewSet):
         enrollment.last_activity_at = timezone.now()
         enrollment.save()
 
+        # Re-evaluate strict, server-side course completion now that lesson
+        # state may have changed.
+        evaluate_course_completion(user, lesson.chapter.course)
+
         remaining = max(total_exercises - solved_exercises, 0)
         return Response({
             'status': progress.status,
@@ -346,6 +316,16 @@ class LessonViewSet(viewsets.ReadOnlyModelViewSet):
 class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
     """List and retrieve exercises."""
     permission_classes = [permissions.AllowAny]
+    # See LessonViewSet.action_permissions: explicit `as_view` mappings do not
+    # carry the per-action kwargs, so `self.action` decides.
+    action_permissions = {
+        'run': [permissions.IsAuthenticated],
+        'submit': [permissions.IsAuthenticated, IsEmailVerified],
+    }
+
+    def get_permissions(self):
+        classes = self.action_permissions.get(self.action, self.permission_classes)
+        return [permission() for permission in classes]
 
     def get_serializer_class(self):
         if self.action == 'retrieve':
@@ -364,7 +344,7 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
 
         return qs
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=True, methods=['post'])
     def run(self, request, pk=None):
         """Run code without validation (just execute)."""
         exercise = self.get_object()
@@ -397,47 +377,99 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
             'attempt_id': attempt.id,
         })
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    @action(
+        detail=True,
+        methods=['post'],
+    )
     def submit(self, request, pk=None):
-        """Submit exercise for validation."""
+        """Submit exercise for validation.
+
+        Integrity rules (backend-enforced, never delegated to the client):
+        - A repeated request carrying an already-processed ``submission_id``
+          returns the original result without re-grading or re-awarding XP.
+        - XP is computed server-side and awarded at most once per user and
+          exercise, so repeated perfect scores cannot farm unlimited XP.
+        - Configured ``max_attempts`` limits are enforced per exercise.
+        """
         exercise = self.get_object()
         serializer = ExerciseSubmitSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
+        submission_id = serializer.validated_data.get('submission_id') or None
+
+        # Idempotent replay: the same logical submission returns its own
+        # stored result — no new attempt, no grading, no XP.
+        if submission_id:
+            existing = ExerciseAttempt.objects.filter(
+                submission_id=submission_id
+            ).first()
+            if existing is not None:
+                if existing.user_id != request.user.id:
+                    return Response(
+                        {'detail': 'This submission id belongs to another account.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                return Response({
+                    'status': existing.status,
+                    'feedback': existing.feedback,
+                    'output': existing.output,
+                    'error': existing.error_message,
+                    'test_results': existing.test_results,
+                    'xp_earned': 0,
+                    'xp_total': existing.xp_earned,
+                    'explain': exercise.explain,
+                    'attempt_id': existing.id,
+                    'duplicate': True,
+                })
 
         code = serializer.validated_data.get('code', exercise.starter_code)
         selected_answer = serializer.validated_data.get('selected_answer')
         time_spent = serializer.validated_data.get('time_spent_seconds', 0)
 
-        # Validate based on exercise type
-        result = self._validate_exercise(exercise, code, selected_answer)
-
-        # Create attempt
-        attempt = ExerciseAttempt.objects.create(
-            user=request.user,
-            exercise=exercise,
-            status=result['status'],
-            submitted_code=code,
-            selected_answer=selected_answer,
-            output=result.get('output', ''),
-            error_message=result.get('error', ''),
-            feedback=result.get('feedback', ''),
-            test_results=result.get('test_results', []),
-            time_spent_seconds=time_spent,
-            xp_earned=result.get('xp_earned', 0),
-            attempt_number=ExerciseAttempt.objects.filter(
-                user=request.user, exercise=exercise
-            ).count() + 1,
-        )
-
-        # If correct, award XP and update progress; auto-enroll so progress
-        # is never lost for learners who started reading before enrolling.
-        if result['status'] == 'correct':
-            Enrollment.objects.get_or_create(
-                user=request.user, course=exercise.lesson.chapter.course,
-                defaults={'status': 'active'},
+        prior_count = ExerciseAttempt.objects.filter(
+            user=request.user, exercise=exercise
+        ).count()
+        already_solved = ExerciseAttempt.objects.filter(
+            user=request.user, exercise=exercise, status='correct'
+        ).exists()
+        if (exercise.max_attempts > 0 and prior_count >= exercise.max_attempts
+                and not already_solved):
+            return Response(
+                {'detail': 'Attempt limit reached for this exercise.'},
+                status=status.HTTP_400_BAD_REQUEST,
             )
-            self._award_xp(request.user, exercise, attempt)
-            self._update_lesson_progress(request.user, exercise.lesson)
+
+        with transaction.atomic():
+            # Validate based on exercise type
+            result = self._validate_exercise(exercise, code, selected_answer)
+
+            # Create attempt
+            attempt = ExerciseAttempt.objects.create(
+                user=request.user,
+                exercise=exercise,
+                submission_id=submission_id,
+                status=result['status'],
+                submitted_code=code,
+                selected_answer=selected_answer,
+                output=result.get('output', ''),
+                error_message=result.get('error', ''),
+                feedback=result.get('feedback', ''),
+                test_results=result.get('test_results', []),
+                time_spent_seconds=time_spent,
+                attempt_number=prior_count + 1,
+            )
+
+            # If correct, award XP and update progress; auto-enroll so progress
+            # is never lost for learners who started reading before enrolling.
+            xp_awarded = 0
+            if result['status'] == 'correct':
+                Enrollment.objects.get_or_create(
+                    user=request.user, course=exercise.lesson.chapter.course,
+                    defaults={'status': 'active'},
+                )
+                xp_awarded = self._award_xp(request.user, exercise, attempt)
+                self._update_lesson_progress(request.user, exercise.lesson)
+                evaluate_course_completion(request.user, exercise.lesson.chapter.course)
 
         return Response({
             'status': result['status'],
@@ -445,13 +477,14 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
             'output': result.get('output', ''),
             'error': result.get('error', ''),
             'test_results': result.get('test_results', []),
-            'xp_earned': result.get('xp_earned', 0),
+            'xp_earned': xp_awarded,
             'correct_answer': result.get('correct_answer'),
             'explain': result.get('explain', ''),
             'attempt_id': attempt.id,
+            'duplicate': False,
         })
 
-    @action(detail=True, methods=['get'], permission_classes=[permissions.AllowAny])
+    @action(detail=True, methods=['get'])
     def hint(self, request, pk=None):
         """Get the next available hint for this exercise."""
         exercise = self.get_object()
@@ -468,17 +501,10 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
 
         # Deduct XP penalty if hint is used (authenticated learners only)
         if request.user.is_authenticated and next_hint.xp_penalty > 0:
-            XPTransaction.objects.create(
-                user=request.user,
-                amount=-next_hint.xp_penalty,
-                action='hint_used',
+            deduct_xp(
+                request.user, next_hint.xp_penalty, 'hint_used', obj=exercise,
                 description=f'Hint used on {exercise.title}',
-                content_type=ContentType.objects.get_for_model(exercise),
-                object_id=exercise.id,
             )
-            profile, _ = UserProfile.objects.get_or_create(user=request.user)
-            profile.xp_points = max(0, profile.xp_points - next_hint.xp_penalty)
-            profile.save()
 
         return Response({
             'hint': next_hint.content,
@@ -527,7 +553,13 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
         }
 
     def _award_xp(self, user, exercise, attempt):
-        """Award XP for correct exercise completion."""
+        """Award XP for a correct exercise, at most once per user+exercise.
+
+        The server computes the amount from the exercise configuration; any
+        client-suggested value is ignored. A re-solve of an already-credited
+        exercise earns nothing further (previous awards are returned so the
+        client can display the total).
+        """
         xp = exercise.xp_reward
         # Reduce XP if hints were used
         hints_penalty = sum(
@@ -535,23 +567,25 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
         )
         xp = max(10, xp - hints_penalty)  # minimum 10 XP
 
-        attempt.xp_earned = xp
-        attempt.save()
-
-        # Update user XP
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-        profile.xp_points += xp
-        profile.save()
-
-        # Record transaction
-        XPTransaction.objects.create(
-            user=user,
-            amount=xp,
-            action='exercise_complete',
+        created = award_xp(
+            user, xp, 'exercise_complete', obj=exercise,
             description=f'Completed: {exercise.title}',
-            content_type=ContentType.objects.get_for_model(exercise),
-            object_id=exercise.id,
         )
+        if created is None:
+            # Already credited for this exercise — report the original award.
+            prior = XPTransaction.objects.filter(
+                user=user, action='exercise_complete',
+                content_type=ContentType.objects.get_for_model(exercise),
+                object_id=exercise.id,
+            ).first()
+            already = prior.amount if prior else 0
+            attempt.xp_earned = already
+            attempt.save(update_fields=['xp_earned'])
+            return 0
+
+        attempt.xp_earned = created.amount
+        attempt.save(update_fields=['xp_earned'])
+        return created.amount
 
     def _update_lesson_progress(self, user, lesson):
         """Update lesson progress when exercise is completed."""
@@ -923,93 +957,3 @@ def profile_stats_view(request):
         'certifications': certs_data,
         'active_enrollments': active_enrollments_data,
     })
-
-
-# ─── Settings View ──────────────────────────────────────────────────────────
-
-@api_view(['GET', 'PUT', 'PATCH'])
-@permission_classes([permissions.IsAuthenticated])
-def settings_view(request):
-    """Get or update user account settings (username, email, password)."""
-    user = request.user
-
-    if request.method == 'GET':
-        return Response({
-            'username': user.username,
-            'email': user.email,
-            'first_name': user.first_name,
-            'last_name': user.last_name,
-            'has_password': user.has_usable_password(),
-        })
-
-    # Update user fields
-    username = request.data.get('username')
-    email = request.data.get('email')
-    first_name = request.data.get('first_name')
-    last_name = request.data.get('last_name')
-    current_password = request.data.get('current_password')
-    new_password = request.data.get('new_password')
-
-    # Validate username uniqueness
-    if username and username != user.username:
-        if User.objects.filter(username=username).exclude(id=user.id).exists():
-            return Response(
-                {'error': 'Username already taken.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        user.username = username
-
-    if email:
-        user.email = email
-    if first_name is not None:
-        user.first_name = first_name
-    if last_name is not None:
-        user.last_name = last_name
-
-    # Handle password change
-    if new_password:
-        if not current_password:
-            return Response(
-                {'error': 'Current password is required to change password.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        if not user.check_password(current_password):
-            return Response(
-                {'error': 'Current password is incorrect.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        if len(new_password) < 8:
-            return Response(
-                {'error': 'New password must be at least 8 characters.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        user.set_password(new_password)
-        # Regenerate token after password change
-        Token.objects.filter(user=user).delete()
-
-    user.save()
-
-    response_data = {
-        'username': user.username,
-        'email': user.email,
-        'first_name': user.first_name,
-        'last_name': user.last_name,
-    }
-
-    # If password was changed, return new token
-    if new_password:
-        token, _ = Token.objects.get_or_create(user=user)
-        response_data['token'] = token.key
-
-    return Response(response_data)
-
-
-@api_view(['POST'])
-@permission_classes([permissions.IsAuthenticated])
-def settings_profile_view(request):
-    """Update profile-specific settings (avatar, bio, role)."""
-    profile, _ = UserProfile.objects.get_or_create(user=request.user)
-    serializer = UserProfileSerializer(profile, data=request.data, partial=True)
-    serializer.is_valid(raise_exception=True)
-    serializer.save()
-    return Response(serializer.data)

@@ -108,7 +108,7 @@ deactivated).
 - [x] 75. `tsc --noEmit` clean.
 - [x] 76. ESLint clean on all touched files.
 - [x] 77. `next build` succeeds (routes `/certificates` and `/verify/[publicId]` present).
-- [~] 78. Course catalog marketing pages still read from static `data/` files for some mock sections; live course API powers learn/dashboard/catalog where wired.
+- [x] 78. Catalog/marketing surfaces read from the live course & track APIs; the unreferenced static `data/tracks.ts` (fabricated learner counts, ratings, testimonials, "10K+" stats) was deleted. Remaining `data/` files are the roadmap visual and dev-only project/challenge demo fallbacks gated to empty-API cases.
 - [x] 79. Verification links from certificates deep-link into the public verify page.
 - [x] 80. No fabricated counts introduced into the frontend.
 
@@ -136,7 +136,7 @@ deactivated).
 
 ## Phase I — Verification & Deployment Readiness (97–100)
 
-- [x] 97. Full backend suite green: **67 tests, 0 failures** (48 learning + 19 certificates).
+- [x] 97. Full backend suite green: **125 tests, 0 failures** (106 learning incl. authentication + 19 certificates).
 - [x] 98. `manage.py check` clean; no missing migrations (`makemigrations --check`).
 - [x] 99. Frontend type-check, lint and production build green.
 - [x] 100. `.env.example` + this report document production configuration.
@@ -185,7 +185,6 @@ dashboard including a "Claim my certificate" flow.
 
 - Non-Python languages (C++, JS, git) are concept-graded; a multi-language
   judge (e.g. containerised compilers) is the natural next phase.
-- Some marketing/catalog sections still use static frontend data (task 78).
 - Certificate PDFs live on local media storage; a storage backend (S3 etc.)
   should be configured when deploying to multiple servers.
 - `seed_courses` (the older seeder) is superseded by `seed_academy`; keep it
@@ -198,7 +197,7 @@ dashboard including a "Claim my certificate" flow.
 cd backend
 python manage.py migrate
 python manage.py seed_academy        # idempotent — safe to re-run
-python manage.py test                # 67 tests
+python manage.py test                # 125 tests
 python manage.py runserver           # API on :8000, admin at /admin/
 
 # frontend

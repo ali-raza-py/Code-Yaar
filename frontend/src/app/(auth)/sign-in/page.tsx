@@ -1,158 +1,216 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
+import { ArrowRight, FlaskConical, MailWarning } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
-import { AlertCircle, ArrowRight, FlaskConical } from "lucide-react";
+import { auth, describeResendError } from "@/lib/api";
+import { FormError, FormField } from "@/components/auth/form-field";
+import { RedirectIfAuthenticated, readNextPath } from "@/components/auth/require-auth";
 
-const DEMO_EMAIL = "demo@codeyaar.dev";
-const DEMO_PASSWORD = "demo123";
+// Development-only shortcut for exploring seeded content. Never rendered in a
+// production build, so no credentials ship with the app.
+const DEMO =
+  process.env.NODE_ENV === "production"
+    ? null
+    : { identifier: "demo@codeyaar.dev", password: "demo123" };
 
 export default function SignInPage() {
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set when the API refused the sign-in because the address is unverified.
+  const [verifyTarget, setVerifyTarget] = useState<string | null>(null);
+  const [resend, setResend] = useState<"idle" | "sending" | "sent">("idle");
+  // Why the last resend attempt failed, if it did. Rendered instead of the
+  // "on its way" note so a failed send is never reported as a success.
+  const [resendError, setResendError] = useState<string | null>(null);
+  const [nextPath, setNextPath] = useState("/dashboard");
   const { signIn } = useAuth();
   const router = useRouter();
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Read the redirect target on the client so the page needs no Suspense
+  // boundary, and validate it before use to avoid an open redirect.
+  useEffect(() => {
+    // Deferred through a microtask so the effect never sets state synchronously.
+    Promise.resolve().then(() => setNextPath(readNextPath()));
+  }, []);
+
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (submitting) return;
+
     setError(null);
-    setLoading(true);
+    setSubmitting(true);
+    const result = await signIn(identifier, password);
+    setSubmitting(false);
 
-    const { error } = await signIn(email, password);
-    setLoading(false);
-
-    if (error) {
-      setError(error);
-    } else {
-      router.push("/dashboard");
+    if (result.error) {
+      setError(result.error);
+      setVerifyTarget(result.code === "email_not_verified" ? result.email ?? null : null);
+      setResend("idle");
+      setResendError(null);
+      return;
     }
-  };
-
-  const fillDemoCredentials = () => {
-    setEmail(DEMO_EMAIL);
-    setPassword(DEMO_PASSWORD);
-    setError(null);
+    router.replace(nextPath);
   };
 
   return (
-    <div>
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold tracking-tight">Welcome back</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Sign in to your account to continue your engineering journey.
-        </p>
-      </div>
-
-      {/* Form */}
-      <form onSubmit={handleSubmit} className="space-y-5">
-        {/* Demo access — works without a personal account once courses are seeded */}
-        <motion.div
-          initial={{ opacity: 0, y: -8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex items-start gap-3 rounded-lg border border-primary/20 bg-primary/[0.05] p-3.5 text-sm"
-        >
-          <FlaskConical className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-          <div className="space-y-1.5">
-            <p className="text-foreground">
-              Just exploring? Use the demo account:
-            </p>
-            <p className="font-mono text-xs text-muted-foreground">
-              {DEMO_EMAIL} / {DEMO_PASSWORD}
-            </p>
-            <button
-              type="button"
-              onClick={fillDemoCredentials}
-              className="text-xs font-semibold text-primary transition-colors hover:text-primary/80"
-            >
-              Fill demo credentials
-            </button>
-          </div>
-        </motion.div>
-
-        {error && (
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex items-start gap-3 rounded-lg border border-destructive/15 bg-destructive/[0.04] p-3.5 text-sm text-destructive"
-          >
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{error}</span>
-          </motion.div>
-        )}
-
-        <div className="space-y-2">
-          <label htmlFor="email" className="text-sm font-medium text-foreground">
-            Email address
-          </label>
-          <input
-            id="email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            required
-            autoComplete="email"
-            className="flex h-11 w-full rounded-lg border border-input bg-background px-3.5 py-2 text-sm transition-colors placeholder:text-muted-foreground/40 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10"
-          />
+    <RedirectIfAuthenticated>
+      <div>
+        <div className="mb-8">
+          <h1 className="text-2xl font-bold tracking-tight">Welcome back</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Sign in to your account to continue your engineering journey.
+          </p>
         </div>
 
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <label htmlFor="password" className="text-sm font-medium text-foreground">
-              Password
-            </label>
-          </div>
-          <input
-            id="password"
+        <form onSubmit={handleSubmit} className="space-y-5" noValidate>
+          {DEMO && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-start gap-3 rounded-lg border border-primary/20 bg-primary/[0.05] p-3.5 text-sm"
+            >
+              <FlaskConical className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+              <div className="space-y-1.5">
+                <p className="text-foreground">Just exploring? Use the demo account:</p>
+                <p className="font-mono text-xs text-muted-foreground">
+                  {DEMO.identifier} / {DEMO.password}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIdentifier(DEMO.identifier);
+                    setPassword(DEMO.password);
+                    setError(null);
+                  }}
+                  className="text-xs font-semibold text-primary transition-colors hover:text-primary/80"
+                >
+                  Fill demo credentials
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          <FormError message={error} />
+
+          {verifyTarget && (
+            <div className="flex items-start gap-3 rounded-lg border border-border/60 bg-muted/40 p-3.5">
+              <MailWarning className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+              {resend === "sent" ? (
+                <p className="text-xs text-muted-foreground">
+                  If that account still needs verification, a new link is on its way.
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  <button
+                    type="button"
+                    disabled={resend === "sending"}
+                    onClick={async () => {
+                      if (!verifyTarget) return;
+                      setResend("sending");
+                      setResendError(null);
+                      try {
+                        const result = await auth.resendVerification(verifyTarget);
+                        if (result.verification_email_sent === false) {
+                          // The API reached its mail transport and the transport
+                          // refused the message: say so rather than claim success.
+                          setResend("idle");
+                          setResendError(
+                            "The server could not hand the message to the mail service. Check the API's SMTP settings and try again."
+                          );
+                          return;
+                        }
+                        setResend("sent");
+                      } catch (caught) {
+                        setResend("idle");
+                        setResendError(describeResendError(caught));
+                      }
+                    }}
+                    className="text-left text-xs font-semibold text-primary transition-colors hover:text-primary/80 disabled:opacity-60"
+                  >
+                    {resend === "sending"
+                      ? "Sending a new link…"
+                      : `Resend the verification link to ${verifyTarget}`}
+                  </button>
+                  {resendError && (
+                    <p className="text-xs text-destructive" role="alert">
+                      {resendError}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          <FormField
+            label="Email or username"
+            name="identifier"
+            type="text"
+            value={identifier}
+            onChange={(event) => setIdentifier(event.target.value)}
+            placeholder="you@example.com"
+            autoComplete="username"
+            autoCapitalize="none"
+            spellCheck={false}
+            required
+          />
+
+          <FormField
+            label="Password"
+            name="password"
             type="password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(event) => setPassword(event.target.value)}
             placeholder="Enter your password"
-            required
             autoComplete="current-password"
-            className="flex h-11 w-full rounded-lg border border-input bg-background px-3.5 py-2 text-sm transition-colors placeholder:text-muted-foreground/40 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10"
+            required
+            labelAction={
+              <Link
+                href="/forgot-password"
+                className="text-xs font-medium text-primary transition-colors hover:text-primary/80"
+              >
+                Forgot password?
+              </Link>
+            }
           />
+
+          <Button type="submit" className="h-11 w-full text-sm font-semibold" disabled={submitting}>
+            {submitting ? (
+              <span className="inline-flex items-center gap-2">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                Signing in...
+              </span>
+            ) : (
+              <>
+                Sign In
+                <ArrowRight className="h-4 w-4" />
+              </>
+            )}
+          </Button>
+        </form>
+
+        <div className="relative my-6">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-border/60" />
+          </div>
         </div>
 
-        <Button type="submit" className="w-full h-11 text-sm font-semibold" disabled={loading}>
-          {loading ? (
-            <span className="inline-flex items-center gap-2">
-              <span className="h-4 w-4 rounded-full border-2 border-current border-t-transparent animate-spin" />
-              Signing in...
-            </span>
-          ) : (
-            <>
-              Sign In
-              <ArrowRight className="h-4 w-4" />
-            </>
-          )}
-        </Button>
-      </form>
-
-      {/* Divider */}
-      <div className="relative my-6">
-        <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-border/60" />
-        </div>
+        <p className="text-center text-sm text-muted-foreground">
+          Don&apos;t have an account?{" "}
+          <Link
+            href="/sign-up"
+            className="font-semibold text-primary transition-colors hover:text-primary/80"
+          >
+            Create account
+          </Link>
+        </p>
       </div>
-
-      {/* Sign up link */}
-      <p className="text-center text-sm text-muted-foreground">
-        Don&apos;t have an account?{" "}
-        <Link
-          href="/sign-up"
-          className="font-semibold text-primary transition-colors hover:text-primary/80"
-        >
-          Create account
-        </Link>
-      </p>
-    </div>
+    </RedirectIfAuthenticated>
   );
 }

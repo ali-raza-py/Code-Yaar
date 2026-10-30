@@ -1,15 +1,37 @@
+import hashlib
+
 from django.db import models
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
+from django.utils import timezone
+
+
+def hash_auth_token(raw_token: str) -> str:
+    """SHA-256 a raw authentication token before it touches the database."""
+    return hashlib.sha256(raw_token.encode('utf-8')).hexdigest()
 
 
 class UserProfile(models.Model):
-    """Extended user profile with learning-specific fields."""
+    """Extended user profile with learning-specific fields.
+
+    This is the platform's student profile. It extends Django's established
+    ``auth.User`` instead of replacing it, so existing enrolments, progress,
+    attempts, and certificates keep their foreign keys.
+    """
     ROLE_CHOICES = [
         ('student', 'Student'),
         ('mentor', 'Mentor'),
         ('admin', 'Admin'),
+    ]
+    EDUCATION_LEVEL_CHOICES = [
+        ('school', 'School'),
+        ('high_school', 'High school'),
+        ('undergraduate', 'Undergraduate'),
+        ('graduate', 'Graduate'),
+        ('bootcamp', 'Bootcamp'),
+        ('self_taught', 'Self taught'),
+        ('other', 'Other'),
     ]
 
     user = models.OneToOneField(
@@ -17,15 +39,27 @@ class UserProfile(models.Model):
         on_delete=models.CASCADE,
         related_name='profile'
     )
-    avatar = models.URLField(blank=True, default='')
+    avatar = models.URLField(blank=True, default='', help_text='Profile picture URL')
     bio = models.TextField(blank=True, default='')
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='student')
+    institution = models.CharField(max_length=200, blank=True, default='')
+    education_level = models.CharField(
+        max_length=20, choices=EDUCATION_LEVEL_CHOICES, blank=True, default=''
+    )
+    github_url = models.URLField(blank=True, default='')
+    linkedin_url = models.URLField(blank=True, default='')
+    email_verified = models.BooleanField(default=False)
+    email_verified_at = models.DateTimeField(null=True, blank=True)
     xp_points = models.PositiveIntegerField(default=0)
     streak_days = models.PositiveIntegerField(default=0)
     level = models.PositiveIntegerField(default=1)
     last_active_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def full_name(self):
+        return self.user.get_full_name().strip() or self.user.username
 
     def __str__(self):
         return f"{self.user.username}'s profile"
@@ -119,24 +153,34 @@ class Course(models.Model):
 
     @property
     def chapter_count(self):
-        return self.chapters.count()
+        return self.chapters.filter(is_active=True).count()
 
     @property
     def lesson_count(self):
-        return Lesson.objects.filter(chapter__course=self).count()
+        return Lesson.objects.filter(
+            chapter__course=self, chapter__is_active=True, is_active=True
+        ).count()
 
     @property
     def exercise_count(self):
-        return Exercise.objects.filter(lesson__chapter__course=self).count()
+        return Exercise.objects.filter(
+            lesson__chapter__course=self,
+            lesson__chapter__is_active=True,
+            lesson__is_active=True,
+            is_active=True,
+        ).count()
 
     @property
     def total_xp(self):
         """Derived from published content, never stored/fabricated."""
         lesson_xp = Lesson.objects.filter(
-            chapter__course=self, is_active=True
+            chapter__course=self, chapter__is_active=True, is_active=True
         ).aggregate(s=models.Sum('xp_reward'))['s'] or 0
         exercise_xp = Exercise.objects.filter(
-            lesson__chapter__course=self, lesson__is_active=True, is_active=True
+            lesson__chapter__course=self,
+            lesson__chapter__is_active=True,
+            lesson__is_active=True,
+            is_active=True,
         ).aggregate(s=models.Sum('xp_reward'))['s'] or 0
         return lesson_xp + exercise_xp
 
@@ -144,7 +188,7 @@ class Course(models.Model):
     def estimated_hours(self):
         """Derived from actual lesson durations."""
         minutes = Lesson.objects.filter(
-            chapter__course=self, is_active=True
+            chapter__course=self, chapter__is_active=True, is_active=True
         ).aggregate(s=models.Sum('duration_minutes'))['s'] or 0
         return max(1, round(minutes / 60))
 
@@ -458,6 +502,13 @@ class ExerciseAttempt(models.Model):
         on_delete=models.CASCADE,
         related_name='attempts'
     )
+    # Client-supplied idempotency key: a replayed submission (double-click,
+    # retried network request) carries the same id and is returned the
+    # original result instead of being re-graded or re-awarded.
+    submission_id = models.CharField(
+        max_length=64, null=True, blank=True, unique=True,
+        help_text='Unique per logical submission; replays resolve to this record'
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='running')
     submitted_code = models.TextField(blank=True, default='')
     selected_answer = models.JSONField(null=True, blank=True, help_text='For MCQ/MSQ')
@@ -476,6 +527,14 @@ class ExerciseAttempt(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        constraints = [
+            # Two submissions may never resolve to the same idempotency key.
+            models.UniqueConstraint(
+                fields=['submission_id'],
+                condition=~models.Q(submission_id__isnull=True),
+                name='unique_exercise_attempt_submission_id',
+            ),
+        ]
 
 
 class SnippetRun(models.Model):
@@ -496,6 +555,16 @@ class SnippetRun(models.Model):
         ordering = ['-date']
 
 
+# Actions whose award must exist at most once per user + referenced object.
+# Repeated merit (e.g. several streak bonuses) is intentionally not awarded for
+# these; the database itself refuses a second award row. Module level because a
+# nested `Meta` body is executed with module globals as its only outer scope —
+# it cannot see attributes defined in the class body around it.
+UNIQUE_AWARD_ACTIONS = frozenset({
+    'lesson_complete', 'exercise_complete', 'chapter_complete', 'course_complete',
+})
+
+
 class XPTransaction(models.Model):
     """Tracks all XP earned/spent by a user."""
     ACTION_CHOICES = [
@@ -507,6 +576,8 @@ class XPTransaction(models.Model):
         ('streak_bonus', 'Streak Bonus'),
         ('manual_adjustment', 'Manual Adjustment'),
     ]
+    # Kept on the class for callers that read it from the model (see xp.py).
+    UNIQUE_AWARD_ACTIONS = UNIQUE_AWARD_ACTIONS
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -527,6 +598,18 @@ class XPTransaction(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        constraints = [
+            # Database-level guarantee: one award transaction per user, action
+            # and referenced content item. Concurrent duplicate requests can
+            # never produce a second XP award for the same completion.
+            models.UniqueConstraint(
+                fields=['user', 'action', 'content_type', 'object_id'],
+                condition=models.Q(action__in=list(UNIQUE_AWARD_ACTIONS))
+                             & ~models.Q(content_type__isnull=True)
+                             & ~models.Q(object_id__isnull=True),
+                name='unique_xp_award_per_user_action_reference',
+            ),
+        ]
 
 
 class Achievement(models.Model):
@@ -777,3 +860,129 @@ class UserSkill(models.Model):
     class Meta:
         unique_together = ['user', 'skill']
         ordering = ['-proficiency']
+
+
+# ─── Authentication ─────────────────────────────────────────────────────────
+
+
+class EmailVerificationToken(models.Model):
+    """Single-use, time-limited email verification token.
+
+    Only the SHA-256 hash is persisted: the raw token exists solely inside
+    the emailed link, so a database leak cannot be replayed.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='email_verification_tokens',
+    )
+    token_hash = models.CharField(max_length=64, unique=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'used_at'], name='auth_email_token_user_used'),
+        ]
+
+    def __str__(self):
+        return f"Email verification for user {self.user_id}"
+
+    @property
+    def is_expired(self):
+        return timezone.now() >= self.expires_at
+
+    @property
+    def is_usable(self):
+        return self.used_at is None and not self.is_expired
+
+
+class PasswordResetToken(models.Model):
+    """Single-use, time-limited password reset token (hash-only storage)."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='password_reset_tokens',
+    )
+    token_hash = models.CharField(max_length=64, unique=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'used_at'], name='auth_reset_token_user_used'),
+        ]
+
+    def __str__(self):
+        return f"Password reset for user {self.user_id}"
+
+    @property
+    def is_expired(self):
+        return timezone.now() >= self.expires_at
+
+    @property
+    def is_usable(self):
+        return self.used_at is None and not self.is_expired
+
+
+class AuthenticationAuditLog(models.Model):
+    """Append-only authentication event trail.
+
+    Never records passwords, password hashes, raw tokens, or token hashes;
+    only the event, the account it belongs to (when known), and coarse
+    request metadata needed to investigate abuse.
+    """
+
+    class Event(models.TextChoices):
+        REGISTER = 'register', 'Registration'
+        LOGIN_SUCCESS = 'login_success', 'Login succeeded'
+        LOGIN_FAILED = 'login_failed', 'Login failed'
+        LOGOUT = 'logout', 'Logout'
+        TOKEN_REFRESH = 'token_refresh', 'Access token refreshed'
+        TOKEN_REFRESH_FAILED = 'token_refresh_failed', 'Token refresh failed'
+        EMAIL_VERIFIED = 'email_verified', 'Email verified'
+        EMAIL_VERIFICATION_SENT = 'email_verification_sent', 'Verification email sent'
+        EMAIL_VERIFICATION_FAILED = 'email_verification_failed', 'Verification failed'
+        PASSWORD_RESET_REQUESTED = 'password_reset_requested', 'Password reset requested'
+        PASSWORD_RESET_COMPLETED = 'password_reset_completed', 'Password reset completed'
+        PASSWORD_CHANGED = 'password_changed', 'Password changed'
+        PROFILE_UPDATED = 'profile_updated', 'Profile updated'
+        PRIVILEGE_ESCALATION_BLOCKED = (
+            'privilege_escalation_blocked',
+            'Privilege escalation blocked',
+        )
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='authentication_events',
+    )
+    event = models.CharField(max_length=40, choices=Event.choices)
+    identifier = models.CharField(
+        max_length=254,
+        blank=True,
+        default='',
+        help_text='Username or email supplied by the request, when relevant',
+    )
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=255, blank=True, default='')
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['event', 'created_at'], name='auth_audit_event_created'),
+            models.Index(fields=['user', 'created_at'], name='auth_audit_user_created'),
+        ]
+
+    def __str__(self):
+        return f"{self.event} @ {self.created_at:%Y-%m-%d %H:%M}"

@@ -130,7 +130,8 @@ export default function ProjectDetailPage() {
         <div className="md:col-span-2">
           <h2 className="mb-4 text-lg font-semibold">Milestones</h2>
           <p className="mb-4 text-sm text-muted-foreground">
-            The recommended build order for this project. Progress tracking for projects is not available yet.
+            Work top to bottom. Every milestone names a deliverable and how to prove it is done, so
+            you always know whether the step is actually finished.
           </p>
           <div className="space-y-3">
             {[...project.milestones]
@@ -154,8 +155,14 @@ export default function ProjectDetailPage() {
             ))}
           </div>
           <Card className="mt-8">
-            <CardContent className="p-4 text-sm text-muted-foreground">
-              The guided project workspace is under development. For now, use these milestones as your build checklist.
+            <CardContent className="space-y-2 p-4 text-sm text-muted-foreground">
+              <p className="font-semibold text-foreground">How to work this project</p>
+              <ol className="list-decimal space-y-1 pl-4">
+                <li>Create your own repository and set up the toolchain listed above.</li>
+                <li>Finish one milestone at a time, checking the &ldquo;Done when&rdquo; line.</li>
+                <li>Commit when a milestone is proven, not when the code merely compiles.</li>
+                <li>Keep the README honest: what works, what is next, how to run it.</li>
+              </ol>
             </CardContent>
           </Card>
         </div>

@@ -20,17 +20,10 @@ router.register(r'skills', api_views.SkillViewSet, basename='skill')
 router.register(r'my-skills', api_views.UserSkillViewSet, basename='user-skill')
 
 urlpatterns = [
-    # Auth endpoints
-    path('auth/register/', api_views.register_view, name='api-register'),
-    path('auth/login/', api_views.login_view, name='api-login'),
-    path('auth/profile/', api_views.profile_view, name='api-profile'),
+    # Authentication lives in `learning.auth_urls` (mounted at /api/auth/).
 
     # Profile stats
     path('profile/stats/', api_views.profile_stats_view, name='api-profile-stats'),
-
-    # Settings
-    path('settings/account/', api_views.settings_view, name='api-settings'),
-    path('settings/profile/', api_views.settings_profile_view, name='api-settings-profile'),
 
     # Leaderboard
     path('leaderboard/', api_views.leaderboard_view, name='api-leaderboard'),

@@ -1,8 +1,7 @@
 from rest_framework import serializers
-from django.contrib.auth.models import User
-from django.utils import timezone
+
 from .models import (
-    UserProfile, CareerTrack, Course, Chapter, Lesson, Exercise, Hint,
+    CareerTrack, Course, Chapter, Lesson, Exercise, Hint,
     Resource, Project, ProjectMilestone, Challenge, Enrollment,
     LessonProgress, ExerciseAttempt, XPTransaction, Achievement,
     UserAchievement, Progress, Certification, UserCertification,
@@ -10,38 +9,9 @@ from .models import (
 )
 
 
-# ─── Auth Serializers ───────────────────────────────────────────────────────
-
-class UserSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name']
-        read_only_fields = ['id']
-
-
-class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, min_length=8)
-
-    class Meta:
-        model = User
-        fields = ['username', 'email', 'password', 'first_name', 'last_name']
-
-    def create(self, validated_data):
-        user = User.objects.create_user(**validated_data)
-        UserProfile.objects.create(user=user)
-        return user
-
-
-class UserProfileSerializer(serializers.ModelSerializer):
-    user = UserSerializer(read_only=True)
-
-    class Meta:
-        model = UserProfile
-        fields = ['user', 'avatar', 'bio', 'role', 'xp_points', 'streak_days', 'level', 'last_active_at']
-        read_only_fields = ['xp_points', 'streak_days', 'level']
-
-
 # ─── Content Serializers ────────────────────────────────────────────────────
+# Authentication serializers live in `learning.auth_serializers`.
+
 
 class HintSerializer(serializers.ModelSerializer):
     class Meta:
@@ -117,7 +87,7 @@ class LessonListSerializer(serializers.ModelSerializer):
         ]
 
     def get_exercise_count(self, obj):
-        return obj.exercises.count()
+        return obj.exercises.filter(is_active=True).count()
 
     def get_progress_status(self, obj):
         request = self.context.get('request')
@@ -132,7 +102,7 @@ class LessonListSerializer(serializers.ModelSerializer):
 
 class LessonDetailSerializer(serializers.ModelSerializer):
     """Full lesson with content and exercises."""
-    exercises = ExerciseListSerializer(many=True, read_only=True)
+    exercises = serializers.SerializerMethodField()
     chapter_title = serializers.CharField(source='chapter.title', read_only=True)
     course_title = serializers.CharField(source='chapter.course.title', read_only=True)
     course_slug = serializers.CharField(source='chapter.course.slug', read_only=True)
@@ -153,7 +123,11 @@ class LessonDetailSerializer(serializers.ModelSerializer):
         ]
 
     def get_exercise_count(self, obj):
-        return obj.exercises.count()
+        return obj.exercises.filter(is_active=True).count()
+
+    def get_exercises(self, obj):
+        exercises = obj.exercises.filter(is_active=True)
+        return ExerciseListSerializer(exercises, many=True, context=self.context).data
 
     def get_progress_status(self, obj):
         request = self.context.get('request')
@@ -188,26 +162,46 @@ class LessonDetailSerializer(serializers.ModelSerializer):
 
 
 class ChapterListSerializer(serializers.ModelSerializer):
-    """Lightweight chapter for course sidebar."""
-    lessons = LessonListSerializer(many=True, read_only=True)
+    """
+    Lightweight chapter for the course sidebar.
+
+    Only published content is nested: retired chapters/lessons stay in the
+    database so learner progress survives re-seeding, but they must never
+    appear in the course map a learner navigates.
+    """
+    lessons = serializers.SerializerMethodField()
     progress_percentage = serializers.SerializerMethodField()
+    is_final_assessment = serializers.SerializerMethodField()
 
     class Meta:
         model = Chapter
         fields = [
             'id', 'title', 'slug', 'order', 'xp_reward',
-            'lessons', 'progress_percentage',
+            'lessons', 'progress_percentage', 'is_final_assessment',
         ]
 
+    def get_lessons(self, obj):
+        lessons = obj.lessons.filter(is_active=True)
+        return LessonListSerializer(lessons, many=True, context=self.context).data
+
+    def get_is_final_assessment(self, obj):
+        return Exercise.objects.filter(
+            lesson__chapter=obj,
+            lesson__is_active=True,
+            is_final_assessment=True,
+            is_active=True,
+        ).exists()
+
     def get_progress_percentage(self, obj):
-        total = obj.lessons.count()
+        lessons = obj.lessons.filter(is_active=True)
+        total = lessons.count()
         if total == 0:
             return 0
         request = self.context.get('request')
         if request and hasattr(request, 'user') and request.user.is_authenticated:
             completed = LessonProgress.objects.filter(
                 user=request.user,
-                lesson__chapter=obj,
+                lesson__in=lessons,
                 status__in=['completed', 'mastered']
             ).count()
             return round((completed / total) * 100)
@@ -216,7 +210,7 @@ class ChapterListSerializer(serializers.ModelSerializer):
 
 class ChapterDetailSerializer(serializers.ModelSerializer):
     """Full chapter with lesson details."""
-    lessons = LessonDetailSerializer(many=True, read_only=True)
+    lessons = serializers.SerializerMethodField()
     exercise_count = serializers.SerializerMethodField()
 
     class Meta:
@@ -226,8 +220,14 @@ class ChapterDetailSerializer(serializers.ModelSerializer):
             'lessons', 'exercise_count',
         ]
 
+    def get_lessons(self, obj):
+        lessons = obj.lessons.filter(is_active=True)
+        return LessonDetailSerializer(lessons, many=True, context=self.context).data
+
     def get_exercise_count(self, obj):
-        return Exercise.objects.filter(lesson__chapter=obj).count()
+        return Exercise.objects.filter(
+            lesson__chapter=obj, lesson__is_active=True, is_active=True
+        ).count()
 
 
 class ResourceSerializer(serializers.ModelSerializer):
@@ -255,10 +255,10 @@ class CourseListSerializer(serializers.ModelSerializer):
         ]
 
     def get_lesson_count(self, obj):
-        return Lesson.objects.filter(chapter__course=obj).count()
+        return obj.lesson_count
 
     def get_exercise_count(self, obj):
-        return Exercise.objects.filter(lesson__chapter__course=obj).count()
+        return obj.exercise_count
 
     def get_enrolled(self, obj):
         request = self.context.get('request')
@@ -268,8 +268,8 @@ class CourseListSerializer(serializers.ModelSerializer):
 
 
 class CourseDetailSerializer(serializers.ModelSerializer):
-    """Full course with chapters, resources, and enrollment info."""
-    chapters = ChapterListSerializer(many=True, read_only=True)
+    """Full course with published chapters, resources, and enrollment info."""
+    chapters = serializers.SerializerMethodField()
     resources = ResourceSerializer(many=True, read_only=True)
     track_title = serializers.CharField(source='track.title', read_only=True)
     lesson_count = serializers.SerializerMethodField()
@@ -292,11 +292,17 @@ class CourseDetailSerializer(serializers.ModelSerializer):
             'enrolled', 'enrollment_id', 'resume_lesson', 'progress_percentage',
         ]
 
+    def get_chapters(self, obj):
+        # Sorted by content order so chapters follow the intended path and
+        # the final assessment always comes last.
+        chapters = obj.chapters.filter(is_active=True).order_by('order', 'id')
+        return ChapterListSerializer(chapters, many=True, context=self.context).data
+
     def get_lesson_count(self, obj):
-        return Lesson.objects.filter(chapter__course=obj).count()
+        return obj.lesson_count
 
     def get_exercise_count(self, obj):
-        return Exercise.objects.filter(lesson__chapter__course=obj).count()
+        return obj.exercise_count
 
     def get_enrolled(self, obj):
         request = self.context.get('request')
@@ -431,7 +437,10 @@ class LessonProgressSerializer(serializers.ModelSerializer):
             'status', 'time_spent_seconds', 'video_watched_seconds',
             'completed_at', 'updated_at',
         ]
-        read_only_fields = ['updated_at']
+        # Completion status and its timestamp are derived by the server from
+        # real evidence (solved exercises / graded assessments). A learner can
+        # track time but must never self-grant a completion via the API.
+        read_only_fields = ['status', 'completed_at', 'updated_at', 'lesson']
 
 
 class ProgressSerializer(serializers.ModelSerializer):
@@ -540,3 +549,12 @@ class ExerciseSubmitSerializer(serializers.Serializer):
     code = serializers.CharField(required=False, allow_blank=True)
     selected_answer = serializers.JSONField(required=False, allow_null=True)
     time_spent_seconds = serializers.IntegerField(required=False, default=0)
+    # Optional client-generated idempotency key. A replayed Submit (double
+    # click / retried request) reuses it so the server can return the original
+    # result instead of re-grading or re-awarding. Never trusted for XP amount.
+    submission_id = serializers.CharField(
+        required=False, allow_blank=True, max_length=64,
+        help_text='Unique per logical submission; replays resolve to the same result',
+    )
+    # NOTE: any client-suggested 'xp_earned' / 'xp' is deliberately ignored —
+    # the backend is the only authority on XP.

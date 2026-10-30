@@ -3,8 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
-import { auth, courses as coursesApi, progress } from "@/lib/api";
-import type { AuthProfileData } from "@/lib/api";
+import { courses as coursesApi, hasSessionHint, progress } from "@/lib/api";
 import type { Course, Enrollment } from "@/types";
 
 /**
@@ -26,16 +25,15 @@ export function CourseResumeCard() {
     let cancelled = false;
 
     async function load() {
-      const token = typeof window !== "undefined" && localStorage.getItem("auth_token");
-      if (!token) {
+      // The access token lives in memory, so the refresh cookie is the only
+      // durable signal that this browser had a session. Without the hint we
+      // skip the request entirely and render the anonymous card.
+      if (!hasSessionHint()) {
         if (!cancelled) setState({ status: "anonymous" });
         return;
       }
       try {
-        const [profile, enrollments] = await Promise.all([
-          auth.getProfile() as Promise<AuthProfileData>,
-          progress.enrollments.list(),
-        ]);
+        const enrollments = await progress.enrollments.list();
         if (cancelled) return;
 
         const active = enrollments.find((e) => e.status === "active") ?? enrollments[0];
@@ -53,7 +51,6 @@ export function CourseResumeCard() {
           lessonTitle: course?.resume_lesson?.title,
           lessonProgress: `${active.progress_percentage}% complete`,
         });
-        void profile;
       } catch {
         if (!cancelled) setState({ status: "unavailable" });
       }
