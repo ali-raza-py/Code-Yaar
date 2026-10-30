@@ -82,13 +82,13 @@ def render_certificate_png(certificate) -> io.BytesIO:
     img = Image.new('RGB', (width, height), IVORY)
     d = ImageDraw.Draw(img)
 
-    _draw_watermark(d, width, height)
+    _draw_watermark(img, d, width, height)
     _draw_frame(d, width, height)
 
     inner_left, inner_right = mm(22), width - mm(22)
     footer_base = height - mm(20)      # bottom edge of the footer zone (PIL y grows down)
     footer_top = footer_base - mm(34)  # top edge of the footer zone
-    header_bottom = _draw_header(d, width, height)
+    header_bottom = _draw_header(img, d, width, height)
     _draw_statement(d, certificate, width, header_bottom, footer_top, inner_left, inner_right)
     _draw_authorisation(d, inner_left, footer_base)
     _draw_verification(d, certificate, img, d, inner_right, footer_base)
@@ -101,9 +101,9 @@ def render_certificate_png(certificate) -> io.BytesIO:
 
 # ─── Composition ───────────────────────────────────────────────────────────
 
-def _draw_watermark(d, width, height):
+def _draw_watermark(img, d, width, height):
     cx, cy = width / 2, height / 2 - mm(6)
-    _emblem_mark(d, cx, cy - mm(30), mm(52), WATERMARK, WATERMARK_LINE)
+    _emblem_mark(img, cx, cy - mm(30), mm(52), WATERMARK)
     _center_spaced(d, BRAND, cx, cy + mm(8), _font(pt(74), bold=True), WATERMARK, pt(10))
 
 
@@ -141,33 +141,21 @@ def _corner_flourish(d, x, y, sx, sy):
     d.ellipse([cx0 - r, cy0 - r, cx0 + r, cy0 + r], fill=BURGUNDY)
 
 
-def _emblem_mark(d, cx, cy, size, colour, line_colour=None):
-    """Original Code Yaar logo mark: a diamond holding code chevrons."""
-    half = size / 2
-    outline = line_colour if line_colour is not None else colour
-    d.polygon(
-        [(cx, cy - half), (cx + half, cy), (cx, cy + half), (cx - half, cy)],
-        outline=outline, width=max(1, int(size * 0.028)),
-    )
-    lw = max(2, int(size * 0.03))
-    gap = 0.30 * size
-    arm = 0.13 * size
-    d.line([(cx - gap + arm * 0.55, cy - arm), (cx - gap - arm * 0.55, cy)], fill=colour, width=lw)
-    d.line([(cx - gap - arm * 0.55, cy), (cx - gap + arm * 0.55, cy + arm)], fill=colour, width=lw)
-    d.line([(cx + gap - arm * 0.55, cy - arm), (cx + gap + arm * 0.55, cy)], fill=colour, width=lw)
-    d.line([(cx + gap + arm * 0.55, cy), (cx + gap - arm * 0.55, cy + arm)], fill=colour, width=lw)
-    d.line(
-        [(cx - 0.045 * size, cy + arm * 1.15), (cx + 0.045 * size, cy - arm * 1.15)],
-        fill=colour, width=max(1, int(size * 0.022)),
-    )
+def _emblem_mark(img, cx, cy, size, colour):
+    """Code Yaar brand logo, tinted to `colour` and centred at (cx, cy)."""
+    from branding import logo_image  # local import keeps module load lazy
+
+    logo = logo_image(max(8, int(round(size))), colour)
+    pos = (int(round(cx - size / 2)), int(round(cy - size / 2)))
+    img.paste(logo, pos, logo)
 
 
-def _draw_header(d, width, height):
+def _draw_header(img, d, width, height):
     """Brand band. Returns the y just below the designation underline."""
     cx = width / 2
     y = mm(20)
 
-    _emblem_mark(d, cx, y + mm(4.5), mm(9.5), PURPLE)
+    _emblem_mark(img, cx, y + mm(4.5), mm(9.5), PURPLE)
     y += mm(14.5)
 
     _center_spaced(d, BRAND, cx, y, _font(pt(25), bold=True), INK, pt(3.2))

@@ -88,7 +88,11 @@
   --color-tone-rose-bg: var(--forest-tone-rose-bg);
   --color-tone-rose-fg: var(--forest-tone-rose-fg);
 
-  --font-sans: var(--font-montserrat);
+  /* Type system: Fraunces (characterful display serif) for headings/hero, Figtree
+     (clean humanist sans) for body & UI, JetBrains Mono for code and technical
+     labels. `--font-display` also generates a `font-display` utility. */
+  --font-sans: var(--font-figtree);
+  --font-display: var(--font-fraunces);
   --font-mono: var(--font-jetbrains-mono);
 
   /* Bimodal radius scale: tool chrome < cards < pills/status */
@@ -363,14 +367,14 @@
     text-rendering: optimizeLegibility;
   }
   h1, h2, h3, h4, h5, h6 {
-    font-family: var(--font-sans);
-    font-weight: 700;
-    letter-spacing: -0.02em;
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    line-height: 1.15;
+    font-optical-sizing: auto;
     text-wrap: balance;
   }
-  p, span, li, a {
-    font-family: var(--font-sans);
-  }
+  /* Body copy inherits the sans from `body`; only code is forced to mono. */
   code, pre, .font-mono {
     font-family: var(--font-mono);
   }
@@ -446,17 +450,22 @@
 
 /* Display typography */
 .display-xl {
+  font-family: var(--font-display);
   font-size: clamp(3rem, 6vw, 5.5rem);
-  font-weight: 800;
+  font-weight: 600;
   line-height: 0.95;
   letter-spacing: -0.03em;
+  /* Unlock Fraunces' WONK axis for editorial flourish on the largest type. */
+  font-variation-settings: 'SOFT' 0, 'WONK' 1;
 }
 
 .display-lg {
+  font-family: var(--font-display);
   font-size: clamp(2rem, 4vw, 3.5rem);
-  font-weight: 800;
+  font-weight: 600;
   line-height: 1.0;
   letter-spacing: -0.025em;
+  font-variation-settings: 'SOFT' 0, 'WONK' 1;
 }
 
 /* Code inline fragment */
@@ -472,9 +481,9 @@
 
 /* Stage number — oversized display */
 .stage-number {
-  font-family: var(--font-sans);
+  font-family: var(--font-display);
   font-size: clamp(4rem, 8vw, 7rem);
-  font-weight: 900;
+  font-weight: 600;
   line-height: 1;
   letter-spacing: -0.05em;
   color: var(--primary);

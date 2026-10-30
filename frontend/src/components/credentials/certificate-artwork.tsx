@@ -37,7 +37,6 @@ const INK = '#171717';
 const MUTED = '#5C564E';
 const IVORY = '#FCFAF3';
 const WATERMARK = '#F6F1E7';
-const WATERMARK_LINE = '#ECE5D6';
 
 const SERIF = "Georgia, 'Times New Roman', 'Nimbus Roman', serif";
 const SANS = "'Segoe UI', 'Helvetica Neue', Arial, sans-serif";
@@ -68,47 +67,29 @@ function formatDate(iso: string): string {
 }
 
 /**
- * Original Code Yaar logo mark — a diamond holding code chevrons and a
- * slash. Same geometry as `_emblem_mark` in pdf.py, drawn on a 100×100
- * canvas so it scales with `size`.
+ * Code Yaar brand logo, tinted to `colour` with a CSS mask. The mask asset is
+ * the same silhouette the PDF/PNG renderers reuse (see backend `branding.py`),
+ * so the on-screen sheet, the download and the print export always match.
  */
 function EmblemMark({ size, colour }: { size: number; colour: string }) {
-  const s = 100; // em canvas
-  const gap = 0.3 * s;
-  const arm = 0.13 * s;
-  const cx = s / 2;
-  const cy = s / 2;
-  const hw = size / 2;
   return (
-    <svg
+    <span
       aria-hidden="true"
-      width={size}
-      height={size}
-      viewBox={`0 0 ${s} ${s}`}
-      fill="none"
-      style={{ display: 'block' }}
-    >
-      {/* Diamond */}
-      <path
-        d={`M ${cx} 0 L ${s} ${cy} L ${cx} ${s} L 0 ${cy} Z`}
-        stroke={colour}
-        strokeWidth={5.5}
-      />
-      {/* Chevrons < > */}
-      <g stroke={colour} strokeWidth={6} strokeLinecap="round">
-        <path
-          d={`M ${cx - gap + arm * 0.55} ${cy - arm} L ${cx - gap - arm * 0.55} ${cy} L ${cx - gap + arm * 0.55} ${cy + arm}`}
-        />
-        <path
-          d={`M ${cx + gap - arm * 0.55} ${cy - arm} L ${cx + gap + arm * 0.55} ${cy} L ${cx + gap - arm * 0.55} ${cy + arm}`}
-        />
-        {/* Slash */}
-        <path
-          d={`M ${cx + 4.5} ${cy + arm * 1.15} L ${cx - 4.5} ${cy - arm * 1.15}`}
-          strokeWidth={4.5}
-        />
-      </g>
-    </svg>
+      style={{
+        display: 'block',
+        width: size,
+        height: size,
+        backgroundColor: colour,
+        WebkitMaskImage: 'url(/brand/logo-mark.png)',
+        maskImage: 'url(/brand/logo-mark.png)',
+        WebkitMaskRepeat: 'no-repeat',
+        maskRepeat: 'no-repeat',
+        WebkitMaskPosition: 'center',
+        maskPosition: 'center',
+        WebkitMaskSize: 'contain',
+        maskSize: 'contain',
+      }}
+    />
   );
 }
 

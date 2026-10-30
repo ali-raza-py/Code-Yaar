@@ -174,37 +174,16 @@ def _corner_flourish(c, x, y, sx, sy):
 
 
 def _emblem_mark(c, cx, cy, size, colour):
-    """Original Code Yaar logo mark: a diamond holding code chevrons."""
-    half = size / 2
+    """Code Yaar brand logo, tinted to `colour` and centred at (cx, cy)."""
+    from branding import logo_png_bytes  # local import keeps module load lazy
+
+    rgb = (round(colour.red * 255), round(colour.green * 255), round(colour.blue * 255))
+    img = ImageReader(io.BytesIO(logo_png_bytes(320, rgb)))
     c.saveState()
-    c.setStrokeColor(colour)
-    c.setFillColor(colour)
-
-    # Diamond outline.
-    path = c.beginPath()
-    path.moveTo(cx, cy + half)
-    path.lineTo(cx + half, cy)
-    path.lineTo(cx, cy - half)
-    path.lineTo(cx - half, cy)
-    path.close()
-    c.setLineWidth(max(1.0, size * 0.055))
-    c.setStrokeColor(colour if colour is PURPLE else BURGUNDY)
-    if colour is WATERMARK:
-        c.setStrokeColor(WATERMARK_LINE)
-    c.drawPath(path, fill=0, stroke=1)
-
-    # Chevrons < > and a slash inside — proportions keyed to the mark size.
-    s = size
-    c.setLineWidth(max(1.2, s * 0.06))
-    c.setStrokeColor(colour)
-    gap = 0.30 * s
-    arm = 0.13 * s
-    c.line(cx - gap + arm * 0.55, cy + arm, cx - gap - arm * 0.55, cy)
-    c.line(cx - gap - arm * 0.55, cy, cx - gap + arm * 0.55, cy - arm)
-    c.line(cx + gap - arm * 0.55, cy + arm, cx + gap + arm * 0.55, cy)
-    c.line(cx + gap + arm * 0.55, cy, cx + gap - arm * 0.55, cy - arm)
-    c.setLineWidth(max(1.0, s * 0.045))
-    c.line(cx - 0.045 * s, cy - arm * 1.15, cx + 0.045 * s, cy + arm * 1.15)
+    c.drawImage(
+        img, cx - size / 2, cy - size / 2, width=size, height=size,
+        mask='auto', preserveAspectRatio=True,
+    )
     c.restoreState()
 
 

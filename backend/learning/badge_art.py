@@ -14,6 +14,7 @@ from the real earned-achievement row, and category colour comes from the
 official palette below — never from client input.
 """
 
+import base64
 import html
 import io
 import math
@@ -280,6 +281,14 @@ def render_badge_svg(user_achievement) -> str:
         f'scale({scale:.4f})">{_emblem_svg(emblem, accent, wash)}</g>'
     )
 
+    # Brand stamp — the Code Yaar logo, embedded as a tinted PNG beneath the id.
+    from branding import logo_png_bytes
+    _logo_b64 = base64.b64encode(logo_png_bytes(64, _hex_to_rgb(NAVY))).decode('ascii')
+    seal_svg = (
+        f'<image href="data:image/png;base64,{_logo_b64}" '
+        f'x="{CX - 15}" y="{Y_ID + 1}" width="30" height="30"/>'
+    )
+
     ribbon = (
         f'<polygon points="86,{RIBBON_TOP} 426,{RIBBON_TOP} 446,{(RIBBON_TOP + RIBBON_BOT) // 2} '
         f'426,{RIBBON_BOT} 86,{RIBBON_BOT} 66,{(RIBBON_TOP + RIBBON_BOT) // 2}" '
@@ -338,7 +347,7 @@ def render_badge_svg(user_achievement) -> str:
         font-size="13" font-weight="600" fill="{NAVY}" letter-spacing="0.6">{_esc(badge_id)}</text>
 
   <!-- Seal accent under the id -->
-  <circle cx="{CX}" cy="{Y_ID + 16}" r="2.6" fill="{GOLD}"/>
+  {seal_svg}
 </svg>'''
 
 
@@ -566,8 +575,10 @@ def render_badge_png(user_achievement) -> io.BytesIO:
     d.text((CX - iw / 2, Y_ID - id_font.size), badge_id, font=id_font,
            fill=_fill_of(navy_rgb))
 
-    # Seal accent
-    d.ellipse((CX - 2.6, Y_ID + 14, CX + 2.6, Y_ID + 19), fill=_fill_of(gold_rgb))
+    # Brand stamp — the Code Yaar logo in navy beneath the credential id.
+    from branding import logo_image
+    stamp = logo_image(30, navy_rgb)
+    img.alpha_composite(stamp, (int(CX - 15), int(Y_ID + 1)))
 
     buf = io.BytesIO()
     img.save(buf, format='PNG')

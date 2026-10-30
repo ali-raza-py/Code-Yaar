@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Version Control Ready badge issued by Code Yaar Academy">
+  <defs>
+    <radialGradient id="cy-field" cx="50%" cy="34%" r="72%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#FFF7ED"/>
+    </radialGradient>
+    <path id="cy-arc-top" d="M 60.0 256.0 A 196 196 0 0 1 452.0 256.0"/>
+    <path id="cy-arc-bottom" d="M 66.0 256.0 A 190 190 0 0 0 446.0 256.0"/>
+  </defs>
+
+  <!-- Rim + rings -->
+  <circle cx="256.0" cy="256.0" r="252" fill="#111827"/>
+  <circle cx="256.0" cy="256.0" r="243" fill="#EA580C"/>
+  <circle cx="256.0" cy="256.0" r="233" fill="none" stroke="#C4A35A" stroke-width="2.4"/>
+  <circle cx="256.0" cy="256.0" r="224" fill="url(#cy-field)"/>
+  <circle cx="256.0" cy="256.0" r="216" fill="none" stroke="#EA580C" stroke-opacity="0.18" stroke-width="1.2"/>
+
+  <!-- Brand arcs -->
+  <text font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="21" font-weight="700" letter-spacing="4" fill="#111827">
+    <textPath href="#cy-arc-top" startOffset="50%" text-anchor="middle">CODE YAAR ACADEMY</textPath>
+  </text>
+  <text font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="600" letter-spacing="3.4" fill="#9A7B32">
+    <textPath href="#cy-arc-bottom" startOffset="50%" text-anchor="middle">THINK. BUILD. EVOLVE.</textPath>
+  </text>
+
+  <!-- Level chevrons -->
+  <path d="M 238.0 109 L 244.0 116 L 238.0 123 L 232.0 116 Z" fill="#C4A35A"/><path d="M 256.0 109 L 262.0 116 L 256.0 123 L 250.0 116 Z" fill="#C4A35A"/><path d="M 274.0 109 L 280.0 116 L 274.0 123 L 268.0 116 Z" fill="#C4A35A"/>
+
+  <!-- Emblem -->
+  <g transform="translate(212.0 128.0) scale(1.3750)"><g><polygon points="32,10 60,24 32,38 4,24" fill="#EA580C"/><polygon points="17,31 47,31 47,50 35,44 35,54 29,54 29,44 17,50" fill="#EA580C"/><polygon points="56,26 58,26 58,43 56,43" fill="#EA580C"/><circle cx="57" cy="46" r="3.4" fill="#EA580C"/></g></g>
+
+  <!-- Ribbon title -->
+  <polygon points="86,244 426,244 446,268 426,292 86,292 66,268" fill="#EA580C"/><polygon points="86,292 104,292 86,308" fill="#9A7B32" opacity="0.55"/><polygon points="426,292 408,292 426,308" fill="#9A7B32" opacity="0.55"/>
+  <text x="256.0" y="277" text-anchor="middle"
+        font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="25" font-weight="700"
+        fill="#FFFFFF" letter-spacing="0.5">Version Control Ready</text>
+
+  <!-- Credential facts -->
+  <text x="256.0" y="320" text-anchor="middle" font-family="'Segoe UI', Helvetica, Arial, sans-serif"
+        font-size="13.5" font-weight="700" letter-spacing="3" fill="#EA580C">VERSION CONTROL</text>
+  <text x="256.0" y="348" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif"
+        font-size="20" font-weight="700" fill="#1F2937">Demo Learner</text>
+  <text x="256.0" y="374" text-anchor="middle" font-family="'Segoe UI', Helvetica, Arial, sans-serif"
+        font-size="13" font-weight="500" fill="#6B7280" letter-spacing="1">30 Oct 2026  ·  ADVANCED</text>
+  <text x="256.0" y="402" text-anchor="middle" font-family="Consolas, 'DejaVu Sans Mono', monospace"
+        font-size="13" font-weight="600" fill="#111827" letter-spacing="0.6">CY-BDG-2026-3E7EEE</text>
+
+  <!-- Seal accent under the id -->
+  <image href="data:image/png;base64,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" x="241.0" y="403" width="30" height="30"/>
+</svg>

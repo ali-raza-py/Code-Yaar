@@ -69,23 +69,12 @@ def _glow(base: Image.Image, cx, cy, radius, colour, alpha) -> None:
     base.alpha_composite(layer)
 
 
-def _logo_mark(d: ImageDraw.ImageDraw, cx, cy, size, colour) -> None:
-    """Original Code Yaar mark: a diamond holding code chevrons and a slash."""
-    half = size / 2
-    d.polygon(
-        [(cx, cy - half), (cx + half, cy), (cx, cy + half), (cx - half, cy)],
-        outline=colour, width=max(2, int(size * 0.06)),
-    )
-    gap, arm = 0.30 * size, 0.13 * size
-    lw = max(2, int(size * 0.06))
-    d.line([(cx - gap + arm * 0.55, cy - arm), (cx - gap - arm * 0.55, cy)], fill=colour, width=lw)
-    d.line([(cx - gap - arm * 0.55, cy), (cx - gap + arm * 0.55, cy + arm)], fill=colour, width=lw)
-    d.line([(cx + gap - arm * 0.55, cy - arm), (cx + gap + arm * 0.55, cy)], fill=colour, width=lw)
-    d.line([(cx + gap + arm * 0.55, cy), (cx + gap - arm * 0.55, cy + arm)], fill=colour, width=lw)
-    d.line(
-        [(cx - 0.045 * size, cy + arm * 1.15), (cx + 0.045 * size, cy - arm * 1.15)],
-        fill=colour, width=max(2, int(size * 0.05)),
-    )
+def _logo_mark(img: Image.Image, cx, cy, size, rgb) -> None:
+    """Code Yaar brand logo, tinted to `rgb` and centred at (cx, cy)."""
+    from branding import logo_image  # local import keeps module load lazy
+
+    logo = logo_image(max(8, int(round(size))), rgb)
+    img.alpha_composite(logo, (int(round(cx - size / 2)), int(round(cy - size / 2))))
 
 
 def _draw_spaced_c(d, cx, y, text, font, fill, spacing, anchor='ma'):
@@ -192,7 +181,7 @@ def _compose_square(img, d, w, h, ua, achievement, accent_rgb,
     cx = w / 2
 
     # Brand header
-    _logo_mark(d, cx, 118, 60, (*GOLD_RGB, 255))
+    _logo_mark(img, cx, 118, 60, GOLD_RGB)
     _draw_spaced_c(d, cx, 168, 'CODE YAAR ACADEMY', _pil_font(26, bold=True), WHITE, 4)
     _draw_spaced_c(d, cx, 200, 'THINK. BUILD. EVOLVE.', _pil_font(13), GOLD_RGB, 3)
 
@@ -242,7 +231,7 @@ def _compose_wide(img, d, w, h, ua, achievement, accent_rgb,
     rx = 560
     rw = w - rx - 70
 
-    _logo_mark(d, rx + 24, 120, 40, (*GOLD_RGB, 255))
+    _logo_mark(img, rx + 24, 120, 40, GOLD_RGB)
     _draw_spaced_l(d, rx + 56, 112, 'CODE YAAR ACADEMY', _pil_font(22, bold=True), WHITE, 3)
     _draw_spaced_l(d, rx + 56, 142, 'THINK. BUILD. EVOLVE.', _pil_font(12), GOLD_RGB, 2.4)
 
