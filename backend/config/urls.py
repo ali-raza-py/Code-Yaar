@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.urls import path, include
 from django.http import JsonResponse
 
+from django.conf import settings
 
 def health_check(request):
     """Liveness probe. Returns only a coarse status — no versions, secrets,
@@ -16,3 +17,11 @@ urlpatterns = [
     path('api/', include('learning.api_urls')),
     path('api/', include('certificates.urls')),
 ]
+
+if settings.DEBUG:
+    import debug_toolbar
+
+    urlpatterns = [
+        path('__debug__/', include(debug_toolbar.urls)),
+        *urlpatterns,
+    ]

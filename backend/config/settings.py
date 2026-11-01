@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     # Enables refresh-token rotation/revocation (OutstandingToken/BlacklistedToken).
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
+    *(['debug_toolbar'] if DEBUG else []),
     # Local
     'learning',
     'certificates',
@@ -50,11 +51,21 @@ MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
+    *(['debug_toolbar.middleware.DebugToolbarMiddleware'] if DEBUG else []),
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+# The toolbar is intentionally available only while Django DEBUG is enabled.
+# Keep the allowlist configurable for local containers and remote development.
+if DEBUG:
+    INTERNAL_IPS = [
+        address.strip()
+        for address in os.getenv('INTERNAL_IPS', '127.0.0.1,::1').split(',')
+        if address.strip()
+    ]
 
 # Reverse-proxy awareness (set behind nginx/traefik in production so
 # is_secure() honours the client-facing scheme).

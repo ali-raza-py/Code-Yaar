@@ -1,6 +1,9 @@
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.db.models import (
+    Count, ExpressionWrapper, F, IntegerField, OuterRef, Q, Subquery, Sum,
+)
 
 from .models import (
     UserProfile, CareerTrack, Course, Chapter, Lesson, Exercise, Hint,
@@ -99,6 +102,7 @@ class UserProfileAdmin(admin.ModelAdmin):
     ]
     raw_id_fields = ['user']
     readonly_fields = ['email_verified_at', 'created_at', 'updated_at']
+    show_full_result_count = False
     fieldsets = (
         ('Account', {'fields': ('user', 'role', 'email_verified', 'email_verified_at')}),
         ('Student profile', {
@@ -112,6 +116,9 @@ class UserProfileAdmin(admin.ModelAdmin):
         }),
         ('Timestamps', {'fields': ('created_at', 'updated_at'), 'classes': ('collapse',)}),
     )
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('user')
 
 
 class StudentProfileInline(admin.StackedInline):
@@ -150,6 +157,10 @@ class UserAdmin(BaseUserAdmin):
     )
     search_fields = ['username', 'email', 'first_name', 'last_name']
     actions = ['activate_accounts', 'deactivate_accounts']
+    show_full_result_count = False
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('profile')
 
     @admin.display(description='Name', ordering='first_name')
     def full_name_display(self, obj):
@@ -188,7 +199,10 @@ class CareerTrackAdmin(admin.ModelAdmin):
 
 @admin.register(Course)
 class CourseAdmin(admin.ModelAdmin):
-    list_display = ['title', 'track', 'difficulty', 'language', 'estimated_hours', 'total_xp', 'is_published', 'is_active']
+    list_display = [
+        'title', 'track', 'difficulty', 'language', 'estimated_hours_display',
+        'total_xp_display', 'is_published', 'is_active',
+    ]
     list_filter = ['track', 'difficulty', 'language', 'is_free', 'is_active', 'is_published']
     search_fields = ['title', 'description', 'subtitle']
     prepopulated_fields = {'slug': ('title',)}
@@ -211,6 +225,48 @@ class CourseAdmin(admin.ModelAdmin):
         }),
     )
 
+    def get_queryset(self, request):
+        lesson_minutes = Lesson.objects.filter(
+            chapter__course=OuterRef('pk'),
+            chapter__is_active=True,
+            is_active=True,
+        ).values('chapter__course').annotate(
+            total=Sum('duration_minutes'),
+        ).values('total')[:1]
+        lesson_xp = Lesson.objects.filter(
+            chapter__course=OuterRef('pk'),
+            chapter__is_active=True,
+            is_active=True,
+        ).values('chapter__course').annotate(
+            total=Sum('xp_reward'),
+        ).values('total')[:1]
+        exercise_xp = Exercise.objects.filter(
+            lesson__chapter__course=OuterRef('pk'),
+            lesson__chapter__is_active=True,
+            lesson__is_active=True,
+            is_active=True,
+        ).values('lesson__chapter__course').annotate(
+            total=Sum('xp_reward'),
+        ).values('total')[:1]
+        return super().get_queryset(request).annotate(
+            admin_lesson_minutes=Subquery(lesson_minutes),
+            admin_lesson_xp=Subquery(lesson_xp),
+            admin_exercise_xp=Subquery(exercise_xp),
+        ).annotate(
+            admin_total_xp=ExpressionWrapper(
+                F('admin_lesson_xp') + F('admin_exercise_xp'),
+                output_field=IntegerField(),
+            ),
+        ).select_related('track')
+
+    @admin.display(description='Estimated hours', ordering='admin_lesson_minutes')
+    def estimated_hours_display(self, obj):
+        return max(1, round((obj.admin_lesson_minutes or 0) / 60))
+
+    @admin.display(description='Total XP', ordering='admin_total_xp')
+    def total_xp_display(self, obj):
+        return (obj.admin_lesson_xp or 0) + (obj.admin_exercise_xp or 0)
+
 
 @admin.register(Chapter)
 class ChapterAdmin(admin.ModelAdmin):
@@ -221,11 +277,19 @@ class ChapterAdmin(admin.ModelAdmin):
     ordering = ['course', 'order']
     inlines = [LessonInline]
 
-    def lesson_count(self, obj):
-        return obj.lessons.count()
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(
+            admin_lesson_count=Count('lessons', distinct=True),
+            admin_exercise_count=Count('lessons__exercises', distinct=True),
+        ).select_related('course')
 
+    @admin.display(description='Lessons', ordering='admin_lesson_count')
+    def lesson_count(self, obj):
+        return obj.admin_lesson_count
+
+    @admin.display(description='Exercises', ordering='admin_exercise_count')
     def exercise_count(self, obj):
-        return Exercise.objects.filter(lesson__chapter=obj).count()
+        return obj.admin_exercise_count
 
 
 @admin.register(Lesson)
@@ -329,9 +393,18 @@ class PracticalClassAdmin(admin.ModelAdmin):
     ]
     inlines = [PracticalSubjectInline]
 
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(
+            admin_subject_count=Count(
+                'subjects',
+                filter=Q(subjects__is_active=True),
+                distinct=True,
+            ),
+        )
+
     @admin.display(description='Subjects')
     def subject_count(self, obj):
-        return obj.subjects.filter(is_active=True).count()
+        return obj.admin_subject_count
 
 
 @admin.register(PracticalSubject)
@@ -342,9 +415,21 @@ class PracticalSubjectAdmin(admin.ModelAdmin):
     prepopulated_fields = {'slug': ('title',)}
     ordering = ['practical_class', 'order', 'title']
 
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(
+            admin_practical_count=Count(
+                'practicals',
+                filter=Q(
+                    practicals__is_active=True,
+                    practicals__is_published=True,
+                ),
+                distinct=True,
+            ),
+        ).select_related('practical_class')
+
     @admin.display(description='Published practicals')
     def practical_count(self, obj):
-        return obj.practicals.filter(is_active=True, is_published=True).count()
+        return obj.admin_practical_count
 
 
 @admin.register(Practical)
@@ -409,8 +494,31 @@ class EnrollmentAdmin(admin.ModelAdmin):
     raw_id_fields = ['user', 'course', 'last_lesson']
     date_hierarchy = 'enrolled_at'
 
+    def get_queryset(self, request):
+        total_lessons = Lesson.objects.filter(
+            chapter__course=OuterRef('course_id'),
+        ).values('chapter__course').annotate(
+            total=Count('pk'),
+        ).values('total')[:1]
+        completed_lessons = LessonProgress.objects.filter(
+            user=OuterRef('user_id'),
+            lesson__chapter__course=OuterRef('course_id'),
+            status='completed',
+        ).values('lesson__chapter__course').annotate(
+            total=Count('pk'),
+        ).values('total')[:1]
+        return super().get_queryset(request).select_related(
+            'user', 'course',
+        ).annotate(
+            admin_total_lessons=Subquery(total_lessons),
+            admin_completed_lessons=Subquery(completed_lessons),
+        )
+
     def progress_percentage(self, obj):
-        return f"{obj.progress_percentage}%"
+        total = obj.admin_total_lessons or 0
+        completed = obj.admin_completed_lessons or 0
+        percentage = round((completed / total) * 100) if total else 0
+        return f"{percentage}%"
 
 
 @admin.register(LessonProgress)
