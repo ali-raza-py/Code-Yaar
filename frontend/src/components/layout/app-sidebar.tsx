@@ -246,11 +246,11 @@ function SidebarPanel({
       <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-white/10 px-4">
         <div className="relative h-6 w-6 shrink-0">
           <Image
-            src="/logo-light.png"
+            src="/brand/logo-mark.png"
             alt=""
             fill
             sizes="24px"
-            className="object-contain"
+            className="object-contain brightness-0 invert"
             priority
           />
         </div>
