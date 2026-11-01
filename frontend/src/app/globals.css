@@ -331,6 +331,12 @@
   --input: #2d3b52;
   --ring: #a78bfa;
 
+  --contribution-0: #161b22;
+  --contribution-1: #0e4429;
+  --contribution-2: #006d32;
+  --contribution-3: #26a641;
+  --contribution-4: #39d353;
+
   /* Translucent-white surface layering (depth via alpha, not shadows) */
   --surface-base: #0f1d32;
   --surface-elevated: #172235;
@@ -350,6 +356,12 @@
   --shadow-2: 0 2px 8px rgb(0 0 0 / 0.32), 0 1px 3px rgb(0 0 0 / 0.24);
   --shadow-3: 0 8px 24px rgb(0 0 0 / 0.40), 0 2px 8px rgb(0 0 0 / 0.24);
 }
+
+.progress-cell[data-level="0"] { background-color: var(--contribution-0, #ebedf0) !important; }
+.progress-cell[data-level="1"] { background-color: var(--contribution-1, #9be9a8) !important; }
+.progress-cell[data-level="2"] { background-color: var(--contribution-2, #40c463) !important; }
+.progress-cell[data-level="3"] { background-color: var(--contribution-3, #30a14e) !important; }
+.progress-cell[data-level="4"] { background-color: var(--contribution-4, #216e39) !important; }
 
 
 

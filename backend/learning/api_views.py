@@ -24,7 +24,11 @@ from .services.sandbox import get_sandbox
 from .services.xp import award_xp, deduct_xp
 from .services.achievements import award_eligible_achievements
 from .services.completion import evaluate_course_completion
-from .services.progress import record_learning_activity, streak_summary
+from .services.progress import (
+    MEANINGFUL_ACTIVITY_TYPES,
+    record_learning_activity,
+    streak_summary,
+)
 from .permissions import IsEmailVerified, IsAdministrator
 from .serializers import (
     CareerTrackSerializer, CareerTrackListSerializer,
@@ -1187,7 +1191,10 @@ def progress_dashboard_view(request):
         passed=Count('id', filter=Q(status='correct')),
     )
 
-    all_activities = LearningActivity.objects.filter(user=user)
+    all_activities = LearningActivity.objects.filter(
+        user=user,
+        activity_type__in=MEANINGFUL_ACTIVITY_TYPES,
+    )
     activity_qs = all_activities
     if request.query_params.get('type'):
         activity_qs = activity_qs.filter(
@@ -1229,6 +1236,45 @@ def progress_dashboard_view(request):
         'date': (today - timedelta(days=offset)).isoformat(),
         'count': daily_counts.get(today - timedelta(days=offset), 0),
     } for offset in range(6, -1, -1)]
+
+    contribution_start = today - timedelta(days=364)
+    contribution_rows = all_activities.filter(
+        activity_date__gte=contribution_start,
+        activity_date__lte=today,
+    ).values('activity_date', 'activity_type').annotate(count=Count('id'))
+    contribution_counts = {}
+    for row in contribution_rows:
+        day = contribution_counts.setdefault(row['activity_date'], {
+            'lessons_completed': 0,
+            'practicals_completed': 0,
+            'quizzes_completed': 0,
+            'total_activities': 0,
+        })
+        count = row['count']
+        if row['activity_type'] == 'lesson_completed':
+            day['lessons_completed'] = count
+        elif row['activity_type'] == 'practical_completed':
+            day['practicals_completed'] = count
+        elif row['activity_type'] == 'quiz_attempted':
+            day['quizzes_completed'] = count
+        day['total_activities'] += count
+
+    contribution_data = []
+    for offset in range(364, -1, -1):
+        activity_date = today - timedelta(days=offset)
+        day = contribution_counts.get(activity_date, {
+            'lessons_completed': 0,
+            'practicals_completed': 0,
+            'quizzes_completed': 0,
+            'total_activities': 0,
+        })
+        total = day['total_activities']
+        intensity = 0 if not total else 1 if total == 1 else 2 if total == 2 else 3 if total <= 4 else 4
+        contribution_data.append({
+            'date': activity_date.isoformat(),
+            **day,
+            'intensity': intensity,
+        })
 
     subjects = PracticalSubject.objects.filter(
         practical_class__is_active=True, practical_class__is_published=True,
@@ -1333,6 +1379,13 @@ def progress_dashboard_view(request):
             for item in assessments.order_by('created_at')[:30]
         ],
         'active_dates': streaks['active_dates'],
+        'contribution_data': contribution_data,
+        'total_learning_activities': sum(
+            item['total_activities'] for item in contribution_data
+        ),
+        'active_learning_days': sum(
+            item['total_activities'] > 0 for item in contribution_data
+        ),
         'activities': activities, 'insights': insights,
     })
 

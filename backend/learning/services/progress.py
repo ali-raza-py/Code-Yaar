@@ -6,6 +6,13 @@ from django.utils import timezone
 
 from ..models import LearningActivity, UserProfile
 
+MEANINGFUL_ACTIVITY_TYPES = (
+    'lesson_completed',
+    'practical_completed',
+    'quiz_attempted',
+    'course_completed',
+)
+
 
 def record_learning_activity(
     user,
@@ -47,7 +54,10 @@ def record_learning_activity(
 def streak_summary(user):
     """Return current/longest streaks based on distinct local activity dates."""
     dates = set(
-        LearningActivity.objects.filter(user=user)
+        LearningActivity.objects.filter(
+            user=user,
+            activity_type__in=MEANINGFUL_ACTIVITY_TYPES,
+        )
         .values_list('activity_date', flat=True)
     )
     if not dates:

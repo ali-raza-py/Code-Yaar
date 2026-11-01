@@ -930,6 +930,16 @@ export interface ProgressDashboardData {
   weekly_activity: Array<{ date: string; count: number }>;
   quiz_performance: Array<{ date: string; score: number }>;
   active_dates: string[];
+  contribution_data: Array<{
+    date: string;
+    lessons_completed: number;
+    practicals_completed: number;
+    quizzes_completed: number;
+    total_activities: number;
+    intensity: 0 | 1 | 2 | 3 | 4;
+  }>;
+  total_learning_activities: number;
+  active_learning_days: number;
   activities: Array<{
     id: number;
     type: string;

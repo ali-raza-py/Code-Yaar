@@ -28,6 +28,12 @@ percentage or user ID is accepted by the progress API.
 - `weekly_activity`: meaningful activity counts for the last seven local days.
 - `quiz_performance`: final-assessment attempt scores (100 for a passed attempt,
   0 otherwise).
+- `contribution_data`: 365 local-calendar dates with lesson, practical, quiz,
+  total activity counts, and a 0-4 intensity level. Missing dates are returned
+  with zeroes so clients can render a complete GitHub-style grid without
+  fetching individual activity records.
+- `total_learning_activities` and `active_learning_days`: totals for the same
+  365-day contribution window.
 - `activities`: recent activity history.
 - `active_dates`: dates used by the streak calendar.
 - `insights`: server-calculated learner guidance.
@@ -42,17 +48,22 @@ enrolled course. A course is completed only by the existing server-side course
 completion service. Assessment metrics use exercises marked
 `is_final_assessment`; opening an assessment does not create an attempt.
 
-Streaks use distinct activity dates in Django's configured timezone. Multiple
-events on one date count as one learning day. The current streak can end today
+Contribution totals and streaks include only lesson completions, practical
+completions, quiz attempts, and course completions. Course starts and
+bookmarks remain available in the ledger but do not represent learning
+activity. Dates use Django's configured timezone, and multiple events on one
+date count as one learning day for streaks. The current streak can end today
 or yesterday, so a learner does not lose a streak before the current day is
 over.
 
 ## Frontend
 
 The authenticated `/progress` route is linked from the dashboard and sidebar.
-It renders real API data for overview cards, course bars, practical
-subject/class bars, weekly activity, insights, activity history filters, and a
-streak calendar. Empty, loading, and API error states are included.
+It renders real API data for overview cards, green course/practical bars,
+weekly activity, quiz performance, a responsive 12-month contribution graph,
+insights, and filtered activity history. Empty, loading, and API error states
+are included. Contribution cells are keyboard focusable and expose their full
+date and category counts through accessible labels.
 
 ## Tests
 
