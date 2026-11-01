@@ -801,7 +801,10 @@ class ChallengeViewSet(viewsets.ReadOnlyModelViewSet):
         if difficulty:
             qs = qs.filter(difficulty=difficulty)
 
-        return qs
+        # Annotating over the submissions join drops the model's implicit
+        # ordering, so pin a deterministic default to keep pagination stable
+        # (OrderingFilter still overrides this when `?ordering=` is supplied).
+        return qs.order_by('topic', 'difficulty', 'title')
 
     @staticmethod
     def _test_dicts(test_results) -> list[dict]:
