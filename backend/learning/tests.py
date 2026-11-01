@@ -13,11 +13,15 @@ Tests cover:
 - Hint system
 - Language adapter
 - Sandbox service
+- Real subprocess sandbox (Python executed, C++ compiled and run)
+- Textbook source references and the official-content verification guard
 """
 
 from datetime import timedelta
+from unittest import skipUnless
 
 from django.test import TestCase, Client, override_settings
+from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.utils import timezone
@@ -35,7 +39,7 @@ from .services.language_adapter import (
     get_adapter, get_supported_languages, PythonAdapter, JavaScriptAdapter,
 )
 from .services.sandbox import (
-    DevelopmentSandbox, validate_submission, SandboxConfig,
+    DevelopmentSandbox, SubprocessSandbox, validate_submission, SandboxConfig,
 )
 from .services.xp import award_xp, deduct_xp
 from .services.progress import record_learning_activity
@@ -1157,3 +1161,581 @@ class SeedProjectsTest(TestCase):
             for p in Project.objects.filter(is_active=True)
         }
         self.assertEqual(before, after)
+
+
+# ─── Real Subprocess Sandbox ───────────────────────────────────────────────
+# These tests execute code for real. They exist to prove the platform never
+# reports a result it did not actually compute.
+
+class SubprocessSandboxPythonTest(TestCase):
+    def setUp(self):
+        self.sandbox = SubprocessSandbox(
+            config=SandboxConfig(timeout_seconds=30.0, max_output_bytes=100_000),
+        )
+
+    def test_python_runs_and_produces_real_output(self):
+        result = self.sandbox.execute('print(sum(range(1, 11)))', 'python')
+        self.assertEqual(result.status, 'success')
+        self.assertEqual(result.output.strip(), '55')
+
+    def test_python_reads_stdin(self):
+        result = self.sandbox.execute('print(input().upper())', 'python', stdin='hello\n')
+        self.assertEqual(result.status, 'success')
+        self.assertEqual(result.output.strip(), 'HELLO')
+
+    def test_python_runtime_error_is_surfaced(self):
+        result = self.sandbox.execute('print(1 / 0)', 'python')
+        self.assertEqual(result.status, 'error')
+        self.assertIn('ZeroDivisionError', result.error)
+
+    def test_infinite_loop_times_out_instead_of_hanging(self):
+        sandbox = SubprocessSandbox(
+            config=SandboxConfig(timeout_seconds=3.0, max_output_bytes=1000),
+        )
+        result = sandbox.execute('while True: pass', 'python')
+        self.assertEqual(result.status, 'timeout')
+
+
+CPP_HELLO = (
+    '#include <iostream>\n'
+    'using namespace std;\n\n'
+    'int main() {\n'
+    '    cout << "Hello, World!";\n'
+    '    return 0;\n'
+    '}\n'
+)
+
+CPP_ADD = (
+    '#include <iostream>\n'
+    'using namespace std;\n\n'
+    'int main() {\n'
+    '    int a, b;\n'
+    '    cin >> a >> b;\n'
+    '    cout << a + b;\n'
+    '    return 0;\n'
+    '}\n'
+)
+
+
+@skipUnless(SubprocessSandbox().cpp_available, 'No C++ compiler on this host')
+class SubprocessSandboxCppTest(TestCase):
+    """C++ must genuinely compile and run, or the request must fail honestly."""
+
+    def setUp(self):
+        self.sandbox = SubprocessSandbox(
+            config=SandboxConfig(timeout_seconds=60.0, max_output_bytes=100_000),
+        )
+
+    def test_advertises_cpp_only_when_a_compiler_exists(self):
+        self.assertIn('cpp', self.sandbox.supported_languages())
+
+    def test_compiles_and_runs(self):
+        result = self.sandbox.execute(CPP_HELLO, 'cpp')
+        self.assertEqual(result.status, 'success', result.error)
+        self.assertEqual(result.output.strip(), 'Hello, World!')
+
+    def test_reads_stdin_via_cin(self):
+        result = self.sandbox.execute(CPP_ADD, 'cpp', stdin='15 27\n')
+        self.assertEqual(result.status, 'success', result.error)
+        self.assertEqual(result.output.strip(), '42')
+
+    def test_grades_multiple_test_cases(self):
+        results = self.sandbox.run_tests(CPP_ADD, 'cpp', [
+            {'input': '2 3', 'expected_output': '5'},
+            {'input': '10 20', 'expected_output': '30'},
+            {'input': '1 1', 'expected_output': '99'},
+        ])
+        self.assertEqual([r.status for r in results], ['passed', 'passed', 'failed'])
+
+    def test_compile_error_is_reported_not_swallowed(self):
+        result = self.sandbox.execute('int main() { cout << "x"; }', 'cpp')
+        self.assertEqual(result.status, 'error')
+        self.assertIn('error', result.error.lower())
+
+    def test_compile_error_does_not_leak_server_paths(self):
+        result = self.sandbox.execute('int main() { cout << "x"; }', 'cpp')
+        self.assertNotIn('Temp', result.error)
+        self.assertNotIn('cy-sandbox-', result.error)
+
+    def test_unsupported_language_is_refused(self):
+        result = self.sandbox.execute(CPP_HELLO, 'javascript')
+        self.assertEqual(result.status, 'error')
+        self.assertIn('supports Python and C++', result.error)
+
+
+# ─── Textbook source references (curriculum accuracy) ───────────────────
+
+class TextbookSourceReferenceTest(TestCase):
+    """
+    Official board-textbook content may only be stored once it has been
+    verified against the book, so un-reviewed material cannot be published as
+    Sindh Board syllabus.
+    """
+
+    def setUp(self):
+        self.track = CareerTrack.objects.create(
+            slug='qa-textbook-board', title='Sindh Board', description='Board syllabus',
+        )
+        self.course = Course.objects.create(
+            slug='class-x-cpp', title='Class X — C++', description='',
+            track=self.track, language='cpp',
+        )
+        self.chapter = Chapter.objects.create(
+            course=self.course, title='Input/Output Handling in C++',
+            slug='unit-3', order=1,
+        )
+        self.lesson = Lesson.objects.create(
+            chapter=self.chapter, title='Escape Sequences', slug='escape-sequences',
+            order=1,
+        )
+
+    def _reference(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self.lesson, key, value)
+        return self.lesson
+
+    def test_official_content_must_be_verified(self):
+        lesson = self._reference(
+            source_type='official', verification_status='', textbook_class='Class X',
+        )
+        with self.assertRaises(ValidationError) as ctx:
+            lesson.full_clean()
+        self.assertIn('verification_status', ctx.exception.message_dict)
+
+    def test_official_verified_content_is_accepted(self):
+        lesson = self._reference(
+            source_type='official', verification_status='verified',
+            textbook_class='Class X', textbook_unit='Unit 3',
+            textbook_topic='3.3.4 Escape Sequences', textbook_pages='56',
+        )
+        lesson.full_clean()
+
+    def test_supplementary_content_does_not_claim_verification(self):
+        lesson = self._reference(
+            source_type='supplementary', verification_status='', textbook_class='Class X',
+        )
+        lesson.full_clean()
+
+    def test_textbook_content_must_name_its_class(self):
+        lesson = self._reference(source_type='official', verification_status='verified')
+        with self.assertRaises(ValidationError) as ctx:
+            lesson.full_clean()
+        self.assertIn('textbook_class', ctx.exception.message_dict)
+
+    def test_reference_label_carries_the_printed_pages(self):
+        lesson = self._reference(
+            source_type='official', verification_status='verified',
+            textbook_class='Class X', textbook_unit='Unit 3',
+            textbook_topic='3.3.4 Escape Sequences', textbook_pages='56',
+        )
+        self.assertEqual(
+            lesson.textbook_reference_label,
+            'Unit 3 > 3.3.4 Escape Sequences (p. 56)',
+        )
+
+    def test_non_textbook_content_keeps_no_reference(self):
+        general = CareerTrack.objects.create(
+            slug='backend', title='Backend', description='Backend',
+        )
+        course = Course.objects.create(
+            slug='python-basics', title='Python Basics', description='',
+            track=general, language='python',
+        )
+        chapter = Chapter.objects.create(course=course, title='Ch', slug='ch', order=1)
+        lesson = Lesson.objects.create(chapter=chapter, title='L', slug='l', order=1)
+        self.assertFalse(lesson.has_textbook_reference)
+        self.assertEqual(lesson.textbook_reference_label, '')
+
+    def test_exercise_carries_its_own_page_reference(self):
+        exercise = Exercise.objects.create(
+            lesson=self.lesson, title='Unit 3 MCQ', slug='unit-3-mcq',
+            exercise_type='multiple_choice', instructions='Pick',
+            source_type='official', verification_status='verified',
+            textbook_class='Class X', textbook_unit='Unit 3',
+            textbook_topic='EXERCISE A', textbook_pages='67',
+            choices=[{'id': 'a', 'text': 'A', 'is_correct': True}],
+        )
+        self.assertEqual(
+            exercise.textbook_reference_label, 'Unit 3 > EXERCISE A (p. 67)'
+        )
+
+    def test_serialiser_exposes_reference_for_textbook_lesson(self):
+        from .serializers import LessonDetailSerializer
+
+        self._reference(
+            source_type='official', verification_status='verified',
+            textbook_class='Class X', textbook_unit='Unit 3',
+            textbook_topic='3.3.4 Escape Sequences', textbook_pages='56',
+        ).save()
+        data = LessonDetailSerializer(self.lesson).data
+        self.assertEqual(data['textbook_reference']['source_type'], 'official')
+        self.assertEqual(data['textbook_reference']['pages'], '56')
+
+    def test_serialiser_returns_no_reference_for_general_content(self):
+        from .serializers import LessonDetailSerializer
+
+        other_track = CareerTrack.objects.create(
+            slug='data', title='Data', description='Data',
+        )
+        other_course = Course.objects.create(
+            slug='ds', title='DS', description='', track=other_track, language='python',
+        )
+        other_chapter = Chapter.objects.create(
+            course=other_course, title='Ch', slug='ch', order=1,
+        )
+        other_lesson = Lesson.objects.create(
+            chapter=other_chapter, title='L', slug='l', order=1,
+        )
+        data = LessonDetailSerializer(other_lesson).data
+        self.assertIsNone(data['textbook_reference'])
+
+
+# ─── Class X end-to-end (real seeded curriculum through the real API) ────────
+
+CLASS_X_SLUG = 'sindh-board-class-x-cpp'
+UNIT_CHAPTER_SLUGS = [
+    'unit-2-basics-of-programming-in-cpp',
+    'unit-3-input-output-handling-in-cpp',
+    'unit-4-control-structure',
+    'unit-5-functions',
+]
+
+
+@override_settings(AUTH_REQUIRE_EMAIL_VERIFICATION=False)
+class SindhBoardClassXEndToEndTest(TestCase):
+    """
+    Seed the real Class X textbook curriculum and walk it through the same
+    HTTP endpoints the frontend calls. This proves the published course is
+    navigable, that every chapter carries verified Sindh Board provenance, and
+    that a textbook C++ exercise genuinely executes and awards XP — not a
+    hand-built fixture, but the material a learner actually meets.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.core.management import call_command
+
+        call_command('seed_sindh_board', verbosity=0)
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username='x_learner', password='pass123')
+        UserProfile.objects.create(user=self.user, xp_points=0)
+        self.client.force_authenticate(user=self.user)
+
+    def test_published_course_lists_all_four_programming_units(self):
+        response = self.client.get(f'/api/courses/{CLASS_X_SLUG}/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        chapters = response.data['chapters']
+        self.assertEqual(len(chapters), 4)
+        self.assertEqual([c['slug'] for c in chapters], UNIT_CHAPTER_SLUGS)
+        # Every unit must carry real, verified textbook provenance.
+        for chapter in chapters:
+            ref = chapter['textbook_reference']
+            self.assertIsNotNone(ref, chapter['slug'])
+            self.assertEqual(ref['source_type'], 'official')
+            self.assertEqual(ref['verification_status'], 'verified')
+            self.assertTrue(ref['pages'])
+            # No unit is an empty shell — each has lessons.
+            self.assertGreaterEqual(len(chapter['lessons']), 4, chapter['slug'])
+
+    def test_lesson_exposes_content_and_provenance(self):
+        response = self.client.get(f'/api/courses/{CLASS_X_SLUG}/lessons/the-if-statement/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['content_body'].strip())
+        ref = response.data['textbook_reference']
+        self.assertEqual(ref['class'], 'Class X')
+        self.assertEqual(ref['unit'], 'Unit 4')
+
+    @skipUnless(SubprocessSandbox().cpp_available, 'No C++ compiler on this host')
+    def test_textbook_cpp_exercise_executes_and_awards_xp(self):
+        exercise = Exercise.objects.get(
+            slug='pass-or-fail-program', lesson__chapter__course__slug=CLASS_X_SLUG,
+        )
+        self.assertEqual(exercise.exercise_type, 'code')
+        self.assertEqual(exercise.language, 'cpp')
+
+        response = self.client.post(
+            f'/api/exercises/{exercise.id}/submit/',
+            {'code': exercise.solution_code, 'time_spent_seconds': 60},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['status'], 'correct', response.data.get('error'))
+        self.assertGreater(response.data['xp_earned'], 0)
+        self.assertTrue(
+            XPTransaction.objects.filter(user=self.user, action='exercise_complete').exists()
+        )
+        # Submitting real work auto-enrolled the learner.
+        self.assertTrue(
+            Enrollment.objects.filter(user=self.user, course__slug=CLASS_X_SLUG).exists()
+        )
+
+    @skipUnless(SubprocessSandbox().cpp_available, 'No C++ compiler on this host')
+    def test_wrong_cpp_program_is_not_marked_correct(self):
+        exercise = Exercise.objects.get(
+            slug='pass-or-fail-program', lesson__chapter__course__slug=CLASS_X_SLUG,
+        )
+        # Compiles and runs, but prints the wrong word — must fail the tests.
+        wrong = (
+            '#include <iostream>\n'
+            'using namespace std;\n'
+            'int main() {\n'
+            '    int marks; cin >> marks;\n'
+            '    cout << "Maybe";\n'
+            '    return 0;\n'
+            '}\n'
+        )
+        response = self.client.post(
+            f'/api/exercises/{exercise.id}/submit/',
+            {'code': wrong, 'time_spent_seconds': 30},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertNotEqual(response.data['status'], 'correct')
+        self.assertEqual(response.data['xp_earned'], 0)
+
+    def test_xii_remains_unpublished_shell(self):
+        """Class XII stays infrastructure-only until its book is verified."""
+        course = Course.objects.get(slug='sindh-board-class-xii-python')
+        self.assertFalse(course.is_published)
+        self.assertEqual(course.chapters.filter(is_active=True).count(), 0)
+        # Class X and XI are the two fully built, published board courses.
+        self.assertTrue(Course.objects.get(slug=CLASS_X_SLUG).is_published)
+        self.assertTrue(
+            Course.objects.get(slug='sindh-board-class-xi-python').is_published
+        )
+
+
+# ─── Class XI end-to-end (real seeded Python curriculum through the API) ──────
+
+CLASS_XI_SLUG = 'sindh-board-class-xi-python'
+XI_CHAPTER_SLUGS = [
+    'xi-programming-with-python',
+    'xi-ide-and-python-basics',
+    'xi-io-and-operators',
+    'xi-control-structures',
+    'xi-libraries-and-debugging',
+]
+
+
+@override_settings(AUTH_REQUIRE_EMAIL_VERIFICATION=False)
+class SindhBoardClassXIEndToEndTest(TestCase):
+    """
+    Seed the real Class XI Unit 3 Python curriculum and walk it through the
+    same HTTP endpoints the frontend calls. This proves the published course
+    is navigable, every chapter carries verified Sindh Board provenance, and a
+    textbook Python exercise genuinely executes in the sandbox and awards XP.
+    Unlike C++, Python needs no compiler check — the sandbox always runs it.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.core.management import call_command
+
+        call_command('seed_sindh_board', verbosity=0)
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username='xi_learner', password='pass123')
+        UserProfile.objects.create(user=self.user, xp_points=0)
+        self.client.force_authenticate(user=self.user)
+
+    def test_published_course_lists_all_unit_three_chapters(self):
+        response = self.client.get(f'/api/courses/{CLASS_XI_SLUG}/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        chapters = response.data['chapters']
+        self.assertEqual([c['slug'] for c in chapters], XI_CHAPTER_SLUGS)
+        for chapter in chapters:
+            ref = chapter['textbook_reference']
+            self.assertIsNotNone(ref, chapter['slug'])
+            self.assertEqual(ref['source_type'], 'official')
+            self.assertEqual(ref['verification_status'], 'verified')
+            self.assertTrue(ref['pages'])
+            self.assertGreaterEqual(len(chapter['lessons']), 2, chapter['slug'])
+
+    def test_lesson_exposes_content_and_provenance(self):
+        response = self.client.get(
+            f'/api/courses/{CLASS_XI_SLUG}/lessons/the-if-and-if-else-statements/'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['content_body'].strip())
+        ref = response.data['textbook_reference']
+        self.assertEqual(ref['class'], 'Class XI')
+        self.assertEqual(ref['unit'], 'Unit 3')
+
+    def test_textbook_python_exercise_executes_and_awards_xp(self):
+        exercise = Exercise.objects.get(
+            slug='cnic-or-crc', lesson__chapter__course__slug=CLASS_XI_SLUG,
+        )
+        solution = (
+            'age = int(input())\n'
+            'if age >= 18:\n'
+            '    print("Adult")\n'
+            'else:\n'
+            '    print("Minor")\n'
+        )
+        response = self.client.post(
+            f'/api/exercises/{exercise.id}/submit/',
+            {'code': solution, 'time_spent_seconds': 40},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['status'], 'correct', response.data.get('error'))
+        self.assertGreater(response.data['xp_earned'], 0)
+        self.assertTrue(
+            XPTransaction.objects.filter(user=self.user, action='exercise_complete').exists()
+        )
+        self.assertTrue(
+            Enrollment.objects.filter(user=self.user, course__slug=CLASS_XI_SLUG).exists()
+        )
+
+    def test_wrong_python_program_is_not_marked_correct(self):
+        exercise = Exercise.objects.get(
+            slug='cnic-or-crc', lesson__chapter__course__slug=CLASS_XI_SLUG,
+        )
+        # Runs fine but prints the wrong word for the 11-year-old test case.
+        wrong = (
+            'age = int(input())\n'
+            'print("Adult")\n'
+        )
+        response = self.client.post(
+            f'/api/exercises/{exercise.id}/submit/',
+            {'code': wrong, 'time_spent_seconds': 20},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertNotEqual(response.data['status'], 'correct')
+        self.assertEqual(response.data['xp_earned'], 0)
+
+
+# ─── Learning Tracks API Tests ────────────────────────────────────────────────
+
+@override_settings(AUTH_REQUIRE_EMAIL_VERIFICATION=False)
+class LearningTracksAPITest(TestCase):
+    """Contract of the Tracks discovery layer (list/detail/enroll/protect)."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username='learner', password='pass123')
+        self.board = CareerTrack.objects.create(
+            slug='qa-board', title='Sindh Board Computer Science',
+            description='Board track', category='school_board',
+            is_published=True, order=0,
+        )
+        self.programming = CareerTrack.objects.create(
+            slug='qa-programming', title='Programming Fundamentals',
+            description='Core track', category='programming',
+            is_published=True, order=1,
+            learning_objectives=['Write Python programs'],
+        )
+        self.hidden = CareerTrack.objects.create(
+            slug='draft-track', title='Draft Track', description='No',
+            category='other', is_published=False,
+        )
+        self.empty = CareerTrack.objects.create(
+            slug='ai-empty', title='Artificial Intelligence',
+            description='No courses yet', category='ai', is_published=True,
+        )
+        self.class_x = Course.objects.create(
+            slug='class-x', title='Class X', description='C++ for board class X',
+            track=self.board, academic_class='Class X', order=1,
+            language='cpp', is_published=True,
+        )
+        self.class_xi = Course.objects.create(
+            slug='class-xi', title='Class XI', description='Python for board class XI',
+            track=self.board, academic_class='Class XI', order=2,
+            language='python', is_published=True,
+        )
+        self.draft_course = Course.objects.create(
+            slug='class-xii', title='Class XII', description='Draft shell',
+            track=self.board, order=3, is_published=False,
+        )
+        self.python = Course.objects.create(
+            slug='py-101', title='Python 101', description='Intro',
+            track=self.programming, order=1, is_published=True,
+        )
+        chapter = Chapter.objects.create(course=self.python, title='B', slug='b', order=1)
+        self.lesson = Lesson.objects.create(
+            chapter=chapter, title='L', slug='l', order=1, xp_reward=50,
+        )
+
+    def _slugs(self, response):
+        return [t['slug'] for t in response.data['results']]
+
+    def test_list_only_published_tracks_with_openable_courses(self):
+        response = self.client.get('/api/tracks/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        slugs = self._slugs(response)
+        self.assertIn('qa-board', slugs)
+        self.assertIn('qa-programming', slugs)
+        # Unpublished tracks and published-but-empty tracks never surface:
+        # an empty shelf is not a browseable destination.
+        self.assertNotIn('draft-track', slugs)
+        self.assertNotIn('ai-empty', slugs)
+
+    def test_category_filter_is_database_driven(self):
+        response = self.client.get('/api/tracks/?category=school_board')
+        self.assertEqual(self._slugs(response), ['qa-board'])
+
+    def test_course_count_excludes_unpublished_courses(self):
+        response = self.client.get('/api/tracks/')
+        track = next(t for t in response.data['results'] if t['slug'] == 'qa-board')
+        self.assertEqual(track['course_count'], 2)
+
+    def test_detail_sequences_courses_and_exposes_metadata(self):
+        response = self.client.get(f'/api/tracks/{self.board.slug}/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        courses = response.data['courses']
+        self.assertEqual([c['slug'] for c in courses], ['class-x', 'class-xi'])
+        self.assertEqual([c['academic_class'] for c in courses], ['Class X', 'Class XI'])
+        self.assertEqual(courses[0]['language'], 'cpp')
+        self.assertEqual(response.data['category'], 'school_board')
+
+    def test_track_enroll_creates_one_enrollment_per_published_course(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.post(f'/api/tracks/{self.board.slug}/enroll/')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            Enrollment.objects.filter(user=self.user).count(), 2
+        )
+        self.assertFalse(
+            Enrollment.objects.filter(user=self.user, course=self.draft_course).exists()
+        )
+
+    def test_track_enroll_is_idempotent_and_keeps_progress(self):
+        self.client.force_authenticate(user=self.user)
+        self.client.post(f'/api/tracks/{self.board.slug}/enroll/')
+        LessonProgress.objects.create(
+            user=self.user, lesson=self.lesson, status='completed'
+        )
+        response = self.client.post(f'/api/tracks/{self.board.slug}/enroll/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(Enrollment.objects.filter(user=self.user).count(), 2)
+
+    def test_enroll_requires_authentication(self):
+        response = self.client.post(f'/api/tracks/{self.board.slug}/enroll/')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_detail_reports_learner_progress(self):
+        self.client.force_authenticate(user=self.user)
+        self.client.post(f'/api/tracks/{self.programming.slug}/enroll/')
+        LessonProgress.objects.create(
+            user=self.user, lesson=self.lesson, status='completed'
+        )
+        response = self.client.get(f'/api/tracks/{self.programming.slug}/')
+        self.assertEqual(response.data['enrolled_course_count'], 1)
+        self.assertEqual(response.data['progress_percentage'], 100)
+        self.assertEqual(response.data['continue_url_slug'], 'py-101')
+
+    def test_anonymous_progress_fields_are_neutral(self):
+        response = self.client.get(f'/api/tracks/{self.board.slug}/')
+        self.assertEqual(response.data['enrolled_course_count'], 0)
+        self.assertEqual(response.data['progress_percentage'], 0)
+
+    def test_track_with_courses_cannot_be_deleted(self):
+        from django.db.models.deletion import ProtectedError
+        with self.assertRaises(ProtectedError):
+            self.board.delete()
+        # Courses (and their enrollment chains) survive untouched.
+        self.assertEqual(self.board.courses.count(), 3)

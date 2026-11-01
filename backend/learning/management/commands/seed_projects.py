@@ -26,19 +26,22 @@ PROJECT_FIELDS = (
 # Used only when the track does not exist yet, so this command can run on a
 # fresh database without depending on the course seeders.
 TRACK_FALLBACKS = {
-    'python': {
-        'title': 'Python',
-        'description': 'Master Python from fundamentals to advanced concepts.',
+    'core-programming': {
+        'title': 'Programming Fundamentals',
+        'description': 'Python, C++ and the problem-solving skills every language builds on.',
+        'category': 'programming',
         'difficulty': 'beginner', 'estimated_hours': 40, 'order': 1,
     },
     'web': {
         'title': 'Web Development',
         'description': 'Build accessible interfaces and full-stack web applications.',
+        'category': 'web',
         'difficulty': 'beginner', 'estimated_hours': 40, 'order': 3,
     },
     'developer-tools': {
         'title': 'Developer Tools',
         'description': 'The everyday tools of real software work: version control and collaboration.',
+        'category': 'other',
         'difficulty': 'beginner', 'estimated_hours': 6, 'order': 2,
     },
 }
@@ -46,7 +49,7 @@ TRACK_FALLBACKS = {
 PROJECT_SPECS = [
     {
         'slug': 'expense-tracker-api',
-        'track_slug': 'python',
+        'track_slug': 'core-programming',
         'title': 'Expense Tracker API',
         'description': (
             'Build a production-shaped REST API for personal expenses with Django REST '

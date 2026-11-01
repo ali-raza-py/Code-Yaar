@@ -50,6 +50,11 @@ export const metadata: Metadata = {
   },
 };
 
+// The saved theme only reaches the DOM when Settings is saved, so without
+// this pre-paint bootstrap a hard reload always flashes light mode even for
+// a learner who chose dark ("system" follows the OS preference).
+const themeBootstrap = `try{var p=JSON.parse(localStorage.getItem("user_preferences")||"{}");var t=p.theme;if(t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme: dark)").matches)){document.documentElement.classList.add("dark")}}catch(e){}`;
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
@@ -57,6 +62,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${fraunces.variable} ${figtree.variable} ${jetbrainsMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeBootstrap }} />
+      </head>
       <body className="min-h-full flex flex-col">
         <ThemeProvider>
           <AuthProvider>

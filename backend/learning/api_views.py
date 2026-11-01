@@ -1,8 +1,10 @@
 from datetime import timedelta
 
 from rest_framework import serializers, viewsets, permissions, status, filters
-from rest_framework.decorators import api_view, permission_classes, action
+from rest_framework.decorators import api_view, permission_classes, action, throttle_classes
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -13,14 +15,14 @@ from django.utils import timezone
 
 from .models import (
     UserProfile, CareerTrack, Course, Chapter, Lesson, Exercise, Hint,
-    Resource, Project, Challenge, Enrollment, SnippetRun,
+    Resource, Project, Challenge, ChallengeSubmission, Enrollment, SnippetRun,
     LessonProgress, ExerciseAttempt, XPTransaction, Achievement,
     UserAchievement, Progress, Certification, UserCertification,
     Skill, UserSkill,
     PracticalClass, PracticalSubject, Practical, PracticalProgress,
-    PracticalBookmark, LearningActivity,
+    PracticalBookmark, LearningActivity, UserNotification,
 )
-from .services.sandbox import get_sandbox
+from .services.sandbox import get_sandbox, DevelopmentSandbox
 from .services.xp import award_xp, deduct_xp
 from .services.achievements import award_eligible_achievements
 from .services.completion import evaluate_course_completion
@@ -38,9 +40,12 @@ from .serializers import (
     ExerciseListSerializer, ExerciseDetailSerializer,
     HintSerializer, ResourceSerializer,
     ProjectSerializer, ChallengeSerializer,
+    ChallengeDetailSerializer, ChallengeRunSerializer, ChallengeSubmitSerializer,
     EnrollmentSerializer, LessonProgressSerializer,
     ExerciseAttemptSerializer, XPTransactionSerializer,
     AchievementSerializer, UserAchievementSerializer,
+    UserNotificationSerializer, NotificationPreferenceSerializer,
+    AvatarUploadSerializer,
     ProgressSerializer,
     CertificationSerializer, UserCertificationSerializer,
     SkillSerializer, UserSkillSerializer,
@@ -78,6 +83,28 @@ def _award_lesson_xp(user, lesson):
     return transaction.amount if transaction else 0
 
 
+def _badge_announcements(newly_awarded):
+    """Compact payload describing badges unlocked by this action.
+
+    Lets completion responses announce unlocks in-band, so the client shows
+    the toast immediately rather than polling the notifications feed.
+    """
+    return [
+        {
+            'slug': ua.achievement.slug,
+            'title': ua.achievement.title,
+            'description': ua.achievement.description,
+            'icon': ua.achievement.icon,
+            'category': ua.achievement.category,
+            'difficulty': ua.achievement.difficulty,
+            'xp_bonus': ua.achievement.xp_bonus,
+            'public_id': ua.public_id,
+            'credential_id': ua.credential_id,
+        }
+        for ua in newly_awarded
+    ]
+
+
 # ─── Sandbox snippet execution (lesson code blocks) ──────────────────────
 
 SNIPPET_DAILY_LIMIT = 150
@@ -85,7 +112,9 @@ SNIPPET_DAILY_LIMIT = 150
 
 class SnippetRunSerializer(serializers.Serializer):
     code = serializers.CharField(max_length=5000)
-    language = serializers.ChoiceField(choices=['python'], default='python')
+    # Only languages the configured sandbox really executes. JavaScript/Java
+    # snippets stay non-runnable in the UI rather than pretending to run.
+    language = serializers.ChoiceField(choices=['python', 'cpp'], default='python')
 
 
 @api_view(['POST'])
@@ -123,15 +152,65 @@ def execute_snippet_view(request):
 # ─── Content ViewSets ───────────────────────────────────────────────────────
 
 class CareerTrackViewSet(viewsets.ReadOnlyModelViewSet):
-    """List and retrieve career tracks."""
-    queryset = CareerTrack.objects.filter(is_active=True)
+    """List and retrieve published learning tracks.
+
+    The learner-facing Tracks page is driven entirely by these records:
+    admins create, categorize, sequence and publish tracks in the dashboard
+    — nothing about the hierarchy is hardcoded in the frontend.
+    """
+    queryset = CareerTrack.objects.filter(is_active=True, is_published=True)
     permission_classes = [permissions.AllowAny]
     lookup_field = 'slug'
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['title', 'description']
+    ordering_fields = ['order', 'title', 'estimated_hours']
 
     def get_serializer_class(self):
         if self.action == 'list':
             return CareerTrackListSerializer
         return CareerTrackSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        category = self.request.query_params.get('category')
+        if category:
+            qs = qs.filter(category=category)
+        # Tracks without a single openable course are not a browseable
+        # destination, so they never reach the learner-facing list.
+        qs = qs.filter(courses__is_active=True, courses__is_published=True).distinct()
+        return qs
+
+    @action(
+        detail=True,
+        methods=['post'],
+        permission_classes=[permissions.IsAuthenticated, IsEmailVerified],
+    )
+    def enroll(self, request, slug=None):
+        """Enroll the current user in every published course of a track.
+
+        Follows the same rules as course enrollment (idempotent
+        get_or_create), so re-clicking Enroll never duplicates rows and
+        already-started courses keep their progress untouched.
+        """
+        track = self.get_object()
+        courses = list(track.published_courses)
+        if not courses:
+            return Response(
+                {'detail': 'This track has no published courses yet.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        enrolled, newly = [], []
+        for course in courses:
+            enrollment, created = Enrollment.objects.get_or_create(
+                user=request.user, course=course, defaults={'status': 'active'}
+            )
+            enrolled.append(enrollment)
+            if created:
+                newly.append(course.slug)
+        return Response(
+            EnrollmentSerializer(enrolled, many=True).data,
+            status=status.HTTP_201_CREATED if newly else status.HTTP_200_OK,
+        )
 
 
 class CourseViewSet(viewsets.ReadOnlyModelViewSet):
@@ -310,13 +389,14 @@ class LessonViewSet(viewsets.ReadOnlyModelViewSet):
         # Re-evaluate strict, server-side course completion now that lesson
         # state may have changed.
         evaluate_course_completion(user, lesson.chapter.course)
-        award_eligible_achievements(user, lesson=lesson)
+        awarded = award_eligible_achievements(user, lesson=lesson)
 
         remaining = max(total_exercises - solved_exercises, 0)
         return Response({
             'status': progress.status,
             'xp_awarded': xp_awarded,
             'exercises_remaining': remaining,
+            'awarded_badges': _badge_announcements(awarded),
             'message': (
                 'Lesson completed.' if progress.status == 'completed' else
                 f'Solve {remaining} more exercise{"s" if remaining != 1 else ""} to complete this lesson.'
@@ -473,6 +553,7 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
             # If correct, award XP and update progress; auto-enroll so progress
             # is never lost for learners who started reading before enrolling.
             xp_awarded = 0
+            awarded = []
             if result['status'] == 'correct':
                 Enrollment.objects.get_or_create(
                     user=request.user, course=exercise.lesson.chapter.course,
@@ -481,7 +562,7 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
                 xp_awarded = self._award_xp(request.user, exercise, attempt)
                 self._update_lesson_progress(request.user, exercise.lesson)
                 evaluate_course_completion(request.user, exercise.lesson.chapter.course)
-                award_eligible_achievements(request.user, lesson=exercise.lesson)
+                awarded = award_eligible_achievements(request.user, lesson=exercise.lesson)
             if exercise.is_final_assessment:
                 record_learning_activity(
                     request.user, 'quiz_attempted', f'Attempted {exercise.title}',
@@ -497,6 +578,7 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
             'error': result.get('error', ''),
             'test_results': result.get('test_results', []),
             'xp_earned': xp_awarded,
+            'awarded_badges': _badge_announcements(awarded),
             'correct_answer': result.get('correct_answer'),
             'explain': result.get('explain', ''),
             'attempt_id': attempt.id,
@@ -662,8 +744,9 @@ class ProjectViewSet(viewsets.ReadOnlyModelViewSet):
         return qs
 
 
+
 class ChallengeViewSet(viewsets.ReadOnlyModelViewSet):
-    """List and retrieve challenges."""
+    """List, retrieve, run and submit challenges."""
     queryset = Challenge.objects.filter(is_active=True)
     serializer_class = ChallengeSerializer
     permission_classes = [permissions.AllowAny]
@@ -672,15 +755,366 @@ class ChallengeViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ['title', 'description', 'topic']
     ordering_fields = ['title', 'estimated_minutes']
 
+    action_permissions = {
+        'run': [permissions.IsAuthenticated],
+        'submit': [permissions.IsAuthenticated, IsEmailVerified],
+    }
+
+    def get_permissions(self):
+        classes = self.action_permissions.get(
+            self.action, self.permission_classes
+        )
+        return [permission() for permission in classes]
+
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return ChallengeDetailSerializer
+        return ChallengeSerializer
+
     def get_queryset(self):
         qs = super().get_queryset()
+        user = self.request.user
+
+        if user.is_authenticated:
+            qs = qs.annotate(
+                solved_count=Count(
+                    'submissions',
+                    filter=Q(
+                        submissions__user=user,
+                        submissions__status='correct',
+                    ),
+                    distinct=True,
+                ),
+                attempt_count=Count(
+                    'submissions',
+                    filter=Q(submissions__user=user),
+                    distinct=True,
+                ),
+            )
+
         topic = self.request.query_params.get('topic')
         difficulty = self.request.query_params.get('difficulty')
+
         if topic:
             qs = qs.filter(topic__icontains=topic)
+
         if difficulty:
             qs = qs.filter(difficulty=difficulty)
+
         return qs
+
+    @staticmethod
+    def _test_dicts(test_results) -> list[dict]:
+        return [
+            {
+                'test': tr.test_number,
+                'status': tr.status,
+                'message': tr.message,
+                'expected': getattr(tr, 'expected', ''),
+                'actual': getattr(tr, 'actual', ''),
+            }
+            for tr in test_results
+        ]
+
+    def _run_challenge_tests(self, challenge, code, language, tests):
+        sandbox = get_sandbox()
+
+        if isinstance(sandbox, DevelopmentSandbox):
+            return None, [
+                {
+                    'test': i + 1,
+                    'status': 'pending',
+                    'message': (
+                        'Automated evaluation is not available '
+                        'on this server yet.'
+                    ),
+                    'expected': str(t.get('expected_output', '')),
+                    'actual': '',
+                }
+                for i, t in enumerate(tests)
+            ]
+
+        results = sandbox.run_tests(
+            code=code,
+            language=language,
+            test_cases=tests,
+        )
+        return sandbox, self._test_dicts(results)
+
+    @action(detail=True, methods=['post'])
+    def run(self, request, slug=None):
+        challenge = self.get_object()
+        serializer = ChallengeRunSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        language = serializer.validated_data.get('language', 'python')
+
+        if language not in challenge.supported_languages():
+            return Response(
+                {'detail': f'{language} is not offered for this challenge.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        code = (
+            serializer.validated_data.get('code')
+            or challenge.starter_for(language)
+        )
+
+        if not code.strip():
+            return Response({
+                'status': 'error',
+                'output': '',
+                'error': 'No code to run.',
+                'test_results': [],
+                'runtime_ms': 0,
+            })
+
+        _, test_results = self._run_challenge_tests(
+            challenge,
+            code,
+            language,
+            challenge.sample_tests or challenge.hidden_tests,
+        )
+
+        passed = sum(
+            1 for test in test_results
+            if test['status'] == 'passed'
+        )
+
+        return Response({
+            'status': 'success',
+            'output': '',
+            'error': '',
+            'test_results': test_results,
+            'summary': (
+                f'{passed}/{len(test_results)} sample tests passed'
+                if test_results else 'No sample tests defined.'
+            ),
+        })
+
+    @action(detail=True, methods=['post'])
+    def submit(self, request, slug=None):
+        challenge = self.get_object()
+        serializer = ChallengeSubmitSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        submission_id = (
+            serializer.validated_data.get('submission_id') or None
+        )
+
+        # Idempotent replay: the ID must belong to this user AND challenge.
+        if submission_id:
+            existing = ChallengeSubmission.objects.filter(
+                submission_id=submission_id
+            ).first()
+
+            if existing is not None:
+                if existing.user_id != request.user.id:
+                    return Response(
+                        {
+                            'detail': (
+                                'This submission id belongs '
+                                'to another account.'
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                if existing.challenge_id != challenge.id:
+                    return Response(
+                        {
+                            'detail': (
+                                'This submission id belongs '
+                                'to another challenge.'
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                return Response(
+                    self._submission_payload(
+                        challenge,
+                        existing,
+                        replay=True,
+                    )
+                )
+
+        language = serializer.validated_data.get('language', 'python')
+
+        if language not in challenge.supported_languages():
+            return Response(
+                {'detail': f'{language} is not offered for this challenge.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        code = serializer.validated_data.get('code') or ''
+        time_spent = serializer.validated_data.get(
+            'time_spent_seconds', 0
+        )
+
+        if (
+            not code.strip()
+            or code.strip() == challenge.starter_for(language).strip()
+        ):
+            return Response({
+                'status': 'incorrect',
+                'feedback': (
+                    "It looks like you haven't written a solution yet. "
+                    'Implement the function and try again.'
+                ),
+                'test_results': [],
+                'xp_earned': 0,
+                'xp_total': challenge.xp_reward,
+                'solved': challenge.submissions.filter(
+                    user=request.user,
+                    status='correct',
+                ).exists(),
+                'duplicate': False,
+                'awarded_badges': [],
+            })
+
+        hidden = challenge.hidden_tests or challenge.sample_tests
+
+        sandbox, test_results = self._run_challenge_tests(
+            challenge,
+            code,
+            language,
+            hidden,
+        )
+
+        if sandbox is None:
+            verdict_status = 'running'
+            all_passed = False
+            feedback = (
+                'Your submission was saved, but this server has no code '
+                'evaluator connected yet, so we cannot confirm correctness.'
+            )
+        else:
+            all_passed = bool(test_results) and all(
+                test['status'] == 'passed'
+                for test in test_results
+            )
+
+            verdict_status = 'correct' if all_passed else 'incorrect'
+
+            if all_passed:
+                count = len(test_results)
+                feedback = (
+                    f'All {count} test'
+                    f'{"es" if count != 1 else ""} passed. Great work.'
+                )
+            else:
+                failure = next(
+                    (
+                        test for test in test_results
+                        if test['status'] != 'passed'
+                    ),
+                    None,
+                )
+
+                if failure is None:
+                    feedback = (
+                        'No runnable test cases are defined '
+                        'for this challenge yet.'
+                    )
+                elif failure['status'] == 'error':
+                    feedback = (
+                        f'Your program raised an error on test '
+                        f'{failure["test"]}: {failure["message"]}'
+                    )
+                else:
+                    feedback = (
+                        f'Test {failure["test"]} failed. '
+                        f'Expected {failure["expected"]!r}, '
+                        f'got {failure["actual"]!r}.'
+                    )
+
+        attempt_number = ChallengeSubmission.objects.filter(
+            user=request.user,
+            challenge=challenge,
+        ).count() + 1
+
+        xp_awarded = 0
+
+        with transaction.atomic():
+            submission = ChallengeSubmission.objects.create(
+                user=request.user,
+                challenge=challenge,
+                submission_id=submission_id,
+                language=language,
+                status=verdict_status,
+                submitted_code=code,
+                feedback=feedback,
+                test_results=test_results,
+                time_spent_seconds=time_spent,
+                attempt_number=attempt_number,
+            )
+
+            if all_passed:
+                created = award_xp(
+                    request.user,
+                    challenge.xp_reward,
+                    'challenge_complete',
+                    obj=challenge,
+                    description=(
+                        f'Challenge completed: {challenge.title}'
+                    ),
+                )
+
+                if created is not None:
+                    xp_awarded = created.amount
+
+                submission.xp_earned = xp_awarded
+                submission.status = 'correct'
+                submission.save(
+                    update_fields=['xp_earned', 'status']
+                )
+
+        awarded = award_eligible_achievements(request.user)
+
+        payload = self._submission_payload(
+            challenge,
+            submission,
+            replay=False,
+        )
+        payload['feedback'] = feedback
+        payload['test_results'] = test_results
+        payload['xp_earned'] = xp_awarded
+        payload['awarded_badges'] = _badge_announcements(awarded)
+
+        return Response(payload)
+
+    def _submission_payload(self, challenge, submission, *, replay):
+        solved = ChallengeSubmission.objects.filter(
+            user=submission.user,
+            challenge=challenge,
+            status='correct',
+        ).exists()
+
+        data = {
+            'status': submission.status,
+            'feedback': submission.feedback,
+            'test_results': submission.test_results,
+            'xp_earned': 0 if replay else submission.xp_earned,
+            'xp_total': submission.xp_earned,
+            'solved': solved,
+            'attempt_id': submission.id,
+            'duplicate': replay,
+            'awarded_badges': [],
+        }
+
+        if solved:
+            data['solution_explanation'] = (
+                challenge.solution_explanation
+            )
+            data['time_complexity'] = challenge.time_complexity
+            data['space_complexity'] = challenge.space_complexity
+            data['reference_solution'] = challenge.solution_for(
+                submission.language
+            )
+
+        return data
+
 
 
 class PracticalClassViewSet(viewsets.ReadOnlyModelViewSet):
@@ -1445,6 +1879,7 @@ def profile_stats_view(request):
     all_achievements = Achievement.objects.filter(is_active=True)
     total_achievements = all_achievements.count()
     from .badge_art import level_label, palette_for
+    from .services.achievements import measure_progress
     earned_records = {
         item.achievement_id: item
         for item in UserAchievement.objects.filter(
@@ -1452,9 +1887,11 @@ def profile_stats_view(request):
         )
     }
     achievements_data = []
+    next_badge = None
     for achievement in all_achievements:
         record = earned_records.get(achievement.id)
         _, _, category_label = palette_for(achievement)
+        current, target = measure_progress(user, achievement)
         achievements_data.append({
             'id': achievement.id,
             'slug': achievement.slug,
@@ -1463,6 +1900,9 @@ def profile_stats_view(request):
             'icon': achievement.icon,
             'category': achievement.category,
             'category_label': category_label,
+            'difficulty': achievement.difficulty,
+            'difficulty_label': achievement.get_difficulty_display(),
+            'how_to_earn': achievement.how_to_earn,
             'level_label': level_label(achievement),
             'xp_bonus': achievement.xp_bonus,
             'earned': record is not None,
@@ -1472,7 +1912,28 @@ def profile_stats_view(request):
             'recipient_name': record.recipient_name if record else None,
             'verification_url': record.verification_url() if record else None,
             'status': record.status if record else None,
+            'progress': {
+                'current': min(current, target),
+                'target': target,
+                'complete': current >= target,
+            },
         })
+        # Next achievable: the closest locked badge with any progress.
+        if record is None and current > 0 and current < target:
+            ratio = current / target if target else 0
+            if next_badge is None or ratio > next_badge['_ratio']:
+                next_badge = {
+                    'slug': achievement.slug,
+                    'title': achievement.title,
+                    'description': achievement.description,
+                    'how_to_earn': achievement.how_to_earn,
+                    'difficulty': achievement.difficulty,
+                    'difficulty_label': achievement.get_difficulty_display(),
+                    'progress': {'current': current, 'target': target},
+                    '_ratio': ratio,
+                }
+    if next_badge is not None:
+        next_badge.pop('_ratio', None)
 
     # Skills
     skills = UserSkill.objects.filter(user=user).select_related('skill')
@@ -1522,12 +1983,20 @@ def profile_stats_view(request):
             'date_joined': user.date_joined.isoformat(),
         },
         'profile': {
-            'avatar': profile.avatar,
+            'avatar': profile.avatar_url(),
             'bio': profile.bio,
+            'location': profile.location,
             'role': profile.role,
+            'website_url': profile.website_url,
             'xp_points': profile.xp_points,
             'streak_days': profile.streak_days,
+            'longest_streak': profile.longest_streak,
             'level': profile.level,
+            'is_profile_public': profile.is_profile_public,
+            'show_badges': profile.show_badges,
+            'show_activity': profile.show_activity,
+            'show_courses': profile.show_courses,
+            'notification_preferences': profile.notification_preferences,
             'last_active_at': profile.last_active_at.isoformat() if profile.last_active_at else None,
         },
         'stats': {
@@ -1545,7 +2014,250 @@ def profile_stats_view(request):
         'xp_breakdown': xp_breakdown,
         'xp_history': xp_history,
         'achievements': achievements_data,
+        'next_badge': next_badge,
         'skills': skills_data,
         'certifications': certs_data,
         'active_enrollments': active_enrollments_data,
+    })
+
+
+# ─── Avatar upload, notifications, preferences, public profile ────────────
+
+AVATAR_MAX_PIXELS = 512
+
+
+class AvatarUploadThrottle(ScopedRateThrottle):
+    scope = 'avatar_upload'
+
+
+def _encode_avatar(image_bytes, content_type):
+    """Re-open, centre-crop to square, resize and re-encode to bounded JPEG.
+
+    Re-encoding strips EXIF/metadata and any payload a malicious file could
+    hide, and guarantees a real raster lands in storage. Pillow already
+    validated the bytes are a decodable image in the serializer.
+    """
+    import io
+    from PIL import Image, ImageOps
+
+    img = Image.open(io.BytesIO(image_bytes))
+    img = ImageOps.exif_transpose(img)
+    img = img.convert('RGB')
+    width, height = img.size
+    side = min(width, height)
+    left = (width - side) // 2
+    top = (height - side) // 2
+    img = img.crop((left, top, left + side, top + side))
+    img.thumbnail((AVATAR_MAX_PIXELS, AVATAR_MAX_PIXELS), Image.LANCZOS)
+    out = io.BytesIO()
+    img.save(out, format='JPEG', quality=88, optimize=True)
+    out.seek(0)
+    return out.read(), 'image/jpeg'
+
+
+@api_view(['POST', 'DELETE'])
+@permission_classes([permissions.IsAuthenticated])
+@throttle_classes([AvatarUploadThrottle])
+def avatar_view(request):
+    """Upload or remove the signed-in learner's profile picture."""
+    from django.core.files.base import ContentFile
+
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+
+    if request.method == 'DELETE':
+        if profile.avatar:
+            profile.avatar.delete(save=False)
+        profile.avatar = ''
+        profile.save(update_fields=['avatar'])
+        return Response({'avatar': '', 'detail': 'Profile picture removed.'})
+
+    serializer = AvatarUploadSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    upload = serializer.validated_data['file']
+    raw = upload.read()
+    try:
+        data, _ = _encode_avatar(raw, upload.content_type)
+    except Exception:
+        return Response(
+            {'file': ['The image could not be processed. Try another file.']},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if profile.avatar:
+        profile.avatar.delete(save=False)
+    filename = f"avatar_{request.user.pk}.jpg"
+    profile.avatar.save(filename, ContentFile(data), save=True)
+    return Response({'avatar': profile.avatar_url()})
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def notifications_view(request):
+    """List the learner's notifications, newest first, with an unread count."""
+    qs = UserNotification.objects.filter(user=request.user)
+    unread = qs.filter(read_at__isnull=True).count()
+    page = self_paginate(request, qs)
+    data = UserNotificationSerializer(page.object_list, many=True).data
+    return Response({
+        'results': data,
+        'unread_count': unread,
+        'next': page.has_next(),
+        'previous': page.has_previous(),
+    })
+
+
+def self_paginate(request, queryset, default_size=20):
+    """Small manual paginator reusing the project's PAGE_SIZE convention."""
+    from django.core.paginator import Paginator
+
+    try:
+        size = int(request.query_params.get('page_size') or default_size)
+    except ValueError:
+        size = default_size
+    size = max(1, min(size, 100))
+    paginator = Paginator(queryset, size)
+    try:
+        page_number = int(request.query_params.get('page') or 1)
+    except ValueError:
+        page_number = 1
+    return paginator.get_page(page_number)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def notification_read_view(request, pk):
+    notification = get_object_or_404(
+        UserNotification, pk=pk, user=request.user,
+    )
+    if notification.read_at is None:
+        notification.read_at = timezone.now()
+        notification.save(update_fields=['read_at'])
+    return Response({'id': notification.id, 'unread': False})
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def notifications_read_all_view(request):
+    updated = UserNotification.objects.filter(
+        user=request.user, read_at__isnull=True,
+    ).update(read_at=timezone.now())
+    return Response({'marked_read': updated})
+
+
+@api_view(['PATCH'])
+@permission_classes([permissions.IsAuthenticated])
+def notification_preferences_view(request):
+    """Persist account-level notification toggles on the profile."""
+    serializer = NotificationPreferenceSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    prefs = dict(profile.notification_preferences or {})
+    prefs.update(serializer.validated_data)
+    profile.notification_preferences = prefs
+    profile.save(update_fields=['notification_preferences'])
+    return Response({'notification_preferences': prefs})
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def account_deletion_request_view(request):
+    """Record a deletion request for admin follow-up; never deletes in-line."""
+    from .models import AuthenticationAuditLog
+
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    if profile.deletion_requested_at is None:
+        profile.deletion_requested_at = timezone.now()
+        profile.save(update_fields=['deletion_requested_at'])
+    AuthenticationAuditLog.objects.create(
+        user=request.user,
+        event='profile_updated',
+        identifier=request.user.username,
+        metadata={'deletion_requested': True},
+    )
+    return Response({
+        'detail': 'Your deletion request was recorded. Our team reviews these '
+                  'requests; your account and data stay intact until then.',
+        'requested_at': profile.deletion_requested_at.isoformat(),
+    })
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def public_profile_view(request, username):
+    """Shareable public profile, honoring the owner's privacy choices.
+
+    Never exposes email or any sensitive account field. Unknown users and
+    profiles the owner made private both resolve to a 404 so a probe cannot
+    distinguish 'does not exist' from 'hidden by choice'.
+    """
+    from django.contrib.auth import get_user_model
+
+    User = get_user_model()
+    user = User.objects.filter(username__iexact=username).select_related('profile').first()
+    profile = getattr(user, 'profile', None) if user else None
+    if user is None or profile is None or not profile.is_profile_public:
+        return Response({'detail': 'Profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    completed_courses = Enrollment.objects.filter(
+        user=user, status='completed',
+    ).select_related('course', 'course__track')
+    tracks_completed = []
+    if profile.show_courses:
+        seen = set()
+        for enrollment in completed_courses:
+            track = enrollment.course.track
+            if track.pk not in seen:
+                seen.add(track.pk)
+                tracks_completed.append({'slug': track.slug, 'title': track.title})
+
+    badges_data = []
+    if profile.show_badges:
+        earned = UserAchievement.objects.filter(
+            user=user, status='active', achievement__is_active=True,
+        ).select_related('achievement')
+        for ua in earned:
+            badges_data.append({
+                'slug': ua.achievement.slug,
+                'title': ua.achievement.title,
+                'description': ua.achievement.description,
+                'icon': ua.achievement.icon,
+                'category': ua.achievement.category,
+                'difficulty': ua.achievement.difficulty,
+                'earned_at': ua.earned_at.isoformat(),
+                'verification_url': ua.verification_url(),
+            })
+
+    activity = []
+    if profile.show_activity:
+        recent = XPTransaction.objects.filter(user=user).order_by('-created_at')[:8]
+        activity = [{
+            'amount': t.amount,
+            'action': t.action,
+            'description': t.description,
+            'created_at': t.created_at.isoformat(),
+        } for t in recent if t.description]
+
+    return Response({
+        'username': user.username,
+        'display_name': profile.full_name,
+        'avatar': profile.avatar_url(),
+        'bio': profile.bio,
+        'location': profile.location,
+        'joined_at': user.date_joined.isoformat(),
+        'github_url': profile.github_url,
+        'linkedin_url': profile.linkedin_url,
+        'website_url': profile.website_url,
+        'stats': {
+            'level': profile.level,
+            'xp_points': profile.xp_points,
+            'streak_days': profile.streak_days,
+            'longest_streak': profile.longest_streak,
+            'courses_completed': completed_courses.count(),
+            'badges_earned': len(badges_data),
+        },
+        'show_badges': profile.show_badges,
+        'show_courses': profile.show_courses,
+        'show_activity': profile.show_activity,
+        'badges': badges_data,
+        'tracks_completed': tracks_completed,
+        'recent_activity': activity,
     })

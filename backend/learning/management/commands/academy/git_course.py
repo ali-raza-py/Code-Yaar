@@ -19,8 +19,9 @@ COURSE = {
     'language': 'other',
     'prerequisites': 'Basic comfort with a terminal / command prompt.',
     'track': {
-        'slug': 'tools',
+        'slug': 'developer-tools',
         'title': 'Developer Tools',
+        'category': 'other',
         'description': 'The professional tooling every developer is expected to know.',
     },
     'objectives': [

@@ -24,6 +24,7 @@ COURSE = {
     'track': {
         'slug': 'web',
         'title': 'Web Development',
+        'category': 'web',
         'description': 'Build modern websites from structure to interactivity.',
     },
     'objectives': [

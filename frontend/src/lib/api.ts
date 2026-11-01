@@ -1,4 +1,4 @@
-import type { Challenge, Chapter, Course, Enrollment, ExerciseDetail, ExerciseResult, LessonDetail, Project, PracticalAdmin, PracticalClass, PracticalClassAdmin, PracticalDetail, PracticalSubject, PracticalSubjectAdmin, PracticalSummary } from "@/types";
+import type { Challenge, ChallengeDetail, ChallengeRunResult, ChallengeSubmitResult, Chapter, Course, Enrollment, ExerciseDetail, ExerciseResult, LessonDetail, Project, PracticalAdmin, PracticalClass, PracticalClassAdmin, PracticalDetail, PracticalSubject, PracticalSubjectAdmin, PracticalSummary } from "@/types";
 
 /**
  * API client for Code-Yaar learning platform.
@@ -737,8 +737,15 @@ export const practicalAdmin = {
 
 // ─── Sandbox Snippet Execution (lesson "Run" buttons) ────────────────────
 
+/**
+ * Languages the backend sandbox really executes. Keep in sync with
+ * SnippetRunSerializer in backend/learning/api_views.py — a snippet in any
+ * other language must render without a Run button rather than fake a result.
+ */
+export type RunnableLanguage = 'python' | 'cpp';
+
 export const sandbox = {
-  execute: (code: string, language: 'python' = 'python') =>
+  execute: (code: string, language: RunnableLanguage = 'python') =>
     request<{ status: string; output: string; error: string; execution_time_ms: number }>(
       '/execute/',
       { method: 'POST', body: JSON.stringify({ code, language }) }
@@ -804,23 +811,59 @@ export const progress = {
 
 // ─── Tracks ─────────────────────────────────────────────────────────────────
 
+export type TrackCategory = 'school_board' | 'programming' | 'web' | 'ai' | 'other';
+
 export interface TrackSummary {
   id: number;
   slug: string;
   title: string;
   description: string;
   icon: string;
+  category: TrackCategory;
+  category_display: string;
+  cover_url: string | null;
+  learning_objectives: string[];
   difficulty: string;
   estimated_hours: number;
   course_count: number;
+  total_xp: number;
+  enrolled: boolean;
+  progress_percentage: number;
+}
+
+export interface TrackDetail {
+  id: number;
+  slug: string;
+  title: string;
+  description: string;
+  icon: string;
+  category: TrackCategory;
+  category_display: string;
+  cover_url: string | null;
+  learning_objectives: string[];
+  difficulty: string;
+  estimated_hours: number;
+  courses: Course[];
+  course_count: number;
+  total_xp: number;
+  enrolled_course_count: number;
+  completed_course_count: number;
+  progress_percentage: number;
+  continue_url_slug: string | null;
 }
 
 export const tracks = {
-  list: async (): Promise<TrackSummary[]> => {
-    const data = await request<Paginated<TrackSummary>>('/tracks/');
+  list: async (params?: { category?: TrackCategory | ''; search?: string }): Promise<TrackSummary[]> => {
+    const query = new URLSearchParams();
+    if (params?.category) query.set('category', params.category);
+    if (params?.search) query.set('search', params.search);
+    const qs = query.toString();
+    const data = await request<Paginated<TrackSummary>>(`/tracks/${qs ? `?${qs}` : ''}`);
     return unwrapList(data);
   },
-  detail: (slug: string) => request<TrackSummary>(`/tracks/${slug}/`),
+  detail: (slug: string) => request<TrackDetail>(`/tracks/${slug}/`),
+  enroll: (slug: string) =>
+    request<Enrollment[]>(`/tracks/${slug}/enroll/`, { method: 'POST' }),
 };
 
 // ─── Leaderboard ────────────────────────────────────────────────────────────
@@ -873,7 +916,17 @@ export const challenges = {
     );
     return unwrapList(data);
   },
-  detail: (slug: string) => request<Challenge>(`/challenges/${slug}/`),
+  detail: (slug: string) => request<ChallengeDetail>(`/challenges/${slug}/`),
+  run: (slug: string, data: { code: string; language: string }) =>
+    request<ChallengeRunResult>(`/challenges/${slug}/run/`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  submit: (slug: string, data: { code: string; language: string; submission_id?: string; time_spent_seconds?: number }) =>
+    request<ChallengeSubmitResult>(`/challenges/${slug}/submit/`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
 
 // ─── Profile Stats ────────────────────────────────────────────────────────

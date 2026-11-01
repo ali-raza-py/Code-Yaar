@@ -16,16 +16,25 @@ import { useAuth } from "@/hooks/use-auth";
  */
 const BROWSE_ROUTES = ["/learn", "/projects", "/challenges", "/leaderboard"];
 
+// The whole tracks discovery layer (list + detail) is public reading; the
+// action-heavy course workspace under /learn/<course> stays guarded.
+// A challenge problem statement is likewise public reading — running and
+// submitting inside it are guarded by the API, not by this shell.
+const BROWSE_PREFIXES = ["/learn/tracks", "/challenges/"];
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { user, loading } = useAuth();
+  const isBrowseRoute =
+    BROWSE_ROUTES.includes(pathname) ||
+    BROWSE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 
   // Signed in (or still restoring the session): the dashboard shell exactly
   // as it always was. Rendering RequireAuth while loading also means a
   // returning learner never flashes the public chrome, and a visitor whose
   // session check comes back empty unmounts RequireAuth before its redirect
   // effect can fire.
-  if (!BROWSE_ROUTES.includes(pathname) || loading || user) {
+  if (!isBrowseRoute || loading || user) {
     return (
       <RequireAuth>
         <AppShell>{children}</AppShell>

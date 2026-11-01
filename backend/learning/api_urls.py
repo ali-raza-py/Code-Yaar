@@ -34,6 +34,27 @@ urlpatterns = [
     path('profile/stats/', api_views.profile_stats_view, name='api-profile-stats'),
     path('progress/', api_views.progress_dashboard_view, name='api-progress-dashboard'),
 
+    # Profile picture upload / removal (multipart, throttled)
+    path('profile/avatar/', api_views.avatar_view, name='api-avatar'),
+
+    # Account-level notification preferences
+    path('profile/preferences/', api_views.notification_preferences_view,
+         name='api-notification-preferences'),
+
+    # In-app notifications
+    path('notifications/', api_views.notifications_view, name='api-notifications'),
+    path('notifications/read-all/', api_views.notifications_read_all_view,
+         name='api-notifications-read-all'),
+    path('notifications/<int:pk>/read/', api_views.notification_read_view,
+         name='api-notification-read'),
+
+    # Public, shareable profile
+    path('users/<str:username>/', api_views.public_profile_view, name='api-public-profile'),
+
+    # Account deletion request (recorded for admin follow-up)
+    path('account/deletion-request/', api_views.account_deletion_request_view,
+         name='api-account-deletion-request'),
+
     # Public badge verification + owner downloads
     path('badges/verify/<str:identifier>/', api_views.verify_badge, name='badge-verify'),
     path('badges/verify/<str:identifier>/image.png', api_views.public_badge_image, name='badge-verify-image'),
@@ -115,8 +136,9 @@ urlpatterns = [
         name='exercise-hint',
     ),
 
-    # Certificate issuance, download, and public verification
-    path('', include('certificates.urls')),
+    # Certificate issuance, download, and public verification are mounted once
+    # in config/urls.py under the same api/ prefix; including them again here
+    # produced a urls.W005 duplicate-pattern warning.
 
     # Router URLs
     path('', include(router.urls)),

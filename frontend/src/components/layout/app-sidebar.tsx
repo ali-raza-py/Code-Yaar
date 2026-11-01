@@ -31,7 +31,7 @@ import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 
-type QueryKey = "mode" | "view";
+type QueryKey = "mode" | "view" | "track";
 
 interface NavItem {
   href: string;
@@ -56,8 +56,8 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/learn?view=tracks", label: "Tracks", icon: Layers, query: { view: "tracks" } },
       { href: "/learn?view=courses", label: "Courses", icon: BookOpen, query: { view: "courses" } },
-          { href: "/learn/practicals", label: "Practicals", icon: ClipboardCheck },
-          { href: "/challenges", label: "Practice", icon: Dumbbell },
+      { href: "/learn/practicals", label: "Practicals", icon: ClipboardCheck },
+      { href: "/challenges", label: "Practice", icon: Dumbbell },
       {
         href: "/challenges?mode=assessments",
         label: "Assessments",
@@ -204,7 +204,9 @@ function SidebarGroup({
           >
             {group.items.map((item) => (
               <SidebarLink
-                key={item.label}
+                // Hrefs are unique per entry; labels can collide when two
+                // tracks share a title (keying by label breaks React here).
+                key={item.href}
                 item={item}
                 active={isNavItemActive(item, pathname, searchParams)}
                 onNavigate={onNavigate}
@@ -281,6 +283,10 @@ function SidebarPanel({
         </ul>
 
         {navGroups.map((group) => (
+          // Tracks are served by the API and surfaced on the Tracks page, so
+          // an admin adding a track needs no frontend change here. The sidebar
+          // deliberately stays flat: languages and courses are discovered
+          // inside tracks, never injected as nav items.
           <SidebarGroup
             key={group.label}
             group={group}

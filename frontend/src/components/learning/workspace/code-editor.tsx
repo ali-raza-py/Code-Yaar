@@ -26,6 +26,7 @@ import {
 } from '@codemirror/language';
 import { python } from '@codemirror/lang-python';
 import { javascript } from '@codemirror/lang-javascript';
+import { cpp } from '@codemirror/lang-cpp';
 import { sql } from '@codemirror/lang-sql';
 import { tags as t } from '@lezer/highlight';
 
@@ -66,6 +67,12 @@ function languageExtension(lang: string): Extension {
       return javascript({ typescript: lang.toLowerCase().startsWith('ts'), jsx: true });
     case 'sql':
       return sql();
+    case 'cpp':
+    case 'c++':
+    case 'cxx':
+    case 'cpp-static':
+    case 'c++-static':
+      return cpp();
     default:
       return [];
   }

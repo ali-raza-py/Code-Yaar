@@ -21,9 +21,14 @@ COURSE = {
     'language': 'cpp',
     'prerequisites': 'Basic programming logic (Python course recommended first).',
     'track': {
-        'slug': 'cpp',
-        'title': 'C++',
-        'description': 'Compiled-language fundamentals with practical problem solving.',
+        'slug': 'core-programming',
+        'title': 'Programming Fundamentals',
+        'category': 'programming',
+        'description': (
+            'Start with Python, continue with C++, then sharpen the problem-'
+            'solving and data-structure skills every language builds on. '
+            'Languages are lessons inside this track, not separate destinations.'
+        ),
     },
     'objectives': [
         'Describe the structure of a basic C++ program.',

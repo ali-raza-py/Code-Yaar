@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ArrowRight, BookOpen, Search } from "lucide-react";
@@ -10,6 +11,8 @@ import { NetworkError } from "@/components/learning/workspace/error-states";
 
 function LearnContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const viewParam = searchParams.get("view");
   const trackParam = searchParams.get("track") ?? undefined;
   const [courses, setCourses] = useState<Course[]>([]);
   const [category, setCategory] = useState("All");
@@ -17,9 +20,18 @@ function LearnContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
+  // Tracks now live on their own pages; legacy bookmarks are redirected so
+  // old ?view=tracks / ?track= links keep working.
+  useEffect(() => {
+    if (viewParam === "tracks") router.replace("/learn/tracks");
+    else if (trackParam) router.replace(`/learn/tracks/${trackParam}`);
+  }, [viewParam, trackParam, router]);
+
+  const onTrackRedirect = viewParam === "tracks" || Boolean(trackParam);
+
   const load = async () => {
     try {
-      const data = await coursesApi.list(trackParam ? { track: trackParam } : undefined);
+      const data = await coursesApi.list();
       setCourses(data);
       setError(false);
     } catch {
@@ -32,8 +44,7 @@ function LearnContent() {
   useEffect(() => {
     // Deferred via await so the effect never sets state synchronously.
     (async () => { await load(); })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trackParam]);
+  }, []);
 
   // Category chips reflect languages that actually exist in the catalog.
   const categories = useMemo(
@@ -47,12 +58,20 @@ function LearnContent() {
     return matchesCategory && (!query || `${course.title} ${course.description} ${course.track_title}`.toLowerCase().includes(query));
   }), [category, courses, search]);
 
+  if (onTrackRedirect) {
+    return <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8"><div className="h-40 animate-pulse rounded-xl bg-white" /></div>;
+  }
   if (error) return <NetworkError onRetry={load} />;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       <div className="mb-6 overflow-hidden rounded-xl bg-[#0f1d32] p-8 text-white sm:p-10">
         <div className="max-w-2xl">
+          <nav className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-white/60">
+            <Link href="/learn/tracks" className="hover:text-white">Tracks</Link>
+            <span>/</span>
+            <span className="text-[#2dbe52]">All courses</span>
+          </nav>
           <div className="flex items-center gap-3">
             <h1 className="text-3xl font-bold sm:text-4xl">Courses</h1>
             <span className="inline-flex items-center gap-1.5 rounded-full bg-[#2dbe52] px-3 py-1 text-xs font-bold"><BookOpen className="h-3.5 w-3.5" />Hands-on learning</span>

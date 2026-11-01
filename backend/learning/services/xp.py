@@ -41,6 +41,20 @@ def _update_profile_progress(profile, *, record_activity=False):
             profile.streak_days = profile.streak_days + 1 if previous_day == today - timedelta(days=1) else 1
             profile.last_active_at = now
             updates.update(streak_days=profile.streak_days, last_active_at=now)
+            # A personal-best streak is the only honest "record": notify once,
+            # when the current run exceeds every previous one.
+            if profile.streak_days > profile.longest_streak:
+                profile.longest_streak = profile.streak_days
+                updates['longest_streak'] = profile.longest_streak
+                from .notifications import create_notification
+                from ..models import UserNotification
+                create_notification(
+                    profile.user,
+                    type=UserNotification.Type.STREAK_RECORD,
+                    title=f'{profile.streak_days}-day streak!',
+                    body='You are learning every day — keep the run alive.',
+                    link='/achievements',
+                )
 
     if profile.level != level or len(updates) > 1:
         UserProfile.objects.filter(pk=profile.pk).update(**updates)
@@ -150,5 +164,4 @@ def deduct_xp(user, amount: int, action: str, *, obj=None,
         xp_points=Greatest(F('xp_points') - actual_deduction, 0),
     )
     _update_profile_progress(profile)
-    return xp_tx
     return xp_tx

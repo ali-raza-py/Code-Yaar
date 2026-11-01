@@ -13,7 +13,11 @@ const difficultyStyles = {
   advanced: "bg-difficulty-hard-soft text-difficulty-hard",
 };
 
-export function ChallengeCard({ challenge, solved = false }: ChallengeCardProps) {
+export function ChallengeCard({ challenge, solved: solvedProp }: ChallengeCardProps) {
+  const solved = solvedProp ?? Boolean(challenge.solved);
+  const attempts = challenge.attempts ?? 0;
+  const inProgress = !solved && attempts > 0;
+  const actionLabel = solved ? "Review" : inProgress ? "Continue" : "Start";
   return (
     <article className="group flex min-h-[220px] flex-col rounded-[var(--radius-card)] border border-[var(--challenge-border)] bg-[var(--challenge-surface)] p-5 shadow-[var(--challenge-shadow)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-[var(--challenge-accent)]/45 hover:shadow-[var(--challenge-shadow-hover)]">
       <div className="flex items-center justify-between gap-3">
@@ -22,7 +26,7 @@ export function ChallengeCard({ challenge, solved = false }: ChallengeCardProps)
         </span>
         <span className="inline-flex items-center gap-1.5 text-xs text-[var(--challenge-muted)]">
           {solved ? <CheckCircle2 aria-label="Solved" className="h-4 w-4 text-success" /> : <Circle aria-label="Unsolved" className="h-4 w-4" />}
-          {solved ? "Solved" : "Open"}
+          {solved ? "Completed" : inProgress ? "In progress" : "Open"}
         </span>
       </div>
       <div className="mt-5 flex-1">
@@ -35,8 +39,8 @@ export function ChallengeCard({ challenge, solved = false }: ChallengeCardProps)
           <span className="inline-flex items-center gap-1"><Clock3 aria-hidden="true" className="h-3.5 w-3.5" />{challenge.estimated_minutes}m</span>
           <span className="font-semibold text-success">+{challenge.xp_reward} XP</span>
         </div>
-        <Link href={`/challenges/${challenge.slug}`} aria-label={`Start ${challenge.title}`} className="inline-flex min-h-9 items-center gap-1 rounded-md px-2.5 font-bold text-[var(--challenge-accent-strong)] opacity-75 transition-all group-hover:opacity-100 hover:bg-[var(--challenge-accent-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--challenge-accent)]">
-          Start <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" />
+        <Link href={`/challenges/${challenge.slug}`} aria-label={`${actionLabel} ${challenge.title}`} className={`inline-flex min-h-9 items-center gap-1 rounded-md px-2.5 font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--challenge-accent)] ${solved ? "text-success" : "text-[var(--challenge-accent-strong)] opacity-75 group-hover:opacity-100 hover:bg-[var(--challenge-accent-soft)]"}`}>
+          {actionLabel} <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" />
         </Link>
       </div>
     </article>
