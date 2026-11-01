@@ -8,7 +8,8 @@ from .models import (
     LessonProgress, ExerciseAttempt, XPTransaction, Achievement,
     UserAchievement, Progress, Certification, UserCertification,
     Skill, UserSkill, EmailVerificationToken, PasswordResetToken,
-    AuthenticationAuditLog,
+    AuthenticationAuditLog, PracticalClass, PracticalSubject, Practical,
+    PracticalProgress, PracticalBookmark,
 )
 
 User = get_user_model()
@@ -73,6 +74,14 @@ class ResourceInline(admin.TabularInline):
     extra = 0
     fields = ['title', 'resource_type', 'file_url', 'order', 'is_active']
     ordering = ['order']
+
+
+class PracticalSubjectInline(admin.TabularInline):
+    model = PracticalSubject
+    extra = 1
+    fields = ['title', 'slug', 'order', 'is_active']
+    ordering = ['order']
+    prepopulated_fields = {'slug': ('title',)}
 
 
 # ─── Model Admins ───────────────────────────────────────────────────────────
@@ -305,6 +314,78 @@ class ChallengeAdmin(admin.ModelAdmin):
     search_fields = ['title', 'description']
     prepopulated_fields = {'slug': ('title',)}
     ordering = ['topic', 'difficulty']
+
+
+@admin.register(PracticalClass)
+class PracticalClassAdmin(admin.ModelAdmin):
+    list_display = ['title', 'slug', 'order', 'subject_count', 'is_active']
+    list_filter = ['is_active']
+    search_fields = ['title', 'description']
+    prepopulated_fields = {'slug': ('title',)}
+    ordering = ['order', 'title']
+    inlines = [PracticalSubjectInline]
+
+    @admin.display(description='Subjects')
+    def subject_count(self, obj):
+        return obj.subjects.filter(is_active=True).count()
+
+
+@admin.register(PracticalSubject)
+class PracticalSubjectAdmin(admin.ModelAdmin):
+    list_display = ['title', 'practical_class', 'slug', 'practical_count', 'is_active']
+    list_filter = ['practical_class', 'is_active']
+    search_fields = ['title', 'description', 'practical_class__title']
+    prepopulated_fields = {'slug': ('title',)}
+    ordering = ['practical_class', 'order', 'title']
+
+    @admin.display(description='Published practicals')
+    def practical_count(self, obj):
+        return obj.practicals.filter(is_active=True, is_published=True).count()
+
+
+@admin.register(Practical)
+class PracticalAdmin(admin.ModelAdmin):
+    list_display = [
+        'title', 'practical_number', 'practical_class', 'subject',
+        'is_published', 'is_active', 'updated_at',
+    ]
+    list_filter = ['practical_class', 'subject', 'is_published', 'is_active']
+    search_fields = ['title', 'chapter_topic', 'subject__title']
+    prepopulated_fields = {'slug': ('title',)}
+    ordering = ['subject', 'order', 'practical_number']
+    fieldsets = (
+        (None, {
+            'fields': (
+                'practical_class', 'subject', 'title', 'slug',
+                'practical_number', 'chapter_topic', 'order',
+            ),
+        }),
+        ('Content', {
+            'fields': (
+                'aim', 'apparatus', 'theory', 'procedure', 'observations',
+                'calculations', 'result', 'precautions', 'diagrams',
+            ),
+        }),
+        ('Publishing', {'fields': ('is_published', 'is_active')}),
+    )
+
+
+@admin.register(PracticalProgress)
+class PracticalProgressAdmin(admin.ModelAdmin):
+    list_display = ['user', 'practical', 'completed_at', 'updated_at']
+    list_filter = ['practical__practical_class', 'practical__subject']
+    search_fields = ['user__username', 'practical__title']
+    raw_id_fields = ['user', 'practical']
+    date_hierarchy = 'updated_at'
+
+
+@admin.register(PracticalBookmark)
+class PracticalBookmarkAdmin(admin.ModelAdmin):
+    list_display = ['user', 'practical', 'created_at']
+    list_filter = ['practical__practical_class', 'practical__subject']
+    search_fields = ['user__username', 'practical__title']
+    raw_id_fields = ['user', 'practical']
+    date_hierarchy = 'created_at'
 
 
 @admin.register(Enrollment)

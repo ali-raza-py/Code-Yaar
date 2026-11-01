@@ -795,6 +795,155 @@ class Challenge(models.Model):
         ordering = ['topic', 'difficulty', 'title']
 
 
+class PracticalClass(models.Model):
+    """A school class grouping practical subjects."""
+
+    slug = models.SlugField(max_length=100, unique=True)
+    title = models.CharField(max_length=100)
+    description = models.TextField(blank=True, default='')
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.title
+
+    class Meta:
+        ordering = ['order', 'title']
+        verbose_name = 'practical class'
+        verbose_name_plural = 'practical classes'
+
+
+class PracticalSubject(models.Model):
+    """A subject within a school class."""
+
+    practical_class = models.ForeignKey(
+        PracticalClass,
+        on_delete=models.CASCADE,
+        related_name='subjects',
+    )
+    slug = models.SlugField(max_length=100)
+    title = models.CharField(max_length=100)
+    description = models.TextField(blank=True, default='')
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f'{self.practical_class.title} > {self.title}'
+
+    class Meta:
+        ordering = ['practical_class', 'order', 'title']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['practical_class', 'slug'],
+                name='unique_practical_subject_slug_per_class',
+            ),
+        ]
+
+
+class Practical(models.Model):
+    """A flexible, publishable practical exercise.
+
+    The structured text fields cover common school-lab formats. ``diagrams``
+    stores a list of approved image URLs so subjects can add visuals without
+    changing the frontend schema.
+    """
+
+    practical_class = models.ForeignKey(
+        PracticalClass,
+        on_delete=models.CASCADE,
+        related_name='practicals',
+    )
+    subject = models.ForeignKey(
+        PracticalSubject,
+        on_delete=models.CASCADE,
+        related_name='practicals',
+    )
+    slug = models.SlugField(max_length=150, unique=True)
+    title = models.CharField(max_length=250)
+    practical_number = models.PositiveIntegerField(default=1)
+    chapter_topic = models.CharField(max_length=250, blank=True, default='')
+    aim = models.TextField(blank=True, default='')
+    apparatus = models.TextField(blank=True, default='')
+    theory = models.TextField(blank=True, default='')
+    procedure = models.TextField(blank=True, default='')
+    observations = models.TextField(blank=True, default='')
+    calculations = models.TextField(blank=True, default='')
+    result = models.TextField(blank=True, default='')
+    precautions = models.TextField(blank=True, default='')
+    diagrams = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='List of image objects, for example [{url, caption}].',
+    )
+    order = models.PositiveIntegerField(default=0)
+    is_published = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'{self.practical_class.title} > {self.subject.title} > {self.title}'
+
+    class Meta:
+        ordering = ['subject', 'order', 'practical_number', 'title']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['subject', 'practical_number'],
+                name='unique_practical_number_per_subject',
+            ),
+        ]
+
+
+class PracticalProgress(models.Model):
+    """Completion state for a practical in a learner's account."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='practical_progress',
+    )
+    practical = models.ForeignKey(
+        Practical,
+        on_delete=models.CASCADE,
+        related_name='progress_entries',
+    )
+    completed_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'practical'],
+                name='unique_practical_progress_per_user',
+            ),
+        ]
+
+
+class PracticalBookmark(models.Model):
+    """A learner's bookmark for a practical."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='practical_bookmarks',
+    )
+    practical = models.ForeignKey(
+        Practical,
+        on_delete=models.CASCADE,
+        related_name='bookmarks',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'practical'],
+                name='unique_practical_bookmark_per_user',
+            ),
+        ]
+
+
 class Progress(models.Model):
     """Generic progress tracker (kept for backward compatibility)."""
     STATUS_CHOICES = [

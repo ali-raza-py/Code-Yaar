@@ -236,3 +236,53 @@ export interface Enrollment {
   status: string;
   progress_percentage: number;
 }
+
+export interface PracticalClass {
+  id: number;
+  slug: string;
+  title: string;
+  description: string;
+  order: number;
+  subject_count: number;
+}
+
+export interface PracticalSubject {
+  id: number;
+  slug: string;
+  title: string;
+  description: string;
+  order: number;
+  class_title: string;
+  class_slug: string;
+  practical_count: number;
+}
+
+export interface PracticalSummary {
+  id: number;
+  slug: string;
+  title: string;
+  practical_number: number;
+  chapter_topic: string;
+  subject_title: string;
+  class_title: string;
+  order: number;
+  is_completed: boolean;
+  is_bookmarked: boolean;
+}
+
+export interface PracticalDiagram {
+  url: string;
+  caption?: string;
+}
+
+export interface PracticalDetail extends PracticalSummary {
+  aim: string;
+  apparatus: string;
+  theory: string;
+  procedure: string;
+  observations: string;
+  calculations: string;
+  result: string;
+  precautions: string;
+  diagrams: PracticalDiagram[];
+}

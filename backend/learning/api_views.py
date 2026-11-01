@@ -15,6 +15,8 @@ from .models import (
     LessonProgress, ExerciseAttempt, XPTransaction, Achievement,
     UserAchievement, Progress, Certification, UserCertification,
     Skill, UserSkill,
+    PracticalClass, PracticalSubject, Practical, PracticalProgress,
+    PracticalBookmark,
 )
 from .services.sandbox import get_sandbox
 from .services.xp import award_xp, deduct_xp
@@ -36,6 +38,9 @@ from .serializers import (
     CertificationSerializer, UserCertificationSerializer,
     SkillSerializer, UserSkillSerializer,
     ExerciseRunSerializer, ExerciseSubmitSerializer,
+    PracticalClassSerializer, PracticalSubjectSerializer,
+    PracticalListSerializer, PracticalDetailSerializer,
+    PracticalProgressSerializer, PracticalBookmarkSerializer,
 )
 from .services.sandbox import validate_submission
 
@@ -651,6 +656,116 @@ class ChallengeViewSet(viewsets.ReadOnlyModelViewSet):
         if difficulty:
             qs = qs.filter(difficulty=difficulty)
         return qs
+
+
+class PracticalClassViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = PracticalClass.objects.filter(is_active=True)
+    serializer_class = PracticalClassSerializer
+    permission_classes = [permissions.AllowAny]
+    lookup_field = 'slug'
+
+
+class PracticalSubjectViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = PracticalSubjectSerializer
+    permission_classes = [permissions.AllowAny]
+    lookup_field = 'slug'
+
+    def get_queryset(self):
+        qs = PracticalSubject.objects.filter(
+            practical_class__is_active=True,
+            is_active=True,
+        ).select_related('practical_class')
+        class_slug = self.request.query_params.get('class')
+        if class_slug:
+            qs = qs.filter(practical_class__slug=class_slug)
+        return qs
+
+
+class PracticalViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = [permissions.AllowAny]
+    lookup_field = 'slug'
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['title', 'chapter_topic', 'subject__title']
+    ordering_fields = ['title', 'practical_number', 'order']
+
+    def get_serializer_class(self):
+        return PracticalDetailSerializer if self.action == 'retrieve' else PracticalListSerializer
+
+    def get_queryset(self):
+        qs = Practical.objects.filter(
+            practical_class__is_active=True,
+            subject__is_active=True,
+            is_active=True,
+            is_published=True,
+        ).select_related('practical_class', 'subject')
+        subject_slug = self.request.query_params.get('subject')
+        class_slug = self.request.query_params.get('class')
+        if subject_slug:
+            qs = qs.filter(subject__slug=subject_slug)
+        if class_slug:
+            qs = qs.filter(practical_class__slug=class_slug)
+        return qs
+
+    @action(
+        detail=True,
+        methods=['post', 'delete'],
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def complete(self, request, slug=None):
+        practical = self.get_object()
+        progress, _ = PracticalProgress.objects.get_or_create(
+            user=request.user,
+            practical=practical,
+        )
+        if request.method == 'DELETE':
+            progress.completed_at = None
+            progress.save(update_fields=['completed_at', 'updated_at'])
+        else:
+            if progress.completed_at is None:
+                progress.completed_at = timezone.now()
+                progress.save(update_fields=['completed_at', 'updated_at'])
+        return Response(PracticalProgressSerializer(progress).data)
+
+    @action(
+        detail=True,
+        methods=['post', 'delete'],
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def bookmark(self, request, slug=None):
+        practical = self.get_object()
+        if request.method == 'DELETE':
+            PracticalBookmark.objects.filter(
+                user=request.user, practical=practical
+            ).delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        bookmark, created = PracticalBookmark.objects.get_or_create(
+            user=request.user,
+            practical=practical,
+        )
+        return Response(
+            PracticalBookmarkSerializer(bookmark).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class PracticalProgressViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = PracticalProgressSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return PracticalProgress.objects.filter(
+            user=self.request.user
+        ).select_related('practical')
+
+
+class PracticalBookmarkViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = PracticalBookmarkSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return PracticalBookmark.objects.filter(
+            user=self.request.user
+        ).select_related('practical')
 
 
 # ─── Progress ViewSets ──────────────────────────────────────────────────────

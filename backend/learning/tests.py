@@ -25,6 +25,8 @@ from .models import (
     UserProfile, CareerTrack, Course, Chapter, Lesson, Exercise, Hint,
     Resource, Enrollment, LessonProgress, ExerciseAttempt, XPTransaction,
     Achievement, UserAchievement,
+    PracticalClass, PracticalSubject, Practical, PracticalProgress,
+    PracticalBookmark,
 )
 from .services.language_adapter import (
     get_adapter, get_supported_languages, PythonAdapter, JavaScriptAdapter,
@@ -96,6 +98,74 @@ class ExerciseModelTest(TestCase):
 
     def test_exercise_type(self):
         self.assertEqual(self.exercise.exercise_type, 'code')
+
+
+class PracticalsAPITest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username='practical-reader', password='pass123')
+        UserProfile.objects.create(user=self.user)
+        self.school_class = PracticalClass.objects.create(
+            slug='class-9', title='Class 9', description='Foundation practicals'
+        )
+        self.subject = PracticalSubject.objects.create(
+            practical_class=self.school_class, slug='science', title='Science'
+        )
+        self.practical = Practical.objects.create(
+            practical_class=self.school_class,
+            subject=self.subject,
+            slug='separation-of-mixtures',
+            title='Separation of Mixtures',
+            practical_number=1,
+            aim='Study separation methods.',
+            is_published=True,
+        )
+
+    def test_published_practical_catalog_and_detail(self):
+        classes = self.client.get('/api/practical-classes/')
+        self.assertEqual(classes.status_code, status.HTTP_200_OK)
+        self.assertEqual(classes.data['results'][0]['subject_count'], 1)
+
+        subjects = self.client.get('/api/practical-subjects/?class=class-9')
+        self.assertEqual(subjects.status_code, status.HTTP_200_OK)
+        self.assertEqual(subjects.data['results'][0]['practical_count'], 1)
+
+        practicals = self.client.get('/api/practicals/?class=class-9&subject=science')
+        self.assertEqual(practicals.status_code, status.HTTP_200_OK)
+        self.assertEqual(practicals.data['results'][0]['title'], 'Separation of Mixtures')
+
+        detail = self.client.get('/api/practicals/separation-of-mixtures/')
+        self.assertEqual(detail.status_code, status.HTTP_200_OK)
+        self.assertEqual(detail.data['aim'], 'Study separation methods.')
+
+    def test_unpublished_practical_is_hidden(self):
+        self.practical.is_published = False
+        self.practical.save(update_fields=['is_published'])
+        response = self.client.get('/api/practicals/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 0)
+
+    def test_completion_and_bookmark_require_authentication(self):
+        complete = self.client.post(f'/api/practicals/{self.practical.slug}/complete/')
+        self.assertEqual(complete.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        self.client.force_authenticate(user=self.user)
+        complete = self.client.post(f'/api/practicals/{self.practical.slug}/complete/')
+        self.assertEqual(complete.status_code, status.HTTP_200_OK)
+        self.assertTrue(PracticalProgress.objects.filter(
+            user=self.user, practical=self.practical, completed_at__isnull=False
+        ).exists())
+
+        bookmark = self.client.post(f'/api/practicals/{self.practical.slug}/bookmark/')
+        self.assertEqual(bookmark.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(PracticalBookmark.objects.filter(
+            user=self.user, practical=self.practical
+        ).exists())
+
+        self.client.delete(f'/api/practicals/{self.practical.slug}/bookmark/')
+        self.assertFalse(PracticalBookmark.objects.filter(
+            user=self.user, practical=self.practical
+        ).exists())
 
 
 # ─── Enrollment Tests ────────────────────────────────────────────────────────

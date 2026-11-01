@@ -91,6 +91,20 @@ Future architecture is **Proposed** and must remain separate from current archit
 
 No framework, database, hosting provider, integration, or deployment pattern should be selected as fact until a product and engineering decision is made and implemented.
 
+### Practicals domain
+
+The Learn section includes a separate Practicals domain in `learning`. `PracticalClass`
+contains ordered `PracticalSubject` records, and each subject contains publishable
+`Practical` records. Practical content uses structured optional fields for common
+school-lab sections and a JSON list of diagram image objects for subject-specific
+visuals. `PracticalProgress` and `PracticalBookmark` are user-scoped records with
+database uniqueness constraints.
+
+Published content is read through the public API; completion and bookmarking require
+the existing authenticated session. Content managers create and publish classes,
+subjects, and practicals through Django Admin. No curriculum content is seeded by
+the application.
+
 ## 15. Design System and Visual Governance
 
 The frontend implements a token-governed design system. Component code references semantic tokens exclusively; raw hex values and Tailwind palette classes (`gray-*`, `rose-*`, etc.) are not permitted in live components or pages.

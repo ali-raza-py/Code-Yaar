@@ -18,6 +18,11 @@ router.register(r'certifications', api_views.CertificationViewSet, basename='cer
 router.register(r'my-certifications', api_views.UserCertificationViewSet, basename='user-certification')
 router.register(r'skills', api_views.SkillViewSet, basename='skill')
 router.register(r'my-skills', api_views.UserSkillViewSet, basename='user-skill')
+router.register(r'practical-classes', api_views.PracticalClassViewSet, basename='practical-class')
+router.register(r'practical-subjects', api_views.PracticalSubjectViewSet, basename='practical-subject')
+router.register(r'practicals', api_views.PracticalViewSet, basename='practical')
+router.register(r'practical-progress', api_views.PracticalProgressViewSet, basename='practical-progress')
+router.register(r'practical-bookmarks', api_views.PracticalBookmarkViewSet, basename='practical-bookmark')
 
 urlpatterns = [
     # Authentication lives in `learning.auth_urls` (mounted at /api/auth/).

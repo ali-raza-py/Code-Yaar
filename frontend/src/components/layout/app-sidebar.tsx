@@ -55,7 +55,8 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/learn?view=tracks", label: "Tracks", icon: Layers, query: { view: "tracks" } },
       { href: "/learn?view=courses", label: "Courses", icon: BookOpen, query: { view: "courses" } },
-      { href: "/challenges", label: "Practice", icon: Dumbbell },
+          { href: "/learn/practicals", label: "Practicals", icon: ClipboardCheck },
+          { href: "/challenges", label: "Practice", icon: Dumbbell },
       {
         href: "/challenges?mode=assessments",
         label: "Assessments",

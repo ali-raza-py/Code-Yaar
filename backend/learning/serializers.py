@@ -5,12 +5,95 @@ from .models import (
     Resource, Project, ProjectMilestone, Challenge, Enrollment,
     LessonProgress, ExerciseAttempt, XPTransaction, Achievement,
     UserAchievement, Progress, Certification, UserCertification,
-    Skill, UserSkill,
+    Skill, UserSkill, PracticalClass, PracticalSubject, Practical,
+    PracticalProgress, PracticalBookmark,
 )
 
 
 # ─── Content Serializers ────────────────────────────────────────────────────
 # Authentication serializers live in `learning.auth_serializers`.
+
+
+class PracticalClassSerializer(serializers.ModelSerializer):
+    subject_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PracticalClass
+        fields = ['id', 'slug', 'title', 'description', 'order', 'subject_count']
+
+    def get_subject_count(self, obj):
+        return obj.subjects.filter(is_active=True).count()
+
+
+class PracticalSubjectSerializer(serializers.ModelSerializer):
+    practical_count = serializers.SerializerMethodField()
+    class_title = serializers.CharField(source='practical_class.title', read_only=True)
+    class_slug = serializers.CharField(source='practical_class.slug', read_only=True)
+
+    class Meta:
+        model = PracticalSubject
+        fields = [
+            'id', 'slug', 'title', 'description', 'order', 'class_title',
+            'class_slug', 'practical_count',
+        ]
+
+    def get_practical_count(self, obj):
+        return obj.practicals.filter(is_active=True, is_published=True).count()
+
+
+class PracticalListSerializer(serializers.ModelSerializer):
+    subject_title = serializers.CharField(source='subject.title', read_only=True)
+    class_title = serializers.CharField(source='practical_class.title', read_only=True)
+    is_completed = serializers.SerializerMethodField()
+    is_bookmarked = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Practical
+        fields = [
+            'id', 'slug', 'title', 'practical_number', 'chapter_topic',
+            'subject_title', 'class_title', 'order', 'is_completed',
+            'is_bookmarked',
+        ]
+
+    def _user(self):
+        request = self.context.get('request')
+        return request.user if request and request.user.is_authenticated else None
+
+    def get_is_completed(self, obj):
+        user = self._user()
+        return bool(user and obj.progress_entries.filter(
+            user=user, completed_at__isnull=False
+        ).exists())
+
+    def get_is_bookmarked(self, obj):
+        user = self._user()
+        return bool(user and obj.bookmarks.filter(user=user).exists())
+
+
+class PracticalDetailSerializer(PracticalListSerializer):
+    class Meta(PracticalListSerializer.Meta):
+        fields = PracticalListSerializer.Meta.fields + [
+            'aim', 'apparatus', 'theory', 'procedure', 'observations',
+            'calculations', 'result', 'precautions', 'diagrams',
+        ]
+
+
+class PracticalProgressSerializer(serializers.ModelSerializer):
+    practical_slug = serializers.CharField(source='practical.slug', read_only=True)
+
+    class Meta:
+        model = PracticalProgress
+        fields = ['id', 'practical', 'practical_slug', 'completed_at', 'updated_at']
+        read_only_fields = ['id', 'completed_at', 'updated_at']
+
+
+class PracticalBookmarkSerializer(serializers.ModelSerializer):
+    practical_slug = serializers.CharField(source='practical.slug', read_only=True)
+
+    class Meta:
+        model = PracticalBookmark
+        fields = ['id', 'practical', 'practical_slug', 'created_at']
+        read_only_fields = ['id', 'created_at']
 
 
 class HintSerializer(serializers.ModelSerializer):

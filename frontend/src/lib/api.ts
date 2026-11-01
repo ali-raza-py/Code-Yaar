@@ -1,4 +1,4 @@
-import type { Challenge, Chapter, Course, Enrollment, ExerciseDetail, ExerciseResult, LessonDetail, Project } from "@/types";
+import type { Challenge, Chapter, Course, Enrollment, ExerciseDetail, ExerciseResult, LessonDetail, Project, PracticalClass, PracticalDetail, PracticalSubject, PracticalSummary } from "@/types";
 
 /**
  * API client for Code-Yaar learning platform.
@@ -665,6 +665,35 @@ export const courses = {
     }>(`/lessons/${lessonId}/complete/`, { method: 'POST' }),
 };
 
+// ─── Practicals Endpoints ──────────────────────────────────────────────────
+
+export const practicals = {
+  classes: async (): Promise<PracticalClass[]> => {
+    const data = await request<Paginated<PracticalClass>>('/practical-classes/');
+    return unwrapList(data);
+  },
+  subjects: async (classSlug: string): Promise<PracticalSubject[]> => {
+    const data = await request<Paginated<PracticalSubject>>(
+      `/practical-subjects/?class=${encodeURIComponent(classSlug)}`
+    );
+    return unwrapList(data);
+  },
+  list: async (params: { classSlug: string; subjectSlug: string; search?: string }): Promise<PracticalSummary[]> => {
+    const query = new URLSearchParams({
+      class: params.classSlug,
+      subject: params.subjectSlug,
+    });
+    if (params.search) query.set('search', params.search);
+    const data = await request<Paginated<PracticalSummary>>(`/practicals/?${query.toString()}`);
+    return unwrapList(data);
+  },
+  detail: (slug: string) => request<PracticalDetail>(`/practicals/${slug}/`),
+  complete: (slug: string, completed: boolean) =>
+    request(`/practicals/${slug}/complete/`, { method: completed ? 'POST' : 'DELETE' }),
+  bookmark: (slug: string, bookmarked: boolean) =>
+    request(`/practicals/${slug}/bookmark/`, { method: bookmarked ? 'POST' : 'DELETE' }),
+};
+
 // ─── Sandbox Snippet Execution (lesson "Run" buttons) ────────────────────
 
 export const sandbox = {
@@ -1089,4 +1118,3 @@ export const badges = {
     triggerBlobDownload(await res.blob(), `code-yaar-${identifier}-share-${preset}.png`);
   },
 };
-

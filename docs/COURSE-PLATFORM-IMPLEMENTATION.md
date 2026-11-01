@@ -9,6 +9,37 @@ below · `[ ]` not done.
 
 ---
 
+## Practicals
+
+Practicals are managed in Django Admin and are intentionally content-empty until
+verified curriculum material is entered by an authorized administrator.
+
+### Models and migration
+
+- `PracticalClass` -> `PracticalSubject` -> `Practical`
+- `PracticalProgress` and `PracticalBookmark` belong to the authenticated learner.
+- Migration: `learning/migrations/0011_practicalclass_practicalsubject_practical_and_more.py`
+- Publish content by setting both the class/subject active flags and the practical
+  `is_published` and `is_active` flags.
+
+### API
+
+- `GET /api/practical-classes/`
+- `GET /api/practical-subjects/?class={class-slug}`
+- `GET /api/practicals/?class={class-slug}&subject={subject-slug}&search={title}`
+- `GET /api/practicals/{slug}/`
+- `POST|DELETE /api/practicals/{slug}/complete/` (authenticated)
+- `POST|DELETE /api/practicals/{slug}/bookmark/` (authenticated)
+- `GET /api/practical-progress/` and `GET /api/practical-bookmarks/` (authenticated)
+
+### Adding practical content
+
+In Django Admin, create a practical class, add its subjects, then add practicals
+with unique slugs and practical numbers per subject. Fill only the sections needed
+by the subject; diagrams are JSON objects such as `[{"url": "...", "caption": "..."}]`.
+Review the content before enabling `is_published`. The frontend automatically
+renders newly published classes, subjects, and practicals without a code change.
+
 ## Phase A — Audit & Baseline (1–10)
 
 - [x] 1. Read the full master prompt and enumerate every requirement.
