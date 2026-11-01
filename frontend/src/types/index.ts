@@ -241,6 +241,7 @@ export interface PracticalClass {
   id: number;
   slug: string;
   title: string;
+  board: "stb";
   description: string;
   order: number;
   subject_count: number;
@@ -261,6 +262,7 @@ export interface PracticalSummary {
   id: number;
   slug: string;
   title: string;
+  description: string;
   practical_number: number;
   chapter_topic: string;
   subject_title: string;

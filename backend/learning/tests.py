@@ -105,8 +105,13 @@ class PracticalsAPITest(TestCase):
         self.client = APIClient()
         self.user = User.objects.create_user(username='practical-reader', password='pass123')
         UserProfile.objects.create(user=self.user)
-        self.school_class = PracticalClass.objects.create(
-            slug='class-9', title='Class 9', description='Foundation practicals'
+        self.school_class, _ = PracticalClass.objects.get_or_create(
+            slug='class-9',
+            defaults={
+                'title': 'Class 9',
+                'description': 'Foundation practicals',
+                'board': 'stb',
+            },
         )
         self.subject = PracticalSubject.objects.create(
             practical_class=self.school_class, slug='science', title='Science'
@@ -124,6 +129,8 @@ class PracticalsAPITest(TestCase):
     def test_published_practical_catalog_and_detail(self):
         classes = self.client.get('/api/practical-classes/')
         self.assertEqual(classes.status_code, status.HTTP_200_OK)
+        self.assertEqual(classes.data['count'], 4)
+        self.assertEqual(classes.data['results'][0]['board'], 'stb')
         self.assertEqual(classes.data['results'][0]['subject_count'], 1)
 
         subjects = self.client.get('/api/practical-subjects/?class=class-9')

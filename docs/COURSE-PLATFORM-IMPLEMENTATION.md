@@ -18,7 +18,12 @@ verified curriculum material is entered by an authorized administrator.
 
 - `PracticalClass` -> `PracticalSubject` -> `Practical`
 - `PracticalProgress` and `PracticalBookmark` belong to the authenticated learner.
-- Migration: `learning/migrations/0011_practicalclass_practicalsubject_practical_and_more.py`
+- Migrations: `learning/migrations/0011_practicalclass_practicalsubject_practical_and_more.py`
+  and `0012_practicalclass_board_practical_description.py`
+- Migration `0012` creates the four empty STB class containers (Classes 9–12).
+  It does not create subjects or curriculum content.
+- `PracticalClass.board` identifies the curriculum board; the initial supported
+  value is `stb` (Sindh Textbook Board).
 - Publish content by setting both the class/subject active flags and the practical
   `is_published` and `is_active` flags.
 
@@ -34,7 +39,8 @@ verified curriculum material is entered by an authorized administrator.
 
 ### Adding practical content
 
-In Django Admin, create a practical class, add its subjects, then add practicals
+The four STB class containers are available after migration. In Django Admin,
+add subjects under a class, then add practicals
 with unique slugs and practical numbers per subject. Fill only the sections needed
 by the subject; diagrams are JSON objects such as `[{"url": "...", "caption": "..."}]`.
 Review the content before enabling `is_published`. The frontend automatically

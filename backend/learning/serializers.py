@@ -19,7 +19,7 @@ class PracticalClassSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PracticalClass
-        fields = ['id', 'slug', 'title', 'description', 'order', 'subject_count']
+        fields = ['id', 'slug', 'title', 'board', 'description', 'order', 'subject_count']
 
     def get_subject_count(self, obj):
         return obj.subjects.filter(is_active=True).count()
@@ -50,7 +50,7 @@ class PracticalListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Practical
         fields = [
-            'id', 'slug', 'title', 'practical_number', 'chapter_topic',
+            'id', 'slug', 'title', 'description', 'practical_number', 'chapter_topic',
             'subject_title', 'class_title', 'order', 'is_completed',
             'is_bookmarked',
         ]

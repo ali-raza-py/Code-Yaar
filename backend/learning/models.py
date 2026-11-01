@@ -798,8 +798,13 @@ class Challenge(models.Model):
 class PracticalClass(models.Model):
     """A school class grouping practical subjects."""
 
+    BOARD_CHOICES = [
+        ('stb', 'Sindh Textbook Board'),
+    ]
+
     slug = models.SlugField(max_length=100, unique=True)
     title = models.CharField(max_length=100)
+    board = models.CharField(max_length=20, choices=BOARD_CHOICES, default='stb')
     description = models.TextField(blank=True, default='')
     order = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
@@ -861,6 +866,7 @@ class Practical(models.Model):
     slug = models.SlugField(max_length=150, unique=True)
     title = models.CharField(max_length=250)
     practical_number = models.PositiveIntegerField(default=1)
+    description = models.TextField(blank=True, default='')
     chapter_topic = models.CharField(max_length=250, blank=True, default='')
     aim = models.TextField(blank=True, default='')
     apparatus = models.TextField(blank=True, default='')
@@ -892,6 +898,15 @@ class Practical(models.Model):
                 name='unique_practical_number_per_subject',
             ),
         ]
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        if self.subject_id and self.practical_class_id:
+            if self.subject.practical_class_id != self.practical_class_id:
+                raise ValidationError({
+                    'subject': 'The subject must belong to the selected practical class.',
+                })
 
 
 class PracticalProgress(models.Model):

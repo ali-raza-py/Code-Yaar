@@ -318,8 +318,8 @@ class ChallengeAdmin(admin.ModelAdmin):
 
 @admin.register(PracticalClass)
 class PracticalClassAdmin(admin.ModelAdmin):
-    list_display = ['title', 'slug', 'order', 'subject_count', 'is_active']
-    list_filter = ['is_active']
+    list_display = ['title', 'board', 'slug', 'order', 'subject_count', 'is_active']
+    list_filter = ['board', 'is_active']
     search_fields = ['title', 'description']
     prepopulated_fields = {'slug': ('title',)}
     ordering = ['order', 'title']
@@ -357,7 +357,7 @@ class PracticalAdmin(admin.ModelAdmin):
         (None, {
             'fields': (
                 'practical_class', 'subject', 'title', 'slug',
-                'practical_number', 'chapter_topic', 'order',
+                'practical_number', 'description', 'chapter_topic', 'order',
             ),
         }),
         ('Content', {
