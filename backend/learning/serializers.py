@@ -19,7 +19,7 @@ class PracticalClassSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PracticalClass
-        fields = ['id', 'slug', 'title', 'board', 'description', 'order', 'subject_count']
+        fields = ['id', 'slug', 'title', 'board', 'thumbnail', 'description', 'order', 'subject_count']
 
     def get_subject_count(self, obj):
         return obj.subjects.filter(is_active=True).count()
@@ -33,7 +33,7 @@ class PracticalSubjectSerializer(serializers.ModelSerializer):
     class Meta:
         model = PracticalSubject
         fields = [
-            'id', 'slug', 'title', 'description', 'order', 'class_title',
+            'id', 'slug', 'title', 'image', 'description', 'order', 'class_title',
             'class_slug', 'practical_count',
         ]
 
@@ -76,6 +76,69 @@ class PracticalDetailSerializer(PracticalListSerializer):
             'aim', 'apparatus', 'theory', 'procedure', 'observations',
             'calculations', 'result', 'precautions', 'diagrams',
         ]
+
+
+class PracticalClassAdminSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PracticalClass
+        fields = [
+            'id', 'slug', 'title', 'board', 'thumbnail', 'description',
+            'order', 'is_published', 'is_active',
+        ]
+
+    def validate_board(self, value):
+        if value != 'stb':
+            raise serializers.ValidationError('Only STB practical classes are currently supported.')
+        return value
+
+    def validate_slug(self, value):
+        if value not in {'class-9', 'class-10', 'class-11', 'class-12'}:
+            raise serializers.ValidationError('Class must be 9, 10, 11, or 12.')
+        return value
+
+    def validate_title(self, value):
+        if value.strip().lower() not in {'class 9', 'class 10', 'class 11', 'class 12'}:
+            raise serializers.ValidationError('Class must be 9, 10, 11, or 12.')
+        return value.strip()
+
+
+class PracticalSubjectAdminSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PracticalSubject
+        fields = ['id', 'practical_class', 'slug', 'title', 'image', 'description', 'order', 'is_active']
+
+    def validate_title(self, value):
+        if not value.strip():
+            raise serializers.ValidationError('Subject name is required.')
+        return value.strip()
+
+
+class PracticalAdminSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Practical
+        fields = [
+            'id', 'practical_class', 'subject', 'slug', 'title', 'description',
+            'practical_number', 'chapter_topic', 'aim', 'apparatus', 'theory',
+            'procedure', 'observations', 'calculations', 'result', 'precautions',
+            'diagrams', 'order', 'is_published', 'is_active',
+        ]
+
+    def validate(self, attrs):
+        practical_class = attrs.get('practical_class', getattr(self.instance, 'practical_class', None))
+        subject = attrs.get('subject', getattr(self.instance, 'subject', None))
+        if practical_class and subject and subject.practical_class_id != practical_class.id:
+            raise serializers.ValidationError({
+                'subject': 'The subject must belong to the selected class.',
+            })
+        diagrams = attrs.get('diagrams', getattr(self.instance, 'diagrams', []))
+        if not isinstance(diagrams, list):
+            raise serializers.ValidationError({'diagrams': 'Provide a list of image objects.'})
+        for diagram in diagrams:
+            if not isinstance(diagram, dict) or not isinstance(diagram.get('url'), str):
+                raise serializers.ValidationError({
+                    'diagrams': 'Each diagram must include an image URL.',
+                })
+        return attrs
 
 
 class PracticalProgressSerializer(serializers.ModelSerializer):

@@ -242,6 +242,7 @@ export interface PracticalClass {
   slug: string;
   title: string;
   board: "stb";
+  is_published?: boolean;
   description: string;
   order: number;
   subject_count: number;
@@ -287,4 +288,23 @@ export interface PracticalDetail extends PracticalSummary {
   result: string;
   precautions: string;
   diagrams: PracticalDiagram[];
+}
+
+export interface PracticalClassAdmin extends PracticalClass {
+  thumbnail: string;
+  is_active: boolean;
+}
+
+export interface PracticalSubjectAdmin extends PracticalSubject {
+  practical_class: number;
+  image: string;
+  is_active: boolean;
+}
+
+export interface PracticalAdmin extends PracticalDetail {
+  practical_class: number;
+  subject: number;
+  slug: string;
+  is_published: boolean;
+  is_active: boolean;
 }

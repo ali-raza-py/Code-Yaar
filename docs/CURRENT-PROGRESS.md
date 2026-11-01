@@ -23,6 +23,7 @@ checklist and final report of the Master Academy implementation.
 | Answer/solution non-leakage | Verified | `AnswerLeakageTest` |
 | Health endpoint | Implemented | `GET /api/health/` |
 | Production configuration surface | Implemented | env-driven DB/hosts/CORS/SITE_URL/HSTS in `settings.py` + `.env.example` |
+| Administrator practical content management | Implemented | Admin-only CRUD APIs and `/learn/practicals/manage` for classes/courses, subjects, and practicals with publish controls |
 
 ## Backend Test Suite
 

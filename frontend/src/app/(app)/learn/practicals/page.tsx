@@ -4,9 +4,11 @@ import Link from "next/link";
 import { FlaskConical, ArrowRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import { practicals as practicalsApi } from "@/lib/api";
+import { useAuth } from "@/hooks/use-auth";
 import type { PracticalClass } from "@/types";
 
 export default function PracticalsPage() {
+  const { user } = useAuth();
   const [classes, setClasses] = useState<PracticalClass[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
 
@@ -21,6 +23,7 @@ export default function PracticalsPage() {
   return (
     <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <nav className="mb-6 text-sm text-muted-foreground"><Link href="/learn" className="hover:text-foreground">Learn</Link><span className="mx-2">/</span><span>Practicals</span></nav>
+      {user?.role === "administrator" && <div className="mb-5 flex flex-wrap gap-2"><Link href="/learn/practicals/manage" className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-primary-foreground">Manage Courses</Link><Link href="/learn/practicals/manage?mode=subjects" className="rounded-lg border border-[var(--color-section-border)] bg-white px-4 py-2 text-sm font-bold">Add Subject</Link><Link href="/learn/practicals/manage?mode=practicals" className="rounded-lg border border-[var(--color-section-border)] bg-white px-4 py-2 text-sm font-bold">Add Practical</Link><Link href="/learn/practicals/manage?mode=classes" className="rounded-lg border border-[var(--color-section-border)] bg-white px-4 py-2 text-sm font-bold">Add Course</Link></div>}
       <section className="rounded-card bg-[#0f1d32] p-8 text-white sm:p-10">
         <div className="flex items-center gap-3"><FlaskConical className="h-8 w-8 text-cta" /><h1 className="text-3xl font-bold sm:text-4xl">Practicals</h1></div>
         <p className="mt-3 max-w-2xl text-white/70">Explore verified practical exercises organized by class and subject.</p>

@@ -174,6 +174,59 @@ class PracticalsAPITest(TestCase):
             user=self.user, practical=self.practical
         ).exists())
 
+    def test_management_endpoints_are_admin_only(self):
+        response = self.client.post('/api/admin/practical-classes/', {
+            'title': 'Student Attempt',
+            'slug': 'student-attempt',
+            'board': 'stb',
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        admin = User.objects.create_user(username='content-admin', password='pass123')
+        UserProfile.objects.create(user=admin, role='admin')
+        self.client.force_authenticate(user=admin)
+
+        response = self.client.patch(
+            f'/api/admin/practical-classes/{self.school_class.id}/',
+            {'is_published': False},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['is_published'])
+
+        response = self.client.post('/api/admin/practical-subjects/', {
+            'practical_class': self.school_class.id,
+            'title': 'Physics',
+            'slug': 'physics',
+            'description': 'STB Physics',
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        subject = PracticalSubject.objects.get(slug='physics')
+
+        response = self.client.post('/api/admin/practicals/', {
+            'practical_class': self.school_class.id,
+            'subject': subject.id,
+            'slug': 'admin-created-practical',
+            'title': 'Admin-created practical',
+            'practical_number': 2,
+            'is_published': False,
+            'diagrams': [],
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        practical = Practical.objects.get(slug='admin-created-practical')
+        self.assertFalse(practical.is_published)
+
+        response = self.client.patch(
+            f'/api/admin/practicals/{practical.id}/',
+            {'is_published': True},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['is_published'])
+
+        response = self.client.delete(f'/api/admin/practicals/{practical.id}/')
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
 
 # ─── Enrollment Tests ────────────────────────────────────────────────────────
 

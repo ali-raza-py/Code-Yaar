@@ -23,6 +23,9 @@ router.register(r'practical-subjects', api_views.PracticalSubjectViewSet, basena
 router.register(r'practicals', api_views.PracticalViewSet, basename='practical')
 router.register(r'practical-progress', api_views.PracticalProgressViewSet, basename='practical-progress')
 router.register(r'practical-bookmarks', api_views.PracticalBookmarkViewSet, basename='practical-bookmark')
+router.register(r'admin/practical-classes', api_views.PracticalClassAdminViewSet, basename='admin-practical-class')
+router.register(r'admin/practical-subjects', api_views.PracticalSubjectAdminViewSet, basename='admin-practical-subject')
+router.register(r'admin/practicals', api_views.PracticalAdminViewSet, basename='admin-practical')
 
 urlpatterns = [
     # Authentication lives in `learning.auth_urls` (mounted at /api/auth/).

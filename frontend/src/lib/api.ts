@@ -1,4 +1,4 @@
-import type { Challenge, Chapter, Course, Enrollment, ExerciseDetail, ExerciseResult, LessonDetail, Project, PracticalClass, PracticalDetail, PracticalSubject, PracticalSummary } from "@/types";
+import type { Challenge, Chapter, Course, Enrollment, ExerciseDetail, ExerciseResult, LessonDetail, Project, PracticalAdmin, PracticalClass, PracticalClassAdmin, PracticalDetail, PracticalSubject, PracticalSubjectAdmin, PracticalSummary } from "@/types";
 
 /**
  * API client for Code-Yaar learning platform.
@@ -692,6 +692,47 @@ export const practicals = {
     request(`/practicals/${slug}/complete/`, { method: completed ? 'POST' : 'DELETE' }),
   bookmark: (slug: string, bookmarked: boolean) =>
     request(`/practicals/${slug}/bookmark/`, { method: bookmarked ? 'POST' : 'DELETE' }),
+};
+
+export const practicalAdmin = {
+  classes: async (search?: string) => {
+    const data = await request<Paginated<PracticalClassAdmin>>(
+      `/admin/practical-classes/${search ? `?search=${encodeURIComponent(search)}` : ''}`
+    );
+    return unwrapList(data);
+  },
+  saveClass: (data: Partial<PracticalClassAdmin>, id?: number) =>
+    request<PracticalClassAdmin>(`/admin/practical-classes/${id ? `${id}/` : ''}`, {
+      method: id ? 'PATCH' : 'POST',
+      body: JSON.stringify(data),
+    }),
+  deleteClass: (id: number) =>
+    request(`/admin/practical-classes/${id}/`, { method: 'DELETE' }),
+  subjects: async (classId?: number) => {
+    const query = classId ? `?practical_class=${classId}` : '';
+    const data = await request<Paginated<PracticalSubjectAdmin>>(`/admin/practical-subjects/${query}`);
+    return unwrapList(data);
+  },
+  saveSubject: (data: Partial<PracticalSubjectAdmin>, id?: number) =>
+    request<PracticalSubjectAdmin>(`/admin/practical-subjects/${id ? `${id}/` : ''}`, {
+      method: id ? 'PATCH' : 'POST',
+      body: JSON.stringify(data),
+    }),
+  deleteSubject: (id: number) =>
+    request(`/admin/practical-subjects/${id}/`, { method: 'DELETE' }),
+  practicals: async (search?: string) => {
+    const data = await request<Paginated<PracticalAdmin>>(
+      `/admin/practicals/${search ? `?search=${encodeURIComponent(search)}` : ''}`
+    );
+    return unwrapList(data);
+  },
+  savePractical: (data: Partial<PracticalAdmin>, id?: number) =>
+    request<PracticalAdmin>(`/admin/practicals/${id ? `${id}/` : ''}`, {
+      method: id ? 'PATCH' : 'POST',
+      body: JSON.stringify(data),
+    }),
+  deletePractical: (id: number) =>
+    request(`/admin/practicals/${id}/`, { method: 'DELETE' }),
 };
 
 // ─── Sandbox Snippet Execution (lesson "Run" buttons) ────────────────────

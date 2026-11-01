@@ -126,6 +126,7 @@ class Course(models.Model):
     learning_objectives = models.JSONField(default=list, blank=True, help_text='List of skills learned')
     is_free = models.BooleanField(default=False)
     order = models.PositiveIntegerField(default=0)
+    is_published = models.BooleanField(default=True)
     is_active = models.BooleanField(default=True)
     is_published = models.BooleanField(default=False)
     # ── Certification policy (configurable per course) ──
@@ -805,8 +806,10 @@ class PracticalClass(models.Model):
     slug = models.SlugField(max_length=100, unique=True)
     title = models.CharField(max_length=100)
     board = models.CharField(max_length=20, choices=BOARD_CHOICES, default='stb')
+    thumbnail = models.URLField(blank=True, default='')
     description = models.TextField(blank=True, default='')
     order = models.PositiveIntegerField(default=0)
+    is_published = models.BooleanField(default=True)
     is_active = models.BooleanField(default=True)
 
     def __str__(self):
@@ -828,6 +831,7 @@ class PracticalSubject(models.Model):
     )
     slug = models.SlugField(max_length=100)
     title = models.CharField(max_length=100)
+    image = models.URLField(blank=True, default='')
     description = models.TextField(blank=True, default='')
     order = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)

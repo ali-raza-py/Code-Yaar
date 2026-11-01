@@ -323,6 +323,10 @@ class PracticalClassAdmin(admin.ModelAdmin):
     search_fields = ['title', 'description']
     prepopulated_fields = {'slug': ('title',)}
     ordering = ['order', 'title']
+    fields = [
+        'title', 'slug', 'board', 'thumbnail', 'description', 'order',
+        'is_published', 'is_active',
+    ]
     inlines = [PracticalSubjectInline]
 
     @admin.display(description='Subjects')

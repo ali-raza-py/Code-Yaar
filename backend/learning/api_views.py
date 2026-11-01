@@ -22,7 +22,7 @@ from .services.sandbox import get_sandbox
 from .services.xp import award_xp, deduct_xp
 from .services.achievements import award_eligible_achievements
 from .services.completion import evaluate_course_completion
-from .permissions import IsEmailVerified
+from .permissions import IsEmailVerified, IsAdministrator
 from .serializers import (
     CareerTrackSerializer, CareerTrackListSerializer,
     CourseListSerializer, CourseDetailSerializer,
@@ -41,6 +41,8 @@ from .serializers import (
     PracticalClassSerializer, PracticalSubjectSerializer,
     PracticalListSerializer, PracticalDetailSerializer,
     PracticalProgressSerializer, PracticalBookmarkSerializer,
+    PracticalClassAdminSerializer, PracticalSubjectAdminSerializer,
+    PracticalAdminSerializer,
 )
 from .services.sandbox import validate_submission
 
@@ -659,7 +661,7 @@ class ChallengeViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class PracticalClassViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = PracticalClass.objects.filter(is_active=True)
+    queryset = PracticalClass.objects.filter(is_active=True, is_published=True)
     serializer_class = PracticalClassSerializer
     permission_classes = [permissions.AllowAny]
     lookup_field = 'slug'
@@ -673,6 +675,7 @@ class PracticalSubjectViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         qs = PracticalSubject.objects.filter(
             practical_class__is_active=True,
+            practical_class__is_published=True,
             is_active=True,
         ).select_related('practical_class')
         class_slug = self.request.query_params.get('class')
@@ -694,6 +697,7 @@ class PracticalViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         qs = Practical.objects.filter(
             practical_class__is_active=True,
+            practical_class__is_published=True,
             subject__is_active=True,
             is_active=True,
             is_published=True,
@@ -766,6 +770,50 @@ class PracticalBookmarkViewSet(viewsets.ReadOnlyModelViewSet):
         return PracticalBookmark.objects.filter(
             user=self.request.user
         ).select_related('practical')
+
+
+class PracticalClassAdminViewSet(viewsets.ModelViewSet):
+    queryset = PracticalClass.objects.all()
+    serializer_class = PracticalClassAdminSerializer
+    permission_classes = [IsAdministrator]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['title', 'slug', 'description']
+    ordering_fields = ['title', 'order', 'is_active']
+
+
+class PracticalSubjectAdminViewSet(viewsets.ModelViewSet):
+    queryset = PracticalSubject.objects.select_related('practical_class').all()
+    serializer_class = PracticalSubjectAdminSerializer
+    permission_classes = [IsAdministrator]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['title', 'slug', 'description', 'practical_class__title']
+    ordering_fields = ['title', 'order', 'is_active']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        practical_class = self.request.query_params.get('practical_class')
+        if practical_class:
+            qs = qs.filter(practical_class_id=practical_class)
+        return qs
+
+
+class PracticalAdminViewSet(viewsets.ModelViewSet):
+    queryset = Practical.objects.select_related('practical_class', 'subject').all()
+    serializer_class = PracticalAdminSerializer
+    permission_classes = [IsAdministrator]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['title', 'slug', 'description', 'subject__title']
+    ordering_fields = ['title', 'practical_number', 'order', 'is_published']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        practical_class = self.request.query_params.get('practical_class')
+        subject = self.request.query_params.get('subject')
+        if practical_class:
+            qs = qs.filter(practical_class_id=practical_class)
+        if subject:
+            qs = qs.filter(subject_id=subject)
+        return qs
 
 
 # ─── Progress ViewSets ──────────────────────────────────────────────────────
