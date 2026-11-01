@@ -118,7 +118,7 @@ export default function DashboardPage() {
       {/* Top bar */}
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">My Activity</h1>
+          <div className="flex items-center gap-3"><h1 className="text-2xl font-bold text-foreground">My Activity</h1><Link href="/progress" className="rounded-lg bg-cta/10 px-3 py-1.5 text-xs font-bold text-cta hover:bg-cta/20">View progress</Link></div>
           <p className="mt-1 text-sm text-muted-foreground">Level {profile?.level ?? 1} · {displayName}</p>
         </div>
       </div>

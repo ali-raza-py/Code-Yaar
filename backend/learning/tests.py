@@ -15,9 +15,12 @@ Tests cover:
 - Sandbox service
 """
 
+from datetime import timedelta
+
 from django.test import TestCase, Client, override_settings
 from django.contrib.auth.models import User
 from django.core.cache import cache
+from django.utils import timezone
 from rest_framework.test import APIClient
 from rest_framework import status
 
@@ -26,7 +29,7 @@ from .models import (
     Resource, Enrollment, LessonProgress, ExerciseAttempt, XPTransaction,
     Achievement, UserAchievement,
     PracticalClass, PracticalSubject, Practical, PracticalProgress,
-    PracticalBookmark,
+    PracticalBookmark, LearningActivity,
 )
 from .services.language_adapter import (
     get_adapter, get_supported_languages, PythonAdapter, JavaScriptAdapter,
@@ -35,6 +38,7 @@ from .services.sandbox import (
     DevelopmentSandbox, validate_submission, SandboxConfig,
 )
 from .services.xp import award_xp, deduct_xp
+from .services.progress import record_learning_activity
 
 
 # ─── Model Tests ─────────────────────────────────────────────────────────────
@@ -226,6 +230,82 @@ class PracticalsAPITest(TestCase):
 
         response = self.client.delete(f'/api/admin/practicals/{practical.id}/')
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+
+class ProgressDashboardAPITest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(username='progress-reader', password='pass123')
+        UserProfile.objects.create(user=self.user)
+        track = CareerTrack.objects.create(
+            slug='progress-track', title='Progress Track', description='Track'
+        )
+        self.course = Course.objects.create(
+            slug='progress-course', title='Progress Course', description='Course',
+            track=track, language='python', is_published=True,
+        )
+        chapter = Chapter.objects.create(
+            course=self.course, title='Module', slug='module', order=1,
+        )
+        self.lesson = Lesson.objects.create(
+            chapter=chapter, title='Lesson', slug='lesson', order=1,
+        )
+
+    def test_new_student_has_zero_progress(self):
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get('/api/progress/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['overview']['overall_percentage'], 0)
+        self.assertEqual(response.data['overview']['lessons_completed'], 0)
+        self.assertEqual(response.data['overview']['current_streak'], 0)
+
+    def test_course_and_lesson_progress_are_server_derived(self):
+        Enrollment.objects.create(user=self.user, course=self.course)
+        LessonProgress.objects.create(
+            user=self.user, lesson=self.lesson, status='completed',
+        )
+        LearningActivity.objects.create(
+            user=self.user, activity_type='lesson_completed',
+            title='Completed Lesson', course=self.course, lesson=self.lesson,
+            activity_date=timezone.localdate(),
+            dedupe_key=f'{self.user.pk}:lesson_completed:{self.lesson.pk}:test',
+        )
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get('/api/progress/')
+        self.assertEqual(response.data['overview']['overall_percentage'], 100)
+        self.assertEqual(response.data['courses'][0]['completed_lessons'], 1)
+        self.assertEqual(response.data['courses'][0]['remaining_lessons'], 0)
+        self.assertEqual(len(response.data['activities']), 1)
+
+    def test_progress_endpoint_is_private(self):
+        response = self.client.get('/api/progress/')
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_streak_uses_distinct_local_activity_days(self):
+        today = timezone.localdate()
+        for offset in range(3):
+            activity_date = today - timedelta(days=offset)
+            LearningActivity.objects.create(
+                user=self.user, activity_type='lesson_completed',
+                title='Lesson', course=self.course, lesson=self.lesson,
+                activity_date=activity_date,
+                dedupe_key=f'{self.user.pk}:lesson:{offset}',
+            )
+        first, created = record_learning_activity(
+            self.user, 'lesson_completed', 'Lesson',
+            course=self.course, lesson=self.lesson,
+        )
+        second, duplicate = record_learning_activity(
+            self.user, 'lesson_completed', 'Lesson',
+            course=self.course, lesson=self.lesson,
+        )
+        self.assertTrue(created)
+        self.assertFalse(duplicate)
+        self.assertEqual(first.pk, second.pk)
+        self.client.force_authenticate(user=self.user)
+        response = self.client.get('/api/progress/')
+        self.assertEqual(response.data['overview']['current_streak'], 3)
+        self.assertEqual(response.data['overview']['longest_streak'], 3)
 
 
 # ─── Enrollment Tests ────────────────────────────────────────────────────────

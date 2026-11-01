@@ -17,6 +17,7 @@ from django.utils import timezone
 from ..models import (
     Course, Enrollment, Exercise, Lesson, LessonProgress,
 )
+from .progress import record_learning_activity
 
 
 def _lessons_completed(user, course: Course):
@@ -89,4 +90,8 @@ def evaluate_course_completion(user, course: Course):
             enrollment.status = 'completed'
             enrollment.completed_at = timezone.now()
             enrollment.save(update_fields=['status', 'completed_at'])
+            record_learning_activity(
+                user, 'course_completed', f'Completed {course.title}',
+                course=course,
+            )
     return enrollment

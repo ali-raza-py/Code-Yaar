@@ -882,6 +882,77 @@ export const profileStats = {
   get: () => request<ProfileStatsData>('/profile/stats/'),
 };
 
+export interface ProgressDashboardData {
+  overview: {
+    overall_percentage: number;
+    total_courses: number;
+    completed_courses: number;
+    in_progress_courses: number;
+    lessons_completed: number;
+    lessons_total: number;
+    practicals_completed: number;
+    practicals_total: number;
+    quizzes_attempted: number;
+    average_quiz_score: number;
+    highest_quiz_score: number;
+    learning_time_seconds: number;
+    current_streak: number;
+    longest_streak: number;
+  };
+  courses: Array<{
+    id: number;
+    slug: string;
+    title: string;
+    status: string;
+    total_lessons: number;
+    completed_lessons: number;
+    remaining_lessons: number;
+    total_practicals: number | null;
+    completed_practicals: number | null;
+    progress_percentage: number;
+    last_accessed_at: string | null;
+  }>;
+  subjects: Array<{
+    id: number;
+    title: string;
+    class_title: string;
+    total: number;
+    completed: number;
+    percentage: number;
+  }>;
+  classes: Array<{
+    id: number;
+    title: string;
+    total: number;
+    completed: number;
+    percentage: number;
+  }>;
+  weekly_activity: Array<{ date: string; count: number }>;
+  quiz_performance: Array<{ date: string; score: number }>;
+  active_dates: string[];
+  activities: Array<{
+    id: number;
+    type: string;
+    title: string;
+    status: string;
+    associated_title: string | null;
+    date: string;
+    activity_date: string;
+  }>;
+  insights: string[];
+}
+
+export const progressDashboard = {
+  get: (params?: { type?: string; from?: string; to?: string }) => {
+    const query = new URLSearchParams();
+    if (params?.type) query.set('type', params.type);
+    if (params?.from) query.set('from', params.from);
+    if (params?.to) query.set('to', params.to);
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return request<ProgressDashboardData>(`/progress/${suffix}`);
+  },
+};
+
 export interface ProfileStatsData {
   user: {
     id: number;

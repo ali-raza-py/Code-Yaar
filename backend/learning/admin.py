@@ -9,7 +9,7 @@ from .models import (
     UserAchievement, Progress, Certification, UserCertification,
     Skill, UserSkill, EmailVerificationToken, PasswordResetToken,
     AuthenticationAuditLog, PracticalClass, PracticalSubject, Practical,
-    PracticalProgress, PracticalBookmark,
+    PracticalProgress, PracticalBookmark, LearningActivity,
 )
 
 User = get_user_model()
@@ -390,6 +390,15 @@ class PracticalBookmarkAdmin(admin.ModelAdmin):
     search_fields = ['user__username', 'practical__title']
     raw_id_fields = ['user', 'practical']
     date_hierarchy = 'created_at'
+
+
+@admin.register(LearningActivity)
+class LearningActivityAdmin(admin.ModelAdmin):
+    list_display = ['user', 'activity_type', 'title', 'status', 'activity_date', 'occurred_at']
+    list_filter = ['activity_type', 'status', 'activity_date']
+    search_fields = ['user__username', 'title']
+    raw_id_fields = ['user', 'course', 'lesson', 'practical', 'exercise']
+    date_hierarchy = 'activity_date'
 
 
 @admin.register(Enrollment)

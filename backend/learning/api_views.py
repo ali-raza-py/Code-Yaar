@@ -1,10 +1,12 @@
+from datetime import timedelta
+
 from rest_framework import serializers, viewsets, permissions, status, filters
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.response import Response
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import F, Sum, Count, Q
+from django.db.models import F, Sum, Count, Q, Avg, Case, When, Value, IntegerField
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -16,12 +18,13 @@ from .models import (
     UserAchievement, Progress, Certification, UserCertification,
     Skill, UserSkill,
     PracticalClass, PracticalSubject, Practical, PracticalProgress,
-    PracticalBookmark,
+    PracticalBookmark, LearningActivity,
 )
 from .services.sandbox import get_sandbox
 from .services.xp import award_xp, deduct_xp
 from .services.achievements import award_eligible_achievements
 from .services.completion import evaluate_course_completion
+from .services.progress import record_learning_activity, streak_summary
 from .permissions import IsEmailVerified, IsAdministrator
 from .serializers import (
     CareerTrackSerializer, CareerTrackListSerializer,
@@ -172,6 +175,10 @@ class CourseViewSet(viewsets.ReadOnlyModelViewSet):
                 {'detail': 'Already enrolled.', 'enrollment_id': enrollment.id},
                 status=status.HTTP_200_OK
             )
+        record_learning_activity(
+            request.user, 'course_started', f'Started {course.title}',
+            course=course,
+        )
         return Response(
             EnrollmentSerializer(enrollment).data,
             status=status.HTTP_201_CREATED
@@ -290,6 +297,11 @@ class LessonViewSet(viewsets.ReadOnlyModelViewSet):
         enrollment.last_lesson = lesson
         enrollment.last_activity_at = timezone.now()
         enrollment.save()
+        if progress.status == 'completed':
+            record_learning_activity(
+                user, 'lesson_completed', f'Completed {lesson.title}',
+                course=lesson.chapter.course, lesson=lesson,
+            )
 
         # Re-evaluate strict, server-side course completion now that lesson
         # state may have changed.
@@ -466,6 +478,13 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
                 self._update_lesson_progress(request.user, exercise.lesson)
                 evaluate_course_completion(request.user, exercise.lesson.chapter.course)
                 award_eligible_achievements(request.user, lesson=exercise.lesson)
+            if exercise.is_final_assessment:
+                record_learning_activity(
+                    request.user, 'quiz_attempted', f'Attempted {exercise.title}',
+                    course=exercise.lesson.chapter.course,
+                    lesson=exercise.lesson, exercise=exercise,
+                    status='passed' if result['status'] == 'correct' else 'needs_practice',
+                )
 
         return Response({
             'status': result['status'],
@@ -728,6 +747,10 @@ class PracticalViewSet(viewsets.ReadOnlyModelViewSet):
             if progress.completed_at is None:
                 progress.completed_at = timezone.now()
                 progress.save(update_fields=['completed_at', 'updated_at'])
+            record_learning_activity(
+                request.user, 'practical_completed',
+                f'Completed {practical.title}', practical=practical,
+            )
         return Response(PracticalProgressSerializer(progress).data)
 
     @action(
@@ -745,6 +768,11 @@ class PracticalViewSet(viewsets.ReadOnlyModelViewSet):
         bookmark, created = PracticalBookmark.objects.get_or_create(
             user=request.user,
             practical=practical,
+        )
+        record_learning_activity(
+            request.user, 'bookmark_created',
+            f'Bookmarked {practical.title}', practical=practical,
+            status='saved',
         )
         return Response(
             PracticalBookmarkSerializer(bookmark).data,
@@ -838,7 +866,11 @@ class LessonProgressViewSet(viewsets.ModelViewSet):
         )
 
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        enrollment = serializer.save(user=self.request.user)
+        record_learning_activity(
+            self.request.user, 'course_started',
+            f'Started {enrollment.course.title}', course=enrollment.course,
+        )
 
 
 class ExerciseAttemptViewSet(viewsets.ReadOnlyModelViewSet):
@@ -1082,6 +1114,226 @@ def leaderboard_view(request):
         'limit': limit,
         'offset': offset,
         'entries': entries,
+    })
+
+
+# ─── Student Progress Dashboard ────────────────────────────────────────────
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def progress_dashboard_view(request):
+    """Return server-derived analytics for the authenticated learner."""
+    user = request.user
+    today = timezone.localdate()
+    streaks = streak_summary(user)
+    enrollments = list(
+        Enrollment.objects.filter(user=user)
+        .select_related('course', 'course__track')
+        .annotate(
+            total_lessons=Count(
+                'course__chapters__lessons',
+                filter=Q(course__chapters__is_active=True,
+                         course__chapters__lessons__is_active=True),
+                distinct=True,
+            ),
+            completed_lessons=Count(
+                'course__chapters__lessons__progress_entries',
+                filter=Q(
+                    course__chapters__is_active=True,
+                    course__chapters__lessons__is_active=True,
+                    course__chapters__lessons__progress_entries__user=user,
+                    course__chapters__lessons__progress_entries__status__in=[
+                        'completed', 'mastered'
+                    ],
+                ),
+                distinct=True,
+            ),
+        )
+    )
+    courses = []
+    for enrollment in enrollments:
+        total = enrollment.total_lessons or 0
+        completed = enrollment.completed_lessons or 0
+        courses.append({
+            'id': enrollment.course_id, 'slug': enrollment.course.slug,
+            'title': enrollment.course.title, 'status': enrollment.status,
+            'total_lessons': total, 'completed_lessons': completed,
+            'remaining_lessons': max(total - completed, 0),
+            'total_practicals': None, 'completed_practicals': None,
+            'progress_percentage': round((completed / total) * 100) if total else 0,
+            'last_accessed_at': enrollment.last_activity_at.isoformat()
+                if enrollment.last_activity_at else None,
+        })
+
+    practical_qs = Practical.objects.filter(
+        practical_class__is_active=True, practical_class__is_published=True,
+        subject__is_active=True, is_active=True, is_published=True,
+    )
+    practical_total = practical_qs.count()
+    practical_completed = PracticalProgress.objects.filter(
+        user=user, completed_at__isnull=False, practical__in=practical_qs,
+    ).count()
+    assessments = ExerciseAttempt.objects.filter(
+        user=user, exercise__is_final_assessment=True,
+        exercise__is_active=True, exercise__lesson__is_active=True,
+        exercise__lesson__chapter__is_active=True,
+    )
+    assessment_stats = assessments.aggregate(
+        total=Count('id'),
+        average=Avg(Case(
+            When(status='correct', then=Value(100)),
+            default=Value(0), output_field=IntegerField(),
+        )),
+        passed=Count('id', filter=Q(status='correct')),
+    )
+
+    all_activities = LearningActivity.objects.filter(user=user)
+    activity_qs = all_activities
+    if request.query_params.get('type'):
+        activity_qs = activity_qs.filter(
+            activity_type=request.query_params['type']
+        )
+    if request.query_params.get('from'):
+        activity_qs = activity_qs.filter(
+            activity_date__gte=request.query_params['from']
+        )
+    if request.query_params.get('to'):
+        activity_qs = activity_qs.filter(
+            activity_date__lte=request.query_params['to']
+        )
+    activities = []
+    for activity in activity_qs.select_related(
+        'course', 'lesson__chapter__course', 'practical__subject'
+    )[:30]:
+        associated_title = (
+            activity.course.title if activity.course else
+            activity.lesson.chapter.course.title if activity.lesson else
+            activity.practical.subject.title if activity.practical else None
+        )
+        activities.append({
+            'id': activity.id, 'type': activity.activity_type,
+            'title': activity.title, 'status': activity.status,
+            'associated_title': associated_title,
+            'date': activity.occurred_at.isoformat(),
+            'activity_date': activity.activity_date.isoformat(),
+        })
+
+    daily_counts = {
+        row['activity_date']: row['count']
+        for row in all_activities.filter(
+            activity_date__gte=today - timedelta(days=6),
+            activity_date__lte=today,
+        ).values('activity_date').annotate(count=Count('id'))
+    }
+    weekly_activity = [{
+        'date': (today - timedelta(days=offset)).isoformat(),
+        'count': daily_counts.get(today - timedelta(days=offset), 0),
+    } for offset in range(6, -1, -1)]
+
+    subjects = PracticalSubject.objects.filter(
+        practical_class__is_active=True, practical_class__is_published=True,
+        is_active=True,
+    ).annotate(
+        total=Count(
+            'practicals',
+            filter=Q(practicals__is_active=True, practicals__is_published=True),
+            distinct=True,
+        ),
+        completed=Count(
+            'practicals__progress_entries',
+            filter=Q(
+                practicals__is_active=True, practicals__is_published=True,
+                practicals__progress_entries__user=user,
+                practicals__progress_entries__completed_at__isnull=False,
+            ),
+            distinct=True,
+        ),
+    ).select_related('practical_class')
+    subject_progress = [{
+        'id': item.id, 'title': item.title,
+        'class_title': item.practical_class.title,
+        'total': item.total or 0, 'completed': item.completed or 0,
+        'percentage': round((item.completed / item.total) * 100)
+            if item.total else 0,
+    } for item in subjects]
+
+    classes = PracticalClass.objects.filter(
+        is_active=True, is_published=True,
+    ).annotate(
+        total=Count(
+            'practicals',
+            filter=Q(
+                practicals__is_active=True,
+                practicals__is_published=True,
+                practicals__subject__is_active=True,
+            ),
+            distinct=True,
+        ),
+        completed=Count(
+            'practicals__progress_entries',
+            filter=Q(
+                practicals__is_active=True,
+                practicals__is_published=True,
+                practicals__subject__is_active=True,
+                practicals__progress_entries__user=user,
+                practicals__progress_entries__completed_at__isnull=False,
+            ),
+            distinct=True,
+        ),
+    )
+    class_progress = [{
+        'id': item.id,
+        'title': item.title,
+        'total': item.total or 0,
+        'completed': item.completed or 0,
+        'percentage': round((item.completed / item.total) * 100)
+            if item.total else 0,
+    } for item in classes]
+
+    total_lessons = sum(item['total_lessons'] for item in courses)
+    lessons_completed = sum(item['completed_lessons'] for item in courses)
+    lesson_recent = all_activities.filter(
+        activity_type='lesson_completed',
+        activity_date__gte=today - timedelta(days=6),
+    ).count()
+    insights = [
+        f'You completed {lesson_recent} lesson{"s" if lesson_recent != 1 else ""} this week.',
+        f'You have {max(practical_total - practical_completed, 0)} practicals remaining.',
+    ]
+    if assessment_stats['total']:
+        insights.append(
+            f'Your assessment average is {round(assessment_stats["average"] or 0)}%.'
+        )
+    if not lesson_recent:
+        insights.append('You have not completed a lesson recently.')
+
+    return Response({
+        'overview': {
+            'overall_percentage': round((lessons_completed / total_lessons) * 100)
+                if total_lessons else 0,
+            'total_courses': len(courses),
+            'completed_courses': sum(item['status'] == 'completed' for item in courses),
+            'in_progress_courses': sum(item['status'] == 'active' for item in courses),
+            'lessons_completed': lessons_completed, 'lessons_total': total_lessons,
+            'practicals_completed': practical_completed,
+            'practicals_total': practical_total,
+            'quizzes_attempted': assessment_stats['total'] or 0,
+            'average_quiz_score': round(assessment_stats['average'] or 0),
+            'highest_quiz_score': 100 if assessment_stats['passed'] else 0,
+            'learning_time_seconds': LessonProgress.objects.filter(user=user)
+                .aggregate(total=Sum('time_spent_seconds'))['total'] or 0,
+            'current_streak': streaks['current'], 'longest_streak': streaks['longest'],
+        },
+        'courses': courses, 'subjects': subject_progress,
+        'classes': class_progress,
+        'weekly_activity': weekly_activity,
+        'quiz_performance': [
+            {'date': item.created_at.date().isoformat(),
+             'score': 100 if item.status == 'correct' else 0}
+            for item in assessments.order_by('created_at')[:30]
+        ],
+        'active_dates': streaks['active_dates'],
+        'activities': activities, 'insights': insights,
     })
 
 

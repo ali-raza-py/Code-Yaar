@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Award,
+  Activity,
   BookOpen,
   ChevronDown,
   ChevronLeft,
@@ -81,6 +82,7 @@ const navGroups: NavGroup[] = [
 ];
 
 const secondaryItems: NavItem[] = [
+  { href: "/progress", label: "Progress", icon: Activity },
   { href: "/leaderboard", label: "Leaderboard", icon: Medal, badge: "NEW" },
   { href: "/achievements", label: "Achievements", icon: Trophy },
   { href: "/certificates", label: "Certificates", icon: Award },

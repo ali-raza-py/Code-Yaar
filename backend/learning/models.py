@@ -963,6 +963,54 @@ class PracticalBookmark(models.Model):
         ]
 
 
+class LearningActivity(models.Model):
+    """A meaningful learner event used for history, analytics, and streaks."""
+
+    TYPE_CHOICES = [
+        ('course_started', 'Course started'),
+        ('lesson_completed', 'Lesson completed'),
+        ('practical_completed', 'Practical completed'),
+        ('quiz_attempted', 'Quiz attempted'),
+        ('course_completed', 'Course completed'),
+        ('bookmark_created', 'Bookmark created'),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='learning_activities',
+    )
+    activity_type = models.CharField(max_length=30, choices=TYPE_CHOICES)
+    title = models.CharField(max_length=250)
+    status = models.CharField(max_length=30, default='completed')
+    course = models.ForeignKey(
+        Course, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='learning_activities',
+    )
+    lesson = models.ForeignKey(
+        Lesson, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='learning_activities',
+    )
+    practical = models.ForeignKey(
+        Practical, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='learning_activities',
+    )
+    exercise = models.ForeignKey(
+        Exercise, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='learning_activities',
+    )
+    dedupe_key = models.CharField(max_length=180, unique=True)
+    activity_date = models.DateField()
+    occurred_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-occurred_at']
+        indexes = [
+            models.Index(fields=['user', 'activity_date']),
+            models.Index(fields=['user', 'activity_type', '-occurred_at']),
+        ]
+
+
 class Progress(models.Model):
     """Generic progress tracker (kept for backward compatibility)."""
     STATUS_CHOICES = [

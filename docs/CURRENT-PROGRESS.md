@@ -24,6 +24,7 @@ checklist and final report of the Master Academy implementation.
 | Health endpoint | Implemented | `GET /api/health/` |
 | Production configuration surface | Implemented | env-driven DB/hosts/CORS/SITE_URL/HSTS in `settings.py` + `.env.example` |
 | Administrator practical content management | Implemented | Admin-only CRUD APIs and `/learn/practicals/manage` for classes/courses, subjects, and practicals with publish controls |
+| Student progress analytics | Implemented | User-scoped `/api/progress/`, meaningful activity ledger, server-derived course/practical/assessment metrics, streaks, and `/progress` dashboard |
 
 ## Backend Test Suite
 

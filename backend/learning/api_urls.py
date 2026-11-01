@@ -32,6 +32,7 @@ urlpatterns = [
 
     # Profile stats
     path('profile/stats/', api_views.profile_stats_view, name='api-profile-stats'),
+    path('progress/', api_views.progress_dashboard_view, name='api-progress-dashboard'),
 
     # Public badge verification + owner downloads
     path('badges/verify/<str:identifier>/', api_views.verify_badge, name='badge-verify'),
