@@ -421,6 +421,15 @@ export interface MePayload extends ProfileFields {
   last_active_at: string | null;
   email_changed?: boolean;
   verification_email_sent?: boolean;
+  // Added by the profile upgrade: shareable + privacy + preference fields.
+  location: string;
+  website_url: string;
+  is_profile_public: boolean;
+  show_badges: boolean;
+  show_activity: boolean;
+  show_courses: boolean;
+  notification_preferences: NotificationPreferences;
+  longest_streak: number;
 }
 
 /** Name kept for existing consumers of the old `/auth/profile/` shape. */
@@ -462,6 +471,14 @@ export interface UpdateProfilePayload extends Partial<ProfileFields> {
   first_name?: string;
   last_name?: string;
   full_name?: string;
+  // `avatar` is read-only here: writes are rejected in favour of the upload
+  // endpoint, but the field is echoed back in the profile payload.
+  location?: string;
+  website_url?: string;
+  is_profile_public?: boolean;
+  show_badges?: boolean;
+  show_activity?: boolean;
+  show_courses?: boolean;
 }
 
 export const auth = {
@@ -1028,10 +1045,18 @@ export interface ProfileStatsData {
   profile: {
     avatar: string;
     bio: string;
+    location: string;
     role: string;
+    website_url: string;
     xp_points: number;
     streak_days: number;
+    longest_streak: number;
     level: number;
+    is_profile_public: boolean;
+    show_badges: boolean;
+    show_activity: boolean;
+    show_courses: boolean;
+    notification_preferences: NotificationPreferences;
     last_active_at: string | null;
   };
   stats: {
@@ -1061,10 +1086,30 @@ export interface ProfileStatsData {
     description: string;
     icon: string;
     category: string;
+    category_label: string;
+    difficulty: string;
+    difficulty_label: string;
+    how_to_earn: string;
+    level_label: string;
     xp_bonus: number;
     earned: boolean;
     earned_at: string | null;
+    public_id: string | null;
+    credential_id: string | null;
+    recipient_name: string | null;
+    verification_url: string | null;
+    status: string | null;
+    progress: { current: number; target: number; complete: boolean };
   }>;
+  next_badge: {
+    slug: string;
+    title: string;
+    description: string;
+    how_to_earn: string;
+    difficulty: string;
+    difficulty_label: string;
+    progress: { current: number; target: number };
+  } | null;
   skills: Array<{
     id: number;
     name: string;
@@ -1110,6 +1155,49 @@ export interface CertificateSummary {
   /** Base64 PNG of the QR code that encodes `verification_url`. */
   qr_data_url: string;
   issuer: string;
+}
+
+// ─── In-app notifications ─────────────────────────────────────────────────
+
+export type NotificationType =
+  | 'badge_unlock'
+  | 'streak_record'
+  | 'track_complete'
+  | 'xp_milestone';
+
+export interface AppNotification {
+  id: number;
+  type: NotificationType;
+  title: string;
+  body: string;
+  link: string;
+  unread: boolean;
+  created_at: string;
+}
+
+/** The five account-level notification toggles the API persists. */
+export interface NotificationPreferences {
+  achievements: boolean;
+  learning_reminders: boolean;
+  streak_reminders: boolean;
+  community: boolean;
+  announcements: boolean;
+}
+
+/**
+ * A badge the server just awarded, echoed on a completion response so the
+ * client can raise a toast without waiting on the notification list.
+ */
+export interface BadgeUnlock {
+  slug: string;
+  title: string;
+  description: string;
+  icon: string;
+  category: string;
+  difficulty: string;
+  xp_bonus: number;
+  public_id: string;
+  credential_id: string;
 }
 
 export interface CertificateRequirement {
@@ -1160,9 +1248,15 @@ export interface AchievementDefinition {
   icon: string;
   category: string;
   category_label: string;
+  difficulty: string;
+  difficulty_label: string;
+  how_to_earn: string;
   xp_bonus: number;
   earned: boolean;
+  earned_at: string | null;
   level_label: string;
+  /** Server-derived progress; null for anonymous visitors. */
+  progress: { current: number; target: number; complete: boolean } | null;
 }
 
 /** One badge actually earned by the signed-in learner. */
