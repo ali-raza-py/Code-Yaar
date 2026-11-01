@@ -68,7 +68,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="flex min-h-dvh flex-col bg-[#f5f7fa]">
+    <div className="flex min-h-dvh flex-col bg-background">
       <Suspense fallback={null}>
         <AppSidebar collapsed={collapsed} onToggle={toggle} />
       </Suspense>

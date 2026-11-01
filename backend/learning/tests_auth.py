@@ -330,7 +330,6 @@ class MeTests(AuthAPITestCase):
             'education_level': 'undergraduate',
             'github_url': 'https://github.com/ada',
             'linkedin_url': 'https://www.linkedin.com/in/ada',
-            'avatar': 'https://example.com/ada.png',
         })
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         self.assertEqual(response.data['user']['first_name'], 'Ada')

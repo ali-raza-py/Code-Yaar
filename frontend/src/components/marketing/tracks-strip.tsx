@@ -43,7 +43,7 @@ export function TracksStrip() {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       {tracks.slice(0, 4).map((track) => (
-        <Link key={track.slug} href={`/learn?track=${track.slug}`} className="focus-ring group rounded-[var(--radius-card)] border border-forest-border bg-white p-5 hover:border-forest-border-hover">
+        <Link key={track.slug} href={`/learn/tracks/${track.slug}`} className="focus-ring group rounded-[var(--radius-card)] border border-forest-border bg-white p-5 hover:border-forest-border-hover">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="font-mono text-[10px] uppercase tracking-wider text-forest-line-soft">

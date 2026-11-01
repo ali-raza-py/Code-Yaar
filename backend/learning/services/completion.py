@@ -17,6 +17,7 @@ from django.utils import timezone
 from ..models import (
     Course, Enrollment, Exercise, Lesson, LessonProgress,
 )
+from .notifications import create_notification
 from .progress import record_learning_activity
 
 
@@ -90,6 +91,13 @@ def evaluate_course_completion(user, course: Course):
             enrollment.status = 'completed'
             enrollment.completed_at = timezone.now()
             enrollment.save(update_fields=['status', 'completed_at'])
+            create_notification(
+                user,
+                type='track_complete',
+                title=f'Course complete: {course.title}',
+                body='You finished every requirement for this course.',
+                link=f'/learn/{course.slug}',
+            )
             record_learning_activity(
                 user, 'course_completed', f'Completed {course.title}',
                 course=course,

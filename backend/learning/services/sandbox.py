@@ -22,6 +22,7 @@ that simulates execution. In production, replace with actual sandbox
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -193,88 +194,191 @@ class DevelopmentSandbox(SandboxService):
         return True
 
 
-class SubprocessPythonSandbox(SandboxService):
+class SubprocessSandbox(SandboxService):
     """
-    Real Python execution for local development and self-hosted deployments.
+    Real execution for local development and self-hosted deployments.
 
-    Runs each program in a separate `python -I` process with:
+    Interpreted path (Python): each program runs in a separate `python -I`
+    process. Compiled path (C++): the program is compiled with g++/clang++
+    into a throwaway directory and the resulting binary is executed.
+
+    Every run gets:
     - a wall-clock timeout (killed and reported as timeout)
     - captured output with a hard byte cap
-    - isolated mode (-I: ignores site-packages user dirs and env vars)
     - a temporary working directory that is deleted after the run
     - stdin supplied from test-case input
+    - stripped environment, so learner code cannot read platform secrets
+    - on POSIX, hard CPU / address-space / process-count limits via `resource`
 
     This is process isolation with resource limits, NOT a hardened security
     boundary. For multi-tenant production deployments, replace with
-    DockerSandbox / a hosted execution service. Restricted to Python.
+    DockerSandbox / a hosted execution service. When no C++ compiler exists
+    on the host, C++ submissions are refused honestly instead of being
+    reported as passing.
     """
+
+    # MinGW is frequently installed but absent from PATH for a service process.
+    _CPP_FALLBACK_PATHS = [
+        r'C:\MinGW\bin\g++.exe',
+        r'C:\TDM-GCC-64\bin\g++.exe',
+        r'C:\msys64\mingw64\bin\g++.exe',
+        r'C:\Program Files\mingw-w64\x86_64-posix-seh\mingw64\bin\g++.exe',
+    ]
 
     def __init__(
         self,
         python_exe: Optional[str] = None,
+        cpp_exe: Optional[str] = None,
         config: Optional[SandboxConfig] = None,
     ):
         self.python_exe = python_exe or sys.executable
+        self.cpp_exe = cpp_exe if cpp_exe is not None else self._find_cpp_compiler()
         self.config = config or SandboxConfig()
 
-    def _run_one(self, code: str, stdin: str) -> ExecutionResult:
+    @staticmethod
+    def _find_cpp_compiler() -> Optional[str]:
+        for name in ('g++', 'clang++'):
+            found = shutil.which(name)
+            if found:
+                return found
+        for candidate in SubprocessSandbox._CPP_FALLBACK_PATHS:
+            if os.path.isfile(candidate):
+                return candidate
+        return None
+
+    @property
+    def cpp_available(self) -> bool:
+        return bool(self.cpp_exe)
+
+    def supported_languages(self) -> list[str]:
+        langs = ['python']
+        if self.cpp_available:
+            langs.append('cpp')
+        return langs
+
+    @staticmethod
+    def _posix_limits():
+        """preexec_fn applying CPU + memory caps, where the OS allows it."""
+        if os.name != 'posix':
+            return None
+        import resource
+
+        def apply_limits():
+            resource.setrlimit(resource.RLIMIT_CPU, (5, 5))
+            resource.setrlimit(resource.RLIMIT_AS, (256 * 1024 * 1024,) * 2)
+            resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
+
+        return apply_limits
+
+    def _clean_env(self) -> dict:
+        env = dict(os.environ)
+        for key in list(env):
+            if key.startswith(('DJANGO_', 'AWS_', 'DATABASE', 'SECRET', 'GIT')):
+                env.pop(key, None)
+        env['PYTHONIOENCODING'] = 'utf-8'
+        return env
+
+    def _spawn(self, argv: list[str], stdin: str, cwd: str) -> ExecutionResult:
+        """Run one prepared program with a timeout and capped output."""
         start = time.monotonic()
-        tmp_dir = tempfile.mkdtemp(prefix='cy-sandbox-')
-        script_path = os.path.join(tmp_dir, 'main.py')
+        try:
+            proc = subprocess.run(
+                argv,
+                input=stdin,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=self.config.timeout_seconds,
+                cwd=cwd,
+                env=self._clean_env(),
+                preexec_fn=self._posix_limits(),
+            )
+        except subprocess.TimeoutExpired:
+            return ExecutionResult(
+                status='timeout',
+                error=(
+                    f'Execution timed out after '
+                    f'{self.config.timeout_seconds:g} seconds. '
+                    'Check for an infinite loop or a range that is too large.'
+                ),
+                execution_time_ms=int((time.monotonic() - start) * 1000),
+            )
+        except FileNotFoundError:
+            return ExecutionResult(
+                status='error',
+                error=f'Runner not available on this server: {argv[0]!r}.',
+            )
+        elapsed = int((time.monotonic() - start) * 1000)
+        out = (proc.stdout or '')[:self.config.max_output_bytes]
+        err = (proc.stderr or '')[:self.config.max_output_bytes]
+        if proc.returncode:
+            return ExecutionResult(
+                status='error', output=out, error=err.strip(),
+                return_code=proc.returncode, execution_time_ms=elapsed,
+            )
+        return ExecutionResult(
+            status='success', output=out, error=err.strip(),
+            return_code=0, execution_time_ms=elapsed,
+        )
+
+    def _run_python(self, code: str, stdin: str, cwd: str) -> ExecutionResult:
+        script_path = os.path.join(cwd, 'main.py')
         try:
             with open(script_path, 'w', encoding='utf-8') as fh:
                 fh.write(code)
-            env = dict(os.environ)
-            # Strip our own environment so learner code cannot read secrets.
-            for key in list(env):
-                if key.startswith(('DJANGO_', 'AWS_', 'DATABASE', 'SECRET', 'GIT', 'HOME')) and key != 'HOME':
-                    env.pop(key, None)
-            env['PYTHONIOENCODING'] = 'utf-8'
-            try:
-                proc = subprocess.run(
-                    [self.python_exe, '-I', script_path],
-                    input=stdin,
-                    capture_output=True,
-                    text=True,
-                    encoding='utf-8',
-                    errors='replace',
-                    timeout=self.config.timeout_seconds,
-                    cwd=tmp_dir,
-                    env=env,
-                )
-            except subprocess.TimeoutExpired:
-                return ExecutionResult(
-                    status='timeout',
-                    error=(
-                        f'Execution timed out after '
-                        f'{self.config.timeout_seconds:g} seconds. '
-                        'Check for an infinite loop or a range that is too large.'
-                    ),
-                    execution_time_ms=int((time.monotonic() - start) * 1000),
-                )
-            elapsed = int((time.monotonic() - start) * 1000)
-            out = (proc.stdout or '')[:self.config.max_output_bytes]
-            err = (proc.stderr or '')[:self.config.max_output_bytes]
-            if proc.returncode:
-                return ExecutionResult(
-                    status='error',
-                    output=out,
-                    error=err.strip(),
-                    return_code=proc.returncode,
-                    execution_time_ms=elapsed,
-                )
-            return ExecutionResult(
-                status='success', output=out, error=err.strip(),
-                return_code=0, execution_time_ms=elapsed,
+        except OSError as exc:
+            return ExecutionResult(status='error', error=f'Sandbox failure: {exc}')
+        return self._spawn([self.python_exe, '-I', script_path], stdin, cwd)
+
+    def compile_cpp(
+        self, code: str, cwd: str,
+    ) -> tuple[Optional[list[str]], Optional[ExecutionResult]]:
+        """Compile `code` in `cwd`; return (run argv, None) or (None, error)."""
+        if not self.cpp_exe:
+            return None, ExecutionResult(
+                status='error',
+                error=(
+                    'C++ execution is not available on this server: no g++ or '
+                    'clang++ compiler was found. Your code has NOT been run.'
+                ),
             )
+        src = os.path.join(cwd, 'main.cpp')
+        exe = os.path.join(cwd, 'main.exe' if os.name == 'nt' else 'main')
+        try:
+            with open(src, 'w', encoding='utf-8') as fh:
+                fh.write(code)
+        except OSError as exc:
+            return None, ExecutionResult(status='error', error=f'Sandbox failure: {exc}')
+
+        build = self._spawn(
+            [self.cpp_exe, '-std=c++17', '-O1', '-o', exe, src], '', cwd,
+        )
+        if build.status != 'success':
+            return None, ExecutionResult(
+                status='error',
+                output=build.output,
+                error=_format_cpp_compile_error(build.error, cwd=cwd),
+                return_code=build.return_code,
+            )
+        return [exe], None
+
+    def _run_cpp(self, code: str, stdin: str, cwd: str) -> ExecutionResult:
+        argv, failure = self.compile_cpp(code, cwd)
+        if failure is not None:
+            return failure
+        return self._spawn(argv, stdin, cwd)
+
+    def _run_one(self, code: str, stdin: str, language: str = 'python') -> ExecutionResult:
+        tmp_dir = tempfile.mkdtemp(prefix='cy-sandbox-')
+        try:
+            if language == 'cpp':
+                return self._run_cpp(code, stdin, tmp_dir)
+            return self._run_python(code, stdin, tmp_dir)
         except Exception as exc:  # noqa: BLE001 — never let the runner crash the API
             return ExecutionResult(status='error', error=f'Sandbox failure: {exc}')
         finally:
-            try:
-                os.remove(script_path)
-                os.rmdir(tmp_dir)
-            except OSError:
-                pass
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def execute(
         self,
@@ -283,14 +387,17 @@ class SubprocessPythonSandbox(SandboxService):
         config: Optional[SandboxConfig] = None,
         stdin: str = '',
     ) -> ExecutionResult:
-        if language != 'python':
+        if language not in ('python', 'cpp'):
             return ExecutionResult(
                 status='error',
-                error=f'Server-side execution currently supports Python only (got {language!r}).',
+                error=(
+                    'Server-side execution currently supports Python and C++ '
+                    f'only (got {language!r}).'
+                ),
             )
         if not code.strip():
             return ExecutionResult(status='error', error='No code provided.')
-        return self._run_one(code, stdin)
+        return self._run_one(code, stdin, language)
 
     def run_tests(
         self,
@@ -300,35 +407,101 @@ class SubprocessPythonSandbox(SandboxService):
         config: Optional[SandboxConfig] = None,
     ) -> list[TestResult]:
         results: list[TestResult] = []
+
+        # A C++ program with no declared tests still deserves a real run.
+        if language == 'cpp' and not test_cases:
+            test_cases = [{'input': '', 'expected_output': ''}]
+
+        # Compile once, then run the same binary against every test case.
+        if language == 'cpp' and self.cpp_available and len(test_cases) > 1:
+            tmp_dir = tempfile.mkdtemp(prefix='cy-sandbox-')
+            try:
+                argv, failure = self.compile_cpp(code, tmp_dir)
+                if failure is not None:
+                    return [
+                        TestResult(
+                            test_number=i + 1,
+                            status='error',
+                            expected=str(t.get('expected_output', '')).strip(),
+                            actual=failure.error,
+                            message=failure.error,
+                        )
+                        for i, t in enumerate(test_cases)
+                    ]
+                for i, test in enumerate(test_cases):
+                    run = self._spawn(argv, _test_stdin(test), tmp_dir)
+                    results.append(self._grade(run, i, test))
+                return results
+            finally:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
         for i, test in enumerate(test_cases):
-            expected = str(test.get('expected_output', '')).strip()
-            stdin = test.get('input', '') if isinstance(test.get('input'), str) else ''
-            run = self._run_one(code, stdin)
-            if run.status in ('error', 'timeout'):
-                results.append(TestResult(
-                    test_number=i + 1,
-                    status='error',
-                    expected=expected,
-                    actual=(run.error or run.output).strip(),
-                    message=run.error or 'Runtime error.',
-                ))
-            elif run.output.strip() == expected:
-                results.append(TestResult(
-                    test_number=i + 1, status='passed',
-                    expected=expected, actual=run.output.strip(),
-                    message='Output matches the expected result.',
-                ))
-            else:
-                results.append(TestResult(
-                    test_number=i + 1, status='failed',
-                    expected=expected, actual=run.output.strip(),
-                    message=f'Expected {expected!r}, got {run.output.strip()!r}.',
-                ))
+            run = self._run_one(code, _test_stdin(test), language)
+            results.append(self._grade(run, i, test))
         return results
 
+    @staticmethod
+    def _grade(run: ExecutionResult, index: int, test: dict) -> TestResult:
+        """Turn one execution into one honest test verdict."""
+        expected = str(test.get('expected_output', '')).strip()
+        if run.status in ('error', 'timeout'):
+            return TestResult(
+                test_number=index + 1,
+                status='error',
+                expected=expected,
+                actual=(run.error or run.output).strip(),
+                message=run.error or 'Runtime error.',
+            )
+        if run.output.strip() == expected:
+            return TestResult(
+                test_number=index + 1, status='passed',
+                expected=expected, actual=run.output.strip(),
+                message='Output matches the expected result.',
+            )
+        return TestResult(
+            test_number=index + 1, status='failed',
+            expected=expected, actual=run.output.strip(),
+            message=f'Expected {expected!r}, got {run.output.strip()!r}.',
+        )
+
     def health_check(self) -> bool:
-        result = self._run_one('print(6 * 7)', '')
+        result = self._run_one('print(6 * 7)', '', 'python')
         return result.status == 'success' and result.output.strip() == '42'
+
+
+def _test_stdin(test: dict) -> str:
+    value = test.get('input', '')
+    return value if isinstance(value, str) else ''
+
+
+def _format_cpp_compile_error(raw: str, cwd: str = '') -> str:
+    """Trim compiler noise to what a beginner can act on, never hide a failure."""
+    if not raw:
+        return 'Compilation failed.'
+
+    # The compile folder is a server-side temp path; students should see
+    # `main.cpp:3:10: error: …`, never a filesystem location.
+    prefixes = [cwd, cwd.replace(os.sep, '/'), cwd.replace('/', os.sep)] if cwd else []
+
+    def _shorten(line: str) -> str:
+        for prefix in prefixes:
+            for form in (prefix + os.sep, prefix + '/', prefix):
+                if form and form in line:
+                    line = line.replace(form, '')
+        return line
+
+    lines = [_shorten(ln.strip()) for ln in raw.splitlines() if ln.strip()]
+    keep = [
+        ln for ln in lines
+        if ': error:' in ln or ': warning:' in ln or ln.startswith('undefined reference')
+    ]
+    if not keep:
+        # Unrecognised shape — show the tail rather than swallow the error.
+        return '\n'.join(lines[-6:])
+    shown = '\n'.join(keep[:5])
+    if len(keep) > 5:
+        shown += f'\n…and {len(keep) - 5} more error(s).'
+    return shown
 
 
 class DockerSandbox(SandboxService):
@@ -390,15 +563,16 @@ def get_sandbox() -> SandboxService:
     Resolution order:
     - SANDBOX_SERVICE setting ('django.conf.settings.DEV_SANDBOX_ENABLED=False
       forces the simulated DevelopmentSandbox).
-    - By default a real SubprocessPythonSandbox (isolated process, timeout,
-      output caps) so that Run/Submit genuinely execute and grade code.
+    - By default a real SubprocessSandbox (isolated process, timeout, output
+      caps) so that Run/Submit genuinely execute and grade code.
     """
     global _sandbox
     if _sandbox is None:
         from django.conf import settings
         if getattr(settings, 'DEV_SANDBOX_ENABLED', True):
-            _sandbox = SubprocessPythonSandbox(
+            _sandbox = SubprocessSandbox(
                 python_exe=getattr(settings, 'SANDBOX_PYTHON_EXE', None) or sys.executable,
+                cpp_exe=getattr(settings, 'SANDBOX_CPP_EXE', None),
                 config=SandboxConfig(
                     timeout_seconds=getattr(settings, 'SANDBOX_TIMEOUT_SECONDS', 10.0),
                     max_output_bytes=getattr(settings, 'SANDBOX_MAX_OUTPUT_BYTES', 100_000),

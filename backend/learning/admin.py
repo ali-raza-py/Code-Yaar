@@ -1,9 +1,6 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from django.db.models import (
-    Count, ExpressionWrapper, F, IntegerField, OuterRef, Q, Subquery, Sum,
-)
 
 from .models import (
     UserProfile, CareerTrack, Course, Chapter, Lesson, Exercise, Hint,
@@ -16,6 +13,29 @@ from .models import (
 )
 
 User = get_user_model()
+
+
+# ─── Textbook provenance ────────────────────────────────────────────────
+# Chapter, Lesson and Exercise all inherit SourceReference, so the same block
+# appears on each. Content editors fill these in from the admin alone — adding
+# or correcting a textbook citation needs no code change and no re-deploy.
+TEXTBOOK_REFERENCE_FIELDSET = (
+    'Textbook source reference', {
+        'fields': (
+            ('source_type', 'verification_status'),
+            ('textbook_board', 'textbook_class'),
+            ('textbook_unit', 'textbook_topic'),
+            'textbook_pages',
+        ),
+        'description': (
+            'Where this content comes from in the board textbook. "Official" '
+            'content cannot be saved until it is marked verified; material that '
+            'goes beyond the book must be labelled supplementary or additional '
+            'so it is never presented as board syllabus.'
+        ),
+        'classes': ('collapse',),
+    },
+)
 
 
 # ─── Inlines ────────────────────────────────────────────────────────────────
@@ -59,10 +79,17 @@ class ProjectMilestoneInline(admin.TabularInline):
 
 
 class CourseInline(admin.TabularInline):
+    """Courses of a track, ordered the way learners should follow them.
+
+    Publishing and sequencing live right here: drag-free reordering via the
+    ``order`` field, draft control via ``is_published``.
+    """
+
     model = Course
     extra = 0
-    fields = ['title', 'slug', 'difficulty', 'is_active', 'order']
-    ordering = ['order']
+    fields = ['order', 'title', 'slug', 'academic_class', 'language',
+              'difficulty', 'is_published', 'is_active']
+    ordering = ['order', 'title']
     prepopulated_fields = {'slug': ('title',)}
 
 
@@ -189,20 +216,96 @@ class UserAdmin(BaseUserAdmin):
 
 @admin.register(CareerTrack)
 class CareerTrackAdmin(admin.ModelAdmin):
-    list_display = ['title', 'slug', 'difficulty', 'estimated_hours', 'is_active', 'order']
-    list_filter = ['difficulty', 'is_active']
+    """Learning-track management: create, categorize, publish, archive.
+
+    Tracks are the learner-facing discovery layer, so the dashboard mirrors
+    the hierarchy students see: cover image, category, objectives, and the
+    course shelf below in recommended sequence.
+    """
+
+    list_display = ['title', 'category', 'course_summary', 'difficulty',
+                    'estimated_hours', 'publish_state', 'is_active', 'order']
+    list_filter = ['category', 'is_published', 'is_active', 'difficulty']
     search_fields = ['title', 'description']
     prepopulated_fields = {'slug': ('title',)}
-    ordering = ['order']
+    ordering = ['order', 'title']
     inlines = [CourseInline, CertificationInline]
+    actions = ['publish_tracks', 'unpublish_tracks', 'archive_tracks']
+    fieldsets = (
+        (None, {
+            'fields': ('title', 'slug', 'description', 'cover_image', 'icon'),
+        }),
+        ('Organization', {
+            'fields': ('category', 'difficulty', 'estimated_hours', 'order'),
+        }),
+        ('Learning objectives', {
+            'fields': ('learning_objectives',),
+            'description': 'What a learner can do after finishing this track (JSON list).',
+        }),
+        ('Publication', {
+            'fields': ('is_published', 'is_active'),
+            'description': (
+                '"Published" shows the track to learners; unchecking '
+                '"active" archives it without touching course data.'
+            ),
+        }),
+    )
+
+    @admin.display(description='Courses')
+    def course_summary(self, obj):
+        total = obj.courses.count()
+        published = obj.courses.filter(is_active=True, is_published=True).count()
+        return f'{published} published / {total} total'
+
+    @admin.display(description='State', boolean=True, ordering='is_published')
+    def publish_state(self, obj):
+        return obj.is_published and obj.is_active
+
+    @admin.action(description='Publish selected tracks to learners')
+    def publish_tracks(self, request, queryset):
+        updated = queryset.update(is_published=True, is_active=True)
+        self.message_user(request, f'{updated} track(s) published.')
+
+    @admin.action(description='Unpublish selected tracks (hidden from learners)')
+    def unpublish_tracks(self, request, queryset):
+        updated = queryset.update(is_published=False)
+        self.message_user(request, f'{updated} track(s) unpublished.')
+
+    @admin.action(description='Archive selected tracks (soft delete)')
+    def archive_tracks(self, request, queryset):
+        updated = queryset.update(is_published=False, is_active=False)
+        self.message_user(request, f'{updated} track(s) archived. Courses and learner progress are untouched.')
+
+    def _protection_message(self, request, error, count=1):
+        """Turn a ProtectedError into actionable guidance. Deleting a track
+        that still holds courses is always a mistake or needs reassignment
+        first — never a silent cascade."""
+        self.message_user(
+            request,
+            'Cannot delete track(s) that still contain courses. Move the '
+            'courses to another track (edit each course) or use the '
+            '“Archive” action instead. Blocked objects: '
+            + ', '.join(str(item) for item in error.protected_objects[:5]),
+            level=messages.ERROR,
+        )
+
+    def delete_model(self, request, obj):
+        try:
+            super().delete_model(request, obj)
+        except ProtectedError as error:
+            self._protection_message(request, error)
+
+    def delete_queryset(self, request, queryset):
+        for obj in queryset:
+            try:
+                obj.delete()
+            except ProtectedError as error:
+                self._protection_message(request, error)
 
 
 @admin.register(Course)
 class CourseAdmin(admin.ModelAdmin):
-    list_display = [
-        'title', 'track', 'difficulty', 'language', 'estimated_hours_display',
-        'total_xp_display', 'is_published', 'is_active',
-    ]
+    list_display = ['title', 'track', 'difficulty', 'language', 'estimated_hours', 'total_xp', 'is_published', 'is_active']
     list_filter = ['track', 'difficulty', 'language', 'is_free', 'is_active', 'is_published']
     search_fields = ['title', 'description', 'subtitle']
     prepopulated_fields = {'slug': ('title',)}
@@ -213,7 +316,7 @@ class CourseAdmin(admin.ModelAdmin):
             'fields': ('track', 'title', 'subtitle', 'slug', 'description', 'thumbnail')
         }),
         ('Configuration', {
-            'fields': ('difficulty', 'language', 'instructor', 'prerequisites')
+            'fields': ('difficulty', 'language', 'academic_class', 'instructor', 'prerequisites')
         }),
         ('Content', {
             'fields': ('learning_objectives', 'is_free', 'is_active', 'is_published', 'order')
@@ -270,12 +373,22 @@ class CourseAdmin(admin.ModelAdmin):
 
 @admin.register(Chapter)
 class ChapterAdmin(admin.ModelAdmin):
-    list_display = ['title', 'course', 'order', 'lesson_count', 'exercise_count', 'xp_reward', 'is_active']
-    list_filter = ['course__track', 'course', 'is_active']
-    search_fields = ['title', 'description']
+    list_display = ['title', 'course', 'order', 'lesson_count', 'exercise_count', 'xp_reward',
+                    'source_type', 'verification_status', 'is_active']
+    list_filter = ['course__track', 'course', 'source_type', 'verification_status', 'is_active']
+    search_fields = ['title', 'description', 'textbook_unit', 'textbook_topic', 'textbook_pages']
     prepopulated_fields = {'slug': ('title',)}
     ordering = ['course', 'order']
     inlines = [LessonInline]
+    fieldsets = (
+        (None, {
+            'fields': ('course', 'title', 'slug', 'description')
+        }),
+        ('Configuration', {
+            'fields': ('order', 'xp_reward', 'is_active')
+        }),
+        TEXTBOOK_REFERENCE_FIELDSET,
+    )
 
     def get_queryset(self, request):
         return super().get_queryset(request).annotate(
@@ -294,8 +407,10 @@ class ChapterAdmin(admin.ModelAdmin):
 
 @admin.register(Lesson)
 class LessonAdmin(admin.ModelAdmin):
-    list_display = ['title', 'chapter', 'content_type', 'order', 'xp_reward', 'duration_minutes', 'is_free_preview']
-    list_filter = ['content_type', 'is_free_preview', 'chapter__course__track', 'chapter__course']
+    list_display = ['title', 'chapter', 'content_type', 'order', 'xp_reward', 'duration_minutes',
+                    'source_type', 'verification_status', 'is_free_preview']
+    list_filter = ['content_type', 'source_type', 'verification_status', 'is_free_preview',
+                   'chapter__course__track', 'chapter__course']
     search_fields = ['title', 'content_body', 'learning_objective']
     prepopulated_fields = {'slug': ('title',)}
     ordering = ['chapter__course', 'chapter__order', 'order']
@@ -310,14 +425,17 @@ class LessonAdmin(admin.ModelAdmin):
         ('Configuration', {
             'fields': ('order', 'duration_minutes', 'xp_reward', 'is_free_preview', 'is_active')
         }),
+        TEXTBOOK_REFERENCE_FIELDSET,
     )
 
 
 @admin.register(Exercise)
 class ExerciseAdmin(admin.ModelAdmin):
-    list_display = ['title', 'lesson', 'exercise_type', 'difficulty', 'language', 'xp_reward', 'order', 'is_active']
-    list_filter = ['exercise_type', 'difficulty', 'language', 'is_active', 'lesson__chapter__course']
-    search_fields = ['title', 'instructions', 'context']
+    list_display = ['title', 'lesson', 'exercise_type', 'difficulty', 'language', 'xp_reward',
+                    'order', 'source_type', 'verification_status', 'is_active']
+    list_filter = ['exercise_type', 'difficulty', 'language', 'source_type',
+                   'verification_status', 'is_active', 'lesson__chapter__course']
+    search_fields = ['title', 'instructions', 'context', 'textbook_topic', 'textbook_pages']
     prepopulated_fields = {'slug': ('title',)}
     ordering = ['lesson__chapter__course', 'lesson__chapter__order', 'lesson__order', 'order']
     inlines = [HintInline]
@@ -342,6 +460,7 @@ class ExerciseAdmin(admin.ModelAdmin):
         ('Configuration', {
             'fields': ('order', 'xp_reward', 'max_attempts', 'is_final_assessment', 'is_active')
         }),
+        TEXTBOOK_REFERENCE_FIELDSET,
     )
 
 

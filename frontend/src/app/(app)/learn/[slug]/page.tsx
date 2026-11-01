@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { ApiError, auth, courses as coursesApi, exercises as exercisesApi, sandbox } from '@/lib/api';
+import type { RunnableLanguage } from '@/lib/api';
 import { useAuth } from '@/hooks/use-auth';
 import type { ExerciseDetail, ExerciseResult, Hint, LessonDetail, Course } from '@/types';
 import CourseSidebar from '@/components/learning/workspace/course-sidebar';
@@ -72,7 +73,10 @@ function Workspace() {
 
   // Layout state — course navigation starts collapsed so the lesson and the
   // workspace get the full width; the header button opens it on demand.
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // On desktop the media-query effect below re-opens it once after mount;
+  // starting open would flash a modal drawer on phones, where the first
+  // tap only dismisses the backdrop.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [cursor, setCursor] = useState({ line: 1, col: 1 });
   const [editorPct, setEditorPct] = useState(62);
   const [mobileTab, setMobileTab] = useState<'code' | 'output'>('code');
@@ -94,7 +98,7 @@ function Workspace() {
   // ── Load course ───────────────────────────────────────────────────────────
   const loadCourse = useCallback(async () => {
     try {
-      const data = await coursesApi.detail(courseSlug);
+      const data = await withTransportRetry(() => coursesApi.detail(courseSlug));
       setCourse(data);
       setError(null);
     } catch (reason) {
@@ -132,7 +136,7 @@ function Workspace() {
   useEffect(() => {
     if (!course || !activeLessonSlug) return;
     let cancelled = false;
-    coursesApi.lessonDetail(courseSlug, activeLessonSlug)
+    withTransportRetry(() => coursesApi.lessonDetail(courseSlug, activeLessonSlug))
       .then((data) => {
         if (!cancelled) setLesson(data);
       })
@@ -156,7 +160,7 @@ function Workspace() {
   useEffect(() => {
     if (currentExerciseId === null) return;
     let cancelled = false;
-    exercisesApi.detail(currentExerciseId)
+    withTransportRetry(() => exercisesApi.detail(currentExerciseId))
       .then((data) => {
         if (cancelled) return;
         setExerciseData(data);
@@ -339,7 +343,7 @@ function Workspace() {
   // ── Lesson snippet "Run" buttons → real sandbox execution ───────────────
   const runSnippet = useCallback(async (snippet: string, lang: string) => {
     if (!user) throw new Error('Sign in to run code.');
-    const res = await withTransportRetry(() => sandbox.execute(snippet, lang as 'python'));
+    const res = await withTransportRetry(() => sandbox.execute(snippet, lang as RunnableLanguage));
     const combined = `${res.output}${res.error ? `\n${res.error}` : ''}`.trim();
     return combined || '(no output)';
   }, [user]);
@@ -514,7 +518,7 @@ function Workspace() {
           <div className="min-h-0 flex-1 overflow-y-auto border-b border-border lg:flex-1 lg:border-b-0 lg:border-r">
             {lesson ? (
               <>
-                <LessonContent lesson={lesson} onRunSandbox={runSnippet} />
+                <LessonContent key={lesson.slug} lesson={lesson} onRunSandbox={runSnippet} />
                 {notice && (
                   <div className="mx-auto max-w-3xl px-6 pb-4">
                     <p role="alert" className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-foreground">

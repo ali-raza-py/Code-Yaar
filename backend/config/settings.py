@@ -351,5 +351,6 @@ REST_FRAMEWORK = {
             'THROTTLE_AUTH_CHANGE_PASSWORD', '10/hour'
         ),
         'auth_refresh': os.getenv('THROTTLE_AUTH_REFRESH', '120/min'),
+        'avatar_upload': os.getenv('THROTTLE_AVATAR_UPLOAD', '10/min'),
     },
 }

@@ -29,6 +29,61 @@ export interface Challenge {
   estimated_minutes: number;
   xp_reward: number;
   starter_code?: string;
+  solved?: boolean;
+  attempts?: number;
+}
+
+export interface ChallengeExample {
+  input: string;
+  output: string;
+  explanation?: string;
+}
+
+export interface ChallengeDetail extends Challenge {
+  languages: string[];
+  starter_code_cpp?: string;
+  problem_statement: string;
+  requirements: string[];
+  input_description: string;
+  output_description: string;
+  constraints: string[];
+  examples: ChallengeExample[];
+  hints: string[];
+  time_complexity: string;
+  space_complexity: string;
+  sample_tests: { input: string; expected_output: string }[];
+  attempts: number;
+}
+
+export interface ChallengeTestResult {
+  test: number;
+  status: string;
+  message: string;
+  expected?: string;
+  actual?: string;
+}
+
+export interface ChallengeRunResult {
+  status: string;
+  output: string;
+  error: string;
+  test_results: ChallengeTestResult[];
+  summary?: string;
+}
+
+export interface ChallengeSubmitResult {
+  status: string;
+  feedback: string;
+  test_results: ChallengeTestResult[];
+  xp_earned: number;
+  xp_total?: number;
+  solved: boolean;
+  attempt_id?: number;
+  duplicate?: boolean;
+  solution_explanation?: string;
+  time_complexity?: string;
+  space_complexity?: string;
+  reference_solution?: string;
 }
 
 export interface LearningPath {
@@ -79,6 +134,7 @@ export interface Course {
   thumbnail: string;
   track: number;
   track_title: string;
+  academic_class?: string;
   difficulty: Difficulty;
   language: string;
   estimated_hours: number;
@@ -98,6 +154,23 @@ export interface Course {
   progress_percentage?: number;
 }
 
+/**
+ * Curriculum provenance, straight from the board textbook. Present only on
+ * textbook-derived content — general catalogue courses return null so their UI
+ * is unchanged. `source_type` is what keeps supplementary practice from being
+ * shown as official Sindh Board syllabus.
+ */
+export interface TextbookReference {
+  source_type: 'official' | 'supplementary' | 'additional';
+  verification_status: '' | 'unverified' | 'verified' | 'needs_review';
+  board: string;
+  class: string;
+  unit: string;
+  topic: string;
+  pages: string;
+  label: string;
+}
+
 export interface Chapter {
   id: number;
   title: string;
@@ -110,6 +183,7 @@ export interface Chapter {
   exercise_count?: number;
   // True for the closing quiz chapter, which the sidebar always shows last.
   is_final_assessment?: boolean;
+  textbook_reference?: TextbookReference | null;
 }
 
 export interface LessonSummary {
@@ -136,6 +210,7 @@ export interface LessonDetail extends LessonSummary {
   exercises: ExerciseSummary[];
   prev_lesson: { slug: string; title: string } | null;
   next_lesson: { slug: string; title: string } | null;
+  textbook_reference?: TextbookReference | null;
 }
 
 export interface ExerciseSummary {
@@ -148,6 +223,7 @@ export interface ExerciseSummary {
   xp_reward: number;
   order: number;
   hint_count: number;
+  textbook_reference?: TextbookReference | null;
 }
 
 export interface ExerciseDetail {

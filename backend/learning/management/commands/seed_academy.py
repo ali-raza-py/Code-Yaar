@@ -101,15 +101,18 @@ class Command(BaseCommand):
             defaults={
                 'title': track_spec['title'],
                 'description': track_spec['description'],
+                'category': track_spec.get('category', 'other'),
                 'difficulty': spec.get('difficulty', 'beginner'),
+                'is_published': True,
                 'order': index,
             },
         )
         if not created:
             track.title = track_spec['title']
             track.description = track_spec['description']
+            track.category = track_spec.get('category', track.category)
             track.is_active = True
-            track.save(update_fields=['title', 'description', 'is_active'])
+            track.save(update_fields=['title', 'description', 'category', 'is_active'])
 
         cert = spec.get('certification', {})
         fields = {

@@ -6,7 +6,7 @@ from .models import (
     LessonProgress, ExerciseAttempt, XPTransaction, Achievement,
     UserAchievement, Progress, Certification, UserCertification,
     Skill, UserSkill, PracticalClass, PracticalSubject, Practical,
-    PracticalProgress, PracticalBookmark,
+    PracticalProgress, PracticalBookmark, UserNotification,
 )
 
 
@@ -159,28 +159,71 @@ class PracticalBookmarkSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at']
 
 
+def _media_url(request, file_field):
+    """Absolute URL for an uploaded file, or None when unset."""
+    if not file_field:
+        return None
+    url = file_field.url
+    if request is not None:
+        return request.build_absolute_uri(url)
+    return url
+
+
+class TextbookReferenceMixin:
+    """
+    Exposes the curriculum source citation (board, class, textbook unit, the
+    topic name as printed, page numbers, plus the verification state) so the
+    UI can always tell a learner which part of the textbook a piece of content
+    came from — and flag anything that is supplementary rather than official.
+
+    Returns None for content that isn't textbook-derived, so the general
+    course catalogue renders unchanged.
+
+    Concrete serializers must still declare
+    `textbook_reference = serializers.SerializerMethodField()` themselves:
+    DRF only collects declared fields from `Serializer` subclasses, so a field
+    defined on a plain mixin is invisible to `ModelSerializer`.
+    """
+
+    def get_textbook_reference(self, obj):
+        if not obj.source_type:
+            return None
+        return {
+            'source_type': obj.source_type,
+            'verification_status': obj.verification_status,
+            'board': obj.textbook_board,
+            'class': obj.textbook_class,
+            'unit': obj.textbook_unit,
+            'topic': obj.textbook_topic,
+            'pages': obj.textbook_pages,
+            'label': obj.textbook_reference_label,
+        }
+
+
 class HintSerializer(serializers.ModelSerializer):
     class Meta:
         model = Hint
         fields = ['id', 'content', 'order', 'reveals_solution', 'xp_penalty']
 
 
-class ExerciseListSerializer(serializers.ModelSerializer):
+class ExerciseListSerializer(TextbookReferenceMixin, serializers.ModelSerializer):
     """Lightweight exercise info for lesson view."""
     hint_count = serializers.SerializerMethodField()
+    textbook_reference = serializers.SerializerMethodField()
 
     class Meta:
         model = Exercise
         fields = [
             'id', 'title', 'slug', 'exercise_type', 'difficulty',
             'language', 'xp_reward', 'order', 'hint_count',
+            'textbook_reference',
         ]
 
     def get_hint_count(self, obj):
         return obj.hints.count()
 
 
-class ExerciseDetailSerializer(serializers.ModelSerializer):
+class ExerciseDetailSerializer(TextbookReferenceMixin, serializers.ModelSerializer):
     """Full exercise with instructions, starter code, and hints.
 
     Security: correct-answer flags and test expectations are never sent to
@@ -188,6 +231,7 @@ class ExerciseDetailSerializer(serializers.ModelSerializer):
     returned by the submit endpoint once the learner has attempted it.
     """
     hints = HintSerializer(many=True, read_only=True)
+    textbook_reference = serializers.SerializerMethodField()
     lesson_title = serializers.CharField(source='lesson.title', read_only=True)
     chapter_title = serializers.CharField(source='lesson.chapter.title', read_only=True)
     choices = serializers.SerializerMethodField()
@@ -202,7 +246,7 @@ class ExerciseDetailSerializer(serializers.ModelSerializer):
             'starter_code', 'expected_output',
             'choices',
             'xp_reward', 'max_attempts', 'order',
-            'hints',
+            'hints', 'textbook_reference',
         ]
 
     def get_choices(self, obj):
@@ -246,9 +290,10 @@ class LessonListSerializer(serializers.ModelSerializer):
         return 'not_started'
 
 
-class LessonDetailSerializer(serializers.ModelSerializer):
+class LessonDetailSerializer(TextbookReferenceMixin, serializers.ModelSerializer):
     """Full lesson with content and exercises."""
     exercises = serializers.SerializerMethodField()
+    textbook_reference = serializers.SerializerMethodField()
     chapter_title = serializers.CharField(source='chapter.title', read_only=True)
     course_title = serializers.CharField(source='chapter.course.title', read_only=True)
     course_slug = serializers.CharField(source='chapter.course.slug', read_only=True)
@@ -265,7 +310,7 @@ class LessonDetailSerializer(serializers.ModelSerializer):
             'learning_objective', 'content_body', 'video_url', 'video_duration_seconds',
             'order', 'duration_minutes', 'xp_reward', 'is_free_preview',
             'exercise_count', 'progress_status', 'prev_lesson', 'next_lesson',
-            'exercises',
+            'exercises', 'textbook_reference',
         ]
 
     def get_exercise_count(self, obj):
@@ -307,7 +352,7 @@ class LessonDetailSerializer(serializers.ModelSerializer):
         return {'slug': lesson.slug, 'title': lesson.title} if lesson else None
 
 
-class ChapterListSerializer(serializers.ModelSerializer):
+class ChapterListSerializer(TextbookReferenceMixin, serializers.ModelSerializer):
     """
     Lightweight chapter for the course sidebar.
 
@@ -316,6 +361,7 @@ class ChapterListSerializer(serializers.ModelSerializer):
     appear in the course map a learner navigates.
     """
     lessons = serializers.SerializerMethodField()
+    textbook_reference = serializers.SerializerMethodField()
     progress_percentage = serializers.SerializerMethodField()
     is_final_assessment = serializers.SerializerMethodField()
 
@@ -324,6 +370,7 @@ class ChapterListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'title', 'slug', 'order', 'xp_reward',
             'lessons', 'progress_percentage', 'is_final_assessment',
+            'textbook_reference',
         ]
 
     def get_lessons(self, obj):
@@ -388,6 +435,7 @@ class CourseListSerializer(serializers.ModelSerializer):
     lesson_count = serializers.SerializerMethodField()
     exercise_count = serializers.SerializerMethodField()
     enrolled = serializers.SerializerMethodField()
+    progress_percentage = serializers.SerializerMethodField()
     estimated_hours = serializers.IntegerField(read_only=True)
     total_xp = serializers.IntegerField(read_only=True)
 
@@ -395,9 +443,9 @@ class CourseListSerializer(serializers.ModelSerializer):
         model = Course
         fields = [
             'id', 'slug', 'title', 'subtitle', 'description', 'thumbnail',
-            'track', 'track_title', 'difficulty', 'language',
+            'track', 'track_title', 'academic_class', 'difficulty', 'language',
             'estimated_hours', 'total_xp', 'chapter_count', 'lesson_count',
-            'exercise_count', 'is_free', 'enrolled',
+            'exercise_count', 'is_free', 'enrolled', 'progress_percentage',
         ]
 
     def get_lesson_count(self, obj):
@@ -406,11 +454,37 @@ class CourseListSerializer(serializers.ModelSerializer):
     def get_exercise_count(self, obj):
         return obj.exercise_count
 
+    def _user(self, request):
+        return getattr(getattr(request, 'user', None), 'is_authenticated', False) and request.user
+
     def get_enrolled(self, obj):
-        request = self.context.get('request')
-        if request and hasattr(request, 'user') and request.user.is_authenticated:
-            return Enrollment.objects.filter(user=request.user, course=obj).exists()
+        user = self._user(self.context.get('request'))
+        if user:
+            return Enrollment.objects.filter(user=user, course=obj).exists()
         return False
+
+    def get_progress_percentage(self, obj):
+        """Lessons completed by the requester, same rule as the course
+        detail endpoint (progress_percentage on CourseDetailSerializer)."""
+        user = self._user(self.context.get('request'))
+        if not user:
+            return 0
+        cache = self.context.setdefault('_course_progress_cache', {})
+        if obj.id not in cache:
+            total = Lesson.objects.filter(
+                chapter__course=obj, chapter__is_active=True, is_active=True
+            ).count()
+            if total == 0:
+                cache[obj.id] = 0
+            else:
+                completed = LessonProgress.objects.filter(
+                    user=user,
+                    lesson__chapter__course=obj,
+                    lesson__is_active=True,
+                    status__in=['completed', 'mastered'],
+                ).count()
+                cache[obj.id] = round((completed / total) * 100)
+        return cache[obj.id]
 
 
 class CourseDetailSerializer(serializers.ModelSerializer):
@@ -497,32 +571,181 @@ class CourseDetailSerializer(serializers.ModelSerializer):
 
 
 class CareerTrackSerializer(serializers.ModelSerializer):
-    courses = CourseListSerializer(many=True, read_only=True)
+    """Track detail: sequenced courses plus the requester's track progress.
+
+    Progress is derived only from real rows (lessons completed, enrollments)
+    — nothing is stored or fabricated on the track itself.
+    """
+    courses = serializers.SerializerMethodField()
     course_count = serializers.SerializerMethodField()
+    category_display = serializers.CharField(source='get_category_display', read_only=True)
+    cover_url = serializers.SerializerMethodField()
+    enrolled_course_count = serializers.SerializerMethodField()
+    completed_course_count = serializers.SerializerMethodField()
+    progress_percentage = serializers.SerializerMethodField()
+    continue_url_slug = serializers.SerializerMethodField()
+    total_xp = serializers.SerializerMethodField()
 
     class Meta:
         model = CareerTrack
         fields = [
-            'id', 'slug', 'title', 'description', 'icon',
+            'id', 'slug', 'title', 'description', 'icon', 'category',
+            'category_display', 'cover_url', 'learning_objectives',
             'difficulty', 'estimated_hours', 'courses', 'course_count',
+            'total_xp', 'enrolled_course_count', 'completed_course_count',
+            'progress_percentage', 'continue_url_slug',
         ]
 
+    def get_courses(self, obj):
+        # Only count/open what a learner can actually see: published courses
+        # in the admin-curated recommended sequence.
+        return CourseListSerializer(
+            obj.published_courses, many=True, context=self.context
+        ).data
+
     def get_course_count(self, obj):
-        return obj.courses.filter(is_active=True).count()
+        # Only count what a learner can actually open — unpublished draft
+        # courses (e.g. Class XI/XII shells) must not inflate the number.
+        return obj.courses.filter(is_active=True, is_published=True).count()
+
+    def get_total_xp(self, obj):
+        return sum(c.total_xp for c in obj.published_courses)
+
+    def get_cover_url(self, obj):
+        return _media_url(self.context.get('request'), obj.cover_image)
+
+    def _progress_rows(self, obj):
+        """(lessons_total, lessons_completed, courses, enrollments_by_course)
+        for the requesting user; shared by the progress fields."""
+        request = self.context.get('request')
+        user = getattr(getattr(request, 'user', None), 'is_authenticated', False) and request.user
+        courses = list(obj.published_courses)
+        lessons_total = 0
+        lessons_completed = 0
+        enrollments = {}
+        if courses:
+            lessons_total = Lesson.objects.filter(
+                chapter__course__in=courses, chapter__is_active=True, is_active=True
+            ).count()
+            if user:
+                lessons_completed = LessonProgress.objects.filter(
+                    user=user,
+                    lesson__chapter__course__in=courses,
+                    lesson__is_active=True,
+                    status__in=['completed', 'mastered'],
+                ).count()
+                enrollments = {
+                    e.course_id: e
+                    for e in Enrollment.objects.filter(user=user, course__in=courses)
+                }
+        return lessons_total, lessons_completed, courses, enrollments
+
+    def get_enrolled_course_count(self, obj):
+        _, _, _, enrollments = self._progress_rows(obj)
+        return len(enrollments)
+
+    def get_completed_course_count(self, obj):
+        _, _, _, enrollments = self._progress_rows(obj)
+        return sum(1 for e in enrollments.values() if e.status == 'completed')
+
+    def get_progress_percentage(self, obj):
+        total, completed, _, _ = self._progress_rows(obj)
+        return round((completed / total) * 100) if total else 0
+
+    def get_continue_url_slug(self, obj):
+        """Course the learner should resume: furthest in progress among
+        enrolled-but-unfinished courses; None when nothing is underway."""
+        request = self.context.get('request')
+        user = getattr(getattr(request, 'user', None), 'is_authenticated', False) and request.user
+        if not user:
+            return None
+        best_slug, best_progress = None, -1.0
+        for course in obj.published_courses:
+            enrollment = course.enrollments.filter(user=user).first()
+            if enrollment is None or enrollment.status in ('completed', 'dropped'):
+                continue
+            total = Lesson.objects.filter(
+                chapter__course=course, chapter__is_active=True, is_active=True
+            ).count()
+            if total == 0:
+                progress = 0.0
+            else:
+                done = LessonProgress.objects.filter(
+                    user=user, lesson__chapter__course=course,
+                    lesson__is_active=True,
+                    status__in=['completed', 'mastered'],
+                ).count()
+                progress = done / total
+            if progress > best_progress:
+                best_progress, best_slug = progress, course.slug
+        return best_slug
 
 
 class CareerTrackListSerializer(serializers.ModelSerializer):
     course_count = serializers.SerializerMethodField()
+    category_display = serializers.CharField(source='get_category_display', read_only=True)
+    cover_url = serializers.SerializerMethodField()
+    total_xp = serializers.SerializerMethodField()
+    enrolled = serializers.SerializerMethodField()
+    progress_percentage = serializers.SerializerMethodField()
 
     class Meta:
         model = CareerTrack
         fields = [
-            'id', 'slug', 'title', 'description', 'icon',
-            'difficulty', 'estimated_hours', 'course_count',
+            'id', 'slug', 'title', 'description', 'icon', 'category',
+            'category_display', 'cover_url', 'learning_objectives',
+            'difficulty', 'estimated_hours', 'course_count', 'total_xp',
+            'enrolled', 'progress_percentage',
         ]
 
     def get_course_count(self, obj):
-        return obj.courses.filter(is_active=True).count()
+        # Matches the course list endpoint, which only serves published courses.
+        return obj.courses.filter(is_active=True, is_published=True).count()
+
+    def get_total_xp(self, obj):
+        cache = self.context.setdefault('_track_xp_cache', {})
+        if obj.id not in cache:
+            cache[obj.id] = sum(
+                c.total_xp for c in obj.courses.filter(is_active=True, is_published=True)
+            )
+        return cache[obj.id]
+
+    def get_cover_url(self, obj):
+        return _media_url(self.context.get('request'), obj.cover_image)
+
+    def _user_state(self, obj):
+        request = self.context.get('request')
+        user = getattr(getattr(request, 'user', None), 'is_authenticated', False) and request.user
+        cache = self.context.setdefault('_track_enroll_cache', {})
+        if not user:
+            return None
+        if obj.id not in cache:
+            courses = list(obj.courses.filter(is_active=True, is_published=True))
+            enrollments = list(
+                Enrollment.objects.filter(user=user, course__in=courses)
+            ) if courses else []
+            total = Lesson.objects.filter(
+                chapter__course__in=courses, chapter__is_active=True, is_active=True
+            ).count() if courses else 0
+            completed = LessonProgress.objects.filter(
+                user=user,
+                lesson__chapter__course__in=courses,
+                lesson__is_active=True,
+                status__in=['completed', 'mastered'],
+            ).count() if courses else 0
+            cache[obj.id] = {
+                'enrolled': bool(enrollments),
+                'progress': round((completed / total) * 100) if total else 0,
+            }
+        return cache[obj.id]
+
+    def get_enrolled(self, obj):
+        state = self._user_state(obj)
+        return bool(state and state['enrolled'])
+
+    def get_progress_percentage(self, obj):
+        state = self._user_state(obj)
+        return state['progress'] if state else 0
 
 
 class ProjectMilestoneSerializer(serializers.ModelSerializer):
@@ -545,13 +768,89 @@ class ProjectSerializer(serializers.ModelSerializer):
 
 
 class ChallengeSerializer(serializers.ModelSerializer):
+    """Card/list projection. Adds per-user ``solved`` and ``attempts``."""
+    solved = serializers.SerializerMethodField()
+    attempts = serializers.SerializerMethodField()
+
     class Meta:
         model = Challenge
         fields = [
             'id', 'slug', 'title', 'description',
             'difficulty', 'topic', 'estimated_minutes', 'xp_reward',
-            'starter_code',
+            'starter_code', 'solved', 'attempts',
         ]
+
+    def get_solved(self, obj) -> bool:
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if user is None or not user.is_authenticated:
+            return False
+        # The viewset annotates `solved_count` to keep this O(1) per row.
+        annotated = getattr(obj, 'solved_count', None)
+        if annotated is not None:
+            return annotated > 0
+        return obj.submissions.filter(user=user, status='correct').exists()
+
+    def get_attempts(self, obj) -> int:
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if user is None or not user.is_authenticated:
+            return 0
+        annotated = getattr(obj, 'attempt_count', None)
+        if annotated is not None:
+            return annotated
+        return obj.submissions.filter(user=user).count()
+
+
+class ChallengeDetailSerializer(serializers.ModelSerializer):
+    """Full workspace content.
+
+    Deliberately omits ``solution_code*`` and ``hidden_tests``: correctness is
+    graded server-side, and the reference answers are only revealed after a
+    learner solves the challenge (returned by the submit endpoint).
+    """
+    solved = serializers.SerializerMethodField()
+    attempts = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Challenge
+        fields = [
+            'id', 'slug', 'title', 'description', 'difficulty', 'topic',
+            'estimated_minutes', 'xp_reward', 'languages',
+            'starter_code', 'starter_code_cpp',
+            'problem_statement', 'requirements', 'input_description',
+            'output_description', 'constraints', 'examples', 'hints',
+            'time_complexity', 'space_complexity',
+            'sample_tests', 'solved', 'attempts',
+        ]
+
+    def get_solved(self, obj) -> bool:
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if user is None or not user.is_authenticated:
+            return False
+        return obj.submissions.filter(user=user, status='correct').exists()
+
+    def get_attempts(self, obj) -> int:
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if user is None or not user.is_authenticated:
+            return 0
+        return obj.submissions.filter(user=user).count()
+
+
+class ChallengeRunSerializer(serializers.Serializer):
+    """Runs sample tests without awarding XP."""
+    code = serializers.CharField(required=False, allow_blank=True)
+    language = serializers.ChoiceField(choices=['python', 'cpp'], default='python')
+
+
+class ChallengeSubmitSerializer(serializers.Serializer):
+    """Submits hidden tests for grading and a one-time XP award."""
+    code = serializers.CharField(required=False, allow_blank=True)
+    language = serializers.ChoiceField(choices=['python', 'cpp'], default='python')
+    submission_id = serializers.UUIDField(required=False, allow_null=True)
+    time_spent_seconds = serializers.IntegerField(required=False, min_value=0, default=0)
 
 
 # ─── Progress Serializers ───────────────────────────────────────────────────
@@ -624,19 +923,57 @@ class AchievementSerializer(serializers.ModelSerializer):
     earned = serializers.SerializerMethodField()
     level_label = serializers.SerializerMethodField()
     category_label = serializers.SerializerMethodField()
+    difficulty_label = serializers.SerializerMethodField()
+    earned_at = serializers.SerializerMethodField()
+    progress = serializers.SerializerMethodField()
 
     class Meta:
         model = Achievement
         fields = [
             'id', 'slug', 'title', 'description', 'icon', 'category',
-            'category_label', 'xp_bonus', 'earned', 'level_label',
+            'category_label', 'difficulty', 'difficulty_label', 'how_to_earn',
+            'xp_bonus', 'earned', 'earned_at', 'level_label', 'progress',
         ]
+        read_only_fields = fields
+
+    def _user_achievement(self, obj):
+        """The requester's earned row for this badge, cached per request."""
+        request = self.context.get('request')
+        if not (request and hasattr(request, 'user') and request.user.is_authenticated):
+            return None
+        cache = self._earned_cache()
+        if obj.pk not in cache:
+            from .models import UserAchievement
+            cache[obj.pk] = UserAchievement.objects.filter(
+                user=request.user, achievement=obj,
+            ).first()
+        return cache[obj.pk]
+
+    def _earned_cache(self):
+        if not hasattr(self, '_earned_cache_map'):
+            self._earned_cache_map = {}
+        return self._earned_cache_map
 
     def get_earned(self, obj):
+        row = self._user_achievement(obj)
+        return bool(row and row.status == 'active')
+
+    def get_earned_at(self, obj):
+        row = self._user_achievement(obj)
+        return row.earned_at.isoformat() if row else None
+
+    def get_progress(self, obj):
+        """Server-derived (current, target); hidden detail once earned."""
         request = self.context.get('request')
-        if request and hasattr(request, 'user') and request.user.is_authenticated:
-            return UserAchievement.objects.filter(user=request.user, achievement=obj).exists()
-        return False
+        if not (request and hasattr(request, 'user') and request.user.is_authenticated):
+            return None
+        from .services.achievements import measure_progress
+        current, target = measure_progress(request.user, obj)
+        return {
+            'current': min(current, target),
+            'target': target,
+            'complete': current >= target,
+        }
 
     def get_level_label(self, obj):
         from .badge_art import level_label
@@ -644,6 +981,9 @@ class AchievementSerializer(serializers.ModelSerializer):
 
     def get_category_label(self, obj):
         return obj.get_category_display()
+
+    def get_difficulty_label(self, obj):
+        return obj.get_difficulty_display()
 
 
 class UserAchievementSerializer(serializers.ModelSerializer):
@@ -661,6 +1001,65 @@ class UserAchievementSerializer(serializers.ModelSerializer):
 
     def get_verification_url(self, obj):
         return obj.verification_url()
+
+
+class UserNotificationSerializer(serializers.ModelSerializer):
+    unread = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UserNotification
+        fields = ['id', 'type', 'title', 'body', 'link', 'unread', 'created_at']
+        read_only_fields = fields
+
+    def get_unread(self, obj):
+        return obj.read_at is None
+
+
+class NotificationPreferenceSerializer(serializers.Serializer):
+    """Validates the fixed set of account-level notification toggles."""
+
+    achievements = serializers.BooleanField(required=False)
+    learning_reminders = serializers.BooleanField(required=False)
+    streak_reminders = serializers.BooleanField(required=False)
+    community = serializers.BooleanField(required=False)
+    announcements = serializers.BooleanField(required=False)
+
+
+class AvatarUploadSerializer(serializers.Serializer):
+    """Multipart avatar upload with content-aware image validation.
+
+    The file is opened by Pillow (not just trusted by extension/MIME) and
+    re-encoded server-side, so a malicious or corrupt payload never reaches
+    storage. Size and format are enforced here; pixels are re-written to a
+    bounded JPEG/PNG in the view.
+    """
+
+    MAX_BYTES = 5 * 1024 * 1024
+    ALLOWED_FORMATS = {'JPEG', 'PNG', 'WEBP'}
+    ALLOWED_CONTENT_TYPES = {'image/jpeg', 'image/jpg', 'image/png', 'image/webp'}
+
+    file = serializers.FileField()
+
+    def validate_file(self, value):
+        from PIL import Image, UnidentifiedImageError
+
+        if value.size > self.MAX_BYTES:
+            raise serializers.ValidationError('Image must be 5 MB or smaller.')
+        if getattr(value, 'content_type', '') and \
+                value.content_type.lower() not in self.ALLOWED_CONTENT_TYPES:
+            raise serializers.ValidationError('Upload a JPEG, PNG, or WebP image.')
+        try:
+            value.seek(0)
+            with Image.open(value) as img:
+                img.verify()
+                fmt = (img.format or '').upper()
+        except (UnidentifiedImageError, OSError, ValueError):
+            raise serializers.ValidationError('That file is not a valid image.')
+        finally:
+            value.seek(0)
+        if fmt not in self.ALLOWED_FORMATS:
+            raise serializers.ValidationError('Upload a JPEG, PNG, or WebP image.')
+        return value
 
 
 # ─── Certification Serializers ──────────────────────────────────────────────

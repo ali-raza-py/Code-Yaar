@@ -1770,7 +1770,7 @@ PYTHON_COURSE = {
         'and a final assessment. Coding exercises are executed and graded by a real '
         'sandbox, so your progress reflects what you actually solved.'
     ),
-    'track_slug': 'python',
+    'track_slug': 'core-programming',
     'difficulty': 'beginner',
     'language': 'python',
     'instructor': 'Code Yaar',
@@ -2476,21 +2476,23 @@ class Command(BaseCommand):
         tracks = {}
         for track_spec in (
             {
-                'slug': 'python',
-                'title': 'Python',
-                'description': 'Master Python from fundamentals to advanced concepts.',
-                'difficulty': 'beginner', 'estimated_hours': 40, 'order': 1,
+                'slug': 'core-programming',
+                'title': 'Programming Fundamentals',
+                'description': 'Python, C++ and the problem-solving skills every language builds on.',
+                'category': 'programming',
+                'difficulty': 'beginner', 'estimated_hours': 40, 'order': 1, 'is_published': True,
             },
             {
                 'slug': 'developer-tools',
                 'title': 'Developer Tools',
                 'description': 'The everyday tools of real software work: version control and collaboration.',
-                'difficulty': 'beginner', 'estimated_hours': 6, 'order': 2,
+                'category': 'other',
+                'difficulty': 'beginner', 'estimated_hours': 6, 'order': 2, 'is_published': True,
             },
         ):
             track, _ = CareerTrack.objects.get_or_create(
                 slug=track_spec['slug'],
-                defaults={f: track_spec[f] for f in ('title', 'description', 'difficulty', 'estimated_hours', 'order')},
+                defaults={f: track_spec[f] for f in ('title', 'description', 'category', 'difficulty', 'estimated_hours', 'order', 'is_published')},
             )
             tracks[track_spec['slug']] = track
 

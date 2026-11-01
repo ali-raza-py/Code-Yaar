@@ -21,9 +21,14 @@ COURSE = {
     'language': 'python',
     'prerequisites': 'The Python Programming Foundations course (functions, lists, dicts).',
     'track': {
-        'slug': 'fundamentals',
-        'title': 'CS Fundamentals',
-        'description': 'Core computer-science skills that transfer to every language.',
+        'slug': 'core-programming',
+        'title': 'Programming Fundamentals',
+        'category': 'programming',
+        'description': (
+            'Start with Python, continue with C++, then sharpen the problem-'
+            'solving and data-structure skills every language builds on. '
+            'Languages are lessons inside this track, not separate destinations.'
+        ),
     },
     'objectives': [
         'Apply a four-step process to an unfamiliar problem.',

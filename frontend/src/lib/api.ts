@@ -1,4 +1,4 @@
-import type { Challenge, Chapter, Course, Enrollment, ExerciseDetail, ExerciseResult, LessonDetail, Project, PracticalAdmin, PracticalClass, PracticalClassAdmin, PracticalDetail, PracticalSubject, PracticalSubjectAdmin, PracticalSummary } from "@/types";
+import type { Challenge, ChallengeDetail, ChallengeRunResult, ChallengeSubmitResult, Chapter, Course, Enrollment, ExerciseDetail, ExerciseResult, LessonDetail, Project, PracticalAdmin, PracticalClass, PracticalClassAdmin, PracticalDetail, PracticalSubject, PracticalSubjectAdmin, PracticalSummary } from "@/types";
 
 /**
  * API client for Code-Yaar learning platform.
@@ -421,6 +421,15 @@ export interface MePayload extends ProfileFields {
   last_active_at: string | null;
   email_changed?: boolean;
   verification_email_sent?: boolean;
+  // Added by the profile upgrade: shareable + privacy + preference fields.
+  location: string;
+  website_url: string;
+  is_profile_public: boolean;
+  show_badges: boolean;
+  show_activity: boolean;
+  show_courses: boolean;
+  notification_preferences: NotificationPreferences;
+  longest_streak: number;
 }
 
 /** Name kept for existing consumers of the old `/auth/profile/` shape. */
@@ -462,6 +471,14 @@ export interface UpdateProfilePayload extends Partial<ProfileFields> {
   first_name?: string;
   last_name?: string;
   full_name?: string;
+  // `avatar` is read-only here: writes are rejected in favour of the upload
+  // endpoint, but the field is echoed back in the profile payload.
+  location?: string;
+  website_url?: string;
+  is_profile_public?: boolean;
+  show_badges?: boolean;
+  show_activity?: boolean;
+  show_courses?: boolean;
 }
 
 export const auth = {
@@ -737,8 +754,15 @@ export const practicalAdmin = {
 
 // ─── Sandbox Snippet Execution (lesson "Run" buttons) ────────────────────
 
+/**
+ * Languages the backend sandbox really executes. Keep in sync with
+ * SnippetRunSerializer in backend/learning/api_views.py — a snippet in any
+ * other language must render without a Run button rather than fake a result.
+ */
+export type RunnableLanguage = 'python' | 'cpp';
+
 export const sandbox = {
-  execute: (code: string, language: 'python' = 'python') =>
+  execute: (code: string, language: RunnableLanguage = 'python') =>
     request<{ status: string; output: string; error: string; execution_time_ms: number }>(
       '/execute/',
       { method: 'POST', body: JSON.stringify({ code, language }) }
@@ -804,23 +828,59 @@ export const progress = {
 
 // ─── Tracks ─────────────────────────────────────────────────────────────────
 
+export type TrackCategory = 'school_board' | 'programming' | 'web' | 'ai' | 'other';
+
 export interface TrackSummary {
   id: number;
   slug: string;
   title: string;
   description: string;
   icon: string;
+  category: TrackCategory;
+  category_display: string;
+  cover_url: string | null;
+  learning_objectives: string[];
   difficulty: string;
   estimated_hours: number;
   course_count: number;
+  total_xp: number;
+  enrolled: boolean;
+  progress_percentage: number;
+}
+
+export interface TrackDetail {
+  id: number;
+  slug: string;
+  title: string;
+  description: string;
+  icon: string;
+  category: TrackCategory;
+  category_display: string;
+  cover_url: string | null;
+  learning_objectives: string[];
+  difficulty: string;
+  estimated_hours: number;
+  courses: Course[];
+  course_count: number;
+  total_xp: number;
+  enrolled_course_count: number;
+  completed_course_count: number;
+  progress_percentage: number;
+  continue_url_slug: string | null;
 }
 
 export const tracks = {
-  list: async (): Promise<TrackSummary[]> => {
-    const data = await request<Paginated<TrackSummary>>('/tracks/');
+  list: async (params?: { category?: TrackCategory | ''; search?: string }): Promise<TrackSummary[]> => {
+    const query = new URLSearchParams();
+    if (params?.category) query.set('category', params.category);
+    if (params?.search) query.set('search', params.search);
+    const qs = query.toString();
+    const data = await request<Paginated<TrackSummary>>(`/tracks/${qs ? `?${qs}` : ''}`);
     return unwrapList(data);
   },
-  detail: (slug: string) => request<TrackSummary>(`/tracks/${slug}/`),
+  detail: (slug: string) => request<TrackDetail>(`/tracks/${slug}/`),
+  enroll: (slug: string) =>
+    request<Enrollment[]>(`/tracks/${slug}/enroll/`, { method: 'POST' }),
 };
 
 // ─── Leaderboard ────────────────────────────────────────────────────────────
@@ -873,7 +933,17 @@ export const challenges = {
     );
     return unwrapList(data);
   },
-  detail: (slug: string) => request<Challenge>(`/challenges/${slug}/`),
+  detail: (slug: string) => request<ChallengeDetail>(`/challenges/${slug}/`),
+  run: (slug: string, data: { code: string; language: string }) =>
+    request<ChallengeRunResult>(`/challenges/${slug}/run/`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  submit: (slug: string, data: { code: string; language: string; submission_id?: string; time_spent_seconds?: number }) =>
+    request<ChallengeSubmitResult>(`/challenges/${slug}/submit/`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
 
 // ─── Profile Stats ────────────────────────────────────────────────────────
@@ -975,10 +1045,18 @@ export interface ProfileStatsData {
   profile: {
     avatar: string;
     bio: string;
+    location: string;
     role: string;
+    website_url: string;
     xp_points: number;
     streak_days: number;
+    longest_streak: number;
     level: number;
+    is_profile_public: boolean;
+    show_badges: boolean;
+    show_activity: boolean;
+    show_courses: boolean;
+    notification_preferences: NotificationPreferences;
     last_active_at: string | null;
   };
   stats: {
@@ -1008,10 +1086,30 @@ export interface ProfileStatsData {
     description: string;
     icon: string;
     category: string;
+    category_label: string;
+    difficulty: string;
+    difficulty_label: string;
+    how_to_earn: string;
+    level_label: string;
     xp_bonus: number;
     earned: boolean;
     earned_at: string | null;
+    public_id: string | null;
+    credential_id: string | null;
+    recipient_name: string | null;
+    verification_url: string | null;
+    status: string | null;
+    progress: { current: number; target: number; complete: boolean };
   }>;
+  next_badge: {
+    slug: string;
+    title: string;
+    description: string;
+    how_to_earn: string;
+    difficulty: string;
+    difficulty_label: string;
+    progress: { current: number; target: number };
+  } | null;
   skills: Array<{
     id: number;
     name: string;
@@ -1057,6 +1155,49 @@ export interface CertificateSummary {
   /** Base64 PNG of the QR code that encodes `verification_url`. */
   qr_data_url: string;
   issuer: string;
+}
+
+// ─── In-app notifications ─────────────────────────────────────────────────
+
+export type NotificationType =
+  | 'badge_unlock'
+  | 'streak_record'
+  | 'track_complete'
+  | 'xp_milestone';
+
+export interface AppNotification {
+  id: number;
+  type: NotificationType;
+  title: string;
+  body: string;
+  link: string;
+  unread: boolean;
+  created_at: string;
+}
+
+/** The five account-level notification toggles the API persists. */
+export interface NotificationPreferences {
+  achievements: boolean;
+  learning_reminders: boolean;
+  streak_reminders: boolean;
+  community: boolean;
+  announcements: boolean;
+}
+
+/**
+ * A badge the server just awarded, echoed on a completion response so the
+ * client can raise a toast without waiting on the notification list.
+ */
+export interface BadgeUnlock {
+  slug: string;
+  title: string;
+  description: string;
+  icon: string;
+  category: string;
+  difficulty: string;
+  xp_bonus: number;
+  public_id: string;
+  credential_id: string;
 }
 
 export interface CertificateRequirement {
@@ -1107,9 +1248,15 @@ export interface AchievementDefinition {
   icon: string;
   category: string;
   category_label: string;
+  difficulty: string;
+  difficulty_label: string;
+  how_to_earn: string;
   xp_bonus: number;
   earned: boolean;
+  earned_at: string | null;
   level_label: string;
+  /** Server-derived progress; null for anonymous visitors. */
+  progress: { current: number; target: number; complete: boolean } | null;
 }
 
 /** One badge actually earned by the signed-in learner. */

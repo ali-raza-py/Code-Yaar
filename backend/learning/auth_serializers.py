@@ -51,17 +51,25 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
     user = AuthUserSerializer(read_only=True)
     full_name = serializers.CharField(read_only=True)
+    # Rendered through the helper so a media upload and a legacy absolute-URL
+    # string stored in the same column both serialize to a usable URL.
+    avatar = serializers.SerializerMethodField()
 
     class Meta:
         model = UserProfile
         fields = [
-            'user', 'full_name', 'avatar', 'bio', 'role', 'institution',
-            'education_level', 'github_url', 'linkedin_url',
-            'email_verified', 'email_verified_at',
-            'xp_points', 'streak_days', 'level', 'last_active_at',
-            'created_at',
+            'user', 'full_name', 'avatar', 'bio', 'location', 'role',
+            'institution', 'education_level', 'github_url', 'linkedin_url',
+            'website_url', 'email_verified', 'email_verified_at',
+            'xp_points', 'streak_days', 'longest_streak', 'level',
+            'last_active_at', 'created_at',
+            'is_profile_public', 'show_badges', 'show_activity', 'show_courses',
+            'notification_preferences',
         ]
         read_only_fields = fields
+
+    def get_avatar(self, obj):
+        return obj.avatar_url()
 
 
 def me_payload(user):
@@ -74,17 +82,25 @@ def me_payload(user):
     return {
         'user': AuthUserSerializer(user).data,
         'profile': UserProfileSerializer(profile).data,
-        'avatar': profile.avatar,
+        'avatar': profile.avatar_url(),
         'bio': profile.bio,
+        'location': profile.location,
         'role': user_role(user),
         'email_verified': profile.email_verified,
         'institution': profile.institution,
         'education_level': profile.education_level,
         'github_url': profile.github_url,
         'linkedin_url': profile.linkedin_url,
+        'website_url': profile.website_url,
         'xp_points': profile.xp_points,
         'streak_days': profile.streak_days,
+        'longest_streak': profile.longest_streak,
         'level': profile.level,
+        'is_profile_public': profile.is_profile_public,
+        'show_badges': profile.show_badges,
+        'show_activity': profile.show_activity,
+        'show_courses': profile.show_courses,
+        'notification_preferences': profile.notification_preferences,
         'last_active_at': (
             profile.last_active_at.isoformat() if profile.last_active_at else None
         ),
@@ -241,18 +257,32 @@ class ProfileUpdateSerializer(serializers.Serializer):
     last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
     full_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
     bio = serializers.CharField(max_length=2000, required=False, allow_blank=True)
-    avatar = serializers.URLField(max_length=500, required=False, allow_blank=True)
+    location = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    avatar = serializers.CharField(max_length=500, required=False, allow_blank=True)
     institution = serializers.CharField(max_length=200, required=False, allow_blank=True)
     education_level = serializers.ChoiceField(
         choices=UserProfile.EDUCATION_LEVEL_CHOICES, required=False, allow_blank=True
     )
     github_url = serializers.URLField(max_length=500, required=False, allow_blank=True)
     linkedin_url = serializers.URLField(max_length=500, required=False, allow_blank=True)
+    website_url = serializers.URLField(max_length=500, required=False, allow_blank=True)
+    is_profile_public = serializers.BooleanField(required=False)
+    show_badges = serializers.BooleanField(required=False)
+    show_activity = serializers.BooleanField(required=False)
+    show_courses = serializers.BooleanField(required=False)
 
     PROFILE_FIELDS = (
-        'bio', 'avatar', 'institution', 'education_level', 'github_url',
-        'linkedin_url',
+        'bio', 'location', 'institution', 'education_level', 'github_url',
+        'linkedin_url', 'website_url', 'is_profile_public', 'show_badges',
+        'show_activity', 'show_courses',
     )
+
+    def validate_avatar(self, value):
+        # Avatars are managed only through the validated upload endpoint, so a
+        # free-form URL can never be written here. Silently drop the value.
+        raise serializers.ValidationError(
+            'Profile pictures are changed by uploading an image, not by URL.'
+        )
 
     def validate_username(self, value):
         username = value.strip()

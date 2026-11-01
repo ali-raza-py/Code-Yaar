@@ -20,9 +20,14 @@ COURSE = {
     'language': 'python',
     'prerequisites': 'None — this is a first programming course.',
     'track': {
-        'slug': 'python',
-        'title': 'Python',
-        'description': 'Master Python from fundamentals to practical projects.',
+        'slug': 'core-programming',
+        'title': 'Programming Fundamentals',
+        'category': 'programming',
+        'description': (
+            'Start with Python, continue with C++, then sharpen the problem-'
+            'solving and data-structure skills every language builds on. '
+            'Languages are lessons inside this track, not separate destinations.'
+        ),
     },
     'objectives': [
         'Understand Python syntax and execute basic programs.',

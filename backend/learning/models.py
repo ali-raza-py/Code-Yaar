@@ -1,5 +1,6 @@
 import hashlib
 
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
@@ -33,14 +34,27 @@ class UserProfile(models.Model):
         ('self_taught', 'Self taught'),
         ('other', 'Other'),
     ]
+    # Fixed keys for account-level notification preferences. Values live on
+    # ``notification_preferences``; unknown keys are rejected at the API edge.
+    NOTIFICATION_PREFERENCE_KEYS = (
+        'achievements', 'learning_reminders', 'streak_reminders',
+        'community', 'announcements',
+    )
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='profile'
     )
-    avatar = models.URLField(blank=True, default='', help_text='Profile picture URL')
+    # ImageField stores the same varchar column a URLField did, so historical
+    # absolute-URL values survive unchanged; uploads write media-relative paths
+    # under ``avatars/``. ``api`` serializers render either form as a URL.
+    avatar = models.ImageField(
+        upload_to='avatars/%Y/', blank=True, default='',
+        help_text='Profile picture uploaded by the learner (or a legacy URL)'
+    )
     bio = models.TextField(blank=True, default='')
+    location = models.CharField(max_length=100, blank=True, default='')
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='student')
     institution = models.CharField(max_length=200, blank=True, default='')
     education_level = models.CharField(
@@ -48,11 +62,29 @@ class UserProfile(models.Model):
     )
     github_url = models.URLField(blank=True, default='')
     linkedin_url = models.URLField(blank=True, default='')
+    website_url = models.URLField(blank=True, default='')
     email_verified = models.BooleanField(default=False)
     email_verified_at = models.DateTimeField(null=True, blank=True)
     xp_points = models.PositiveIntegerField(default=0)
     streak_days = models.PositiveIntegerField(default=0)
+    longest_streak = models.PositiveIntegerField(default=0)
     level = models.PositiveIntegerField(default=1)
+    # ── Privacy: what a public viewer (anyone but the owner) may see ──
+    is_profile_public = models.BooleanField(
+        default=True,
+        help_text='Uncheck to hide the profile from /profile/<username> visitors'
+    )
+    show_badges = models.BooleanField(default=True, help_text='Display earned badges publicly')
+    show_activity = models.BooleanField(default=True, help_text='Display recent learning activity publicly')
+    show_courses = models.BooleanField(default=True, help_text='Display completed courses publicly')
+    notification_preferences = models.JSONField(
+        default=dict, blank=True,
+        help_text='Account-level toggles keyed by NOTIFICATION_PREFERENCE_KEYS'
+    )
+    deletion_requested_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Set when the learner requests account deletion; an admin action follows'
+    )
     last_active_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -60,6 +92,21 @@ class UserProfile(models.Model):
     @property
     def full_name(self):
         return self.user.get_full_name().strip() or self.user.username
+
+    def avatar_url(self) -> str:
+        """Render the avatar whether it is a media file or a legacy URL string."""
+        value = self.avatar
+        if not value:
+            return ''
+        text = getattr(value, 'name', '') or str(value)
+        if text.startswith(('http://', 'https://', '/')):
+            return text
+        return value.url
+
+    def get_notification_preference(self, key: str) -> bool:
+        """Preferences default to on until the learner opts out explicitly."""
+        value = (self.notification_preferences or {}).get(key)
+        return True if value is None else bool(value)
 
     def __str__(self):
         return f"{self.user.username}'s profile"
@@ -69,26 +116,59 @@ class UserProfile(models.Model):
 
 
 class CareerTrack(models.Model):
-    """A learning track/career path (e.g., Full Stack, Backend, Frontend, DevOps)."""
+    """A learning track: the discovery layer above courses.
+
+    Tracks group courses into meaningful paths (board classes, web
+    development, AI...). Programming languages are course metadata, never
+    navigation items, so a track is defined by what a learner can become —
+    not by which syntax a course happens to teach.
+    """
     DIFFICULTY_CHOICES = [
         ('beginner', 'Beginner'),
         ('intermediate', 'Intermediate'),
         ('advanced', 'Advanced'),
+    ]
+    CATEGORY_CHOICES = [
+        ('school_board', 'School & Board Education'),
+        ('programming', 'Programming'),
+        ('web', 'Web Development'),
+        ('ai', 'Artificial Intelligence'),
+        ('other', 'Other'),
     ]
 
     slug = models.SlugField(max_length=100, unique=True)
     title = models.CharField(max_length=200)
     description = models.TextField()
     icon = models.CharField(max_length=50, blank=True, default='')
+    category = models.CharField(
+        max_length=30, choices=CATEGORY_CHOICES, default='other',
+        help_text='Discovery-page grouping shown on track cards'
+    )
+    cover_image = models.ImageField(
+        upload_to='track-covers/', null=True, blank=True,
+        help_text='Optional cover illustration for the track cards and detail page'
+    )
+    learning_objectives = models.JSONField(
+        default=list, blank=True,
+        help_text='What a learner can do after finishing this track'
+    )
     difficulty = models.CharField(max_length=20, choices=DIFFICULTY_CHOICES, default='beginner')
     estimated_hours = models.PositiveIntegerField(default=0)
-    is_active = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True, help_text='Uncheck to archive the track')
+    is_published = models.BooleanField(
+        default=False,
+        help_text='Only published tracks appear on the learner-facing Tracks page'
+    )
     order = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return self.title
+
+    @property
+    def published_courses(self):
+        return self.courses.filter(is_active=True, is_published=True).order_by('order', 'title')
 
     class Meta:
         ordering = ['order', 'title']
@@ -116,9 +196,15 @@ class Course(models.Model):
     thumbnail = models.URLField(blank=True, default='')
     track = models.ForeignKey(
         CareerTrack,
-        on_delete=models.CASCADE,
+        # PROTECT keeps an accidental track deletion from cascading into
+        # published courses and learner progress; the admin guides the user
+        # to move or archive instead.
+        on_delete=models.PROTECT,
         related_name='courses'
     )
+    # Academic class for board-textbook courses (e.g. "Class X"); blank for
+    # general catalogue courses. Lets track pages sequence school classes.
+    academic_class = models.CharField(max_length=50, blank=True, default='')
     difficulty = models.CharField(max_length=20, choices=DIFFICULTY_CHOICES, default='beginner')
     language = models.CharField(max_length=20, choices=LANGUAGE_CHOICES, default='python')
     instructor = models.CharField(max_length=200, blank=True, default='')
@@ -197,7 +283,97 @@ class Course(models.Model):
         ordering = ['track', 'order', 'title']
 
 
-class Chapter(models.Model):
+class SourceReference(models.Model):
+    """
+    Curriculum provenance for textbook-derived content.
+
+    Records where a chapter or lesson came from — board, class, textbook unit,
+    the topic name exactly as printed, and the printed page range — so a learner
+    or reviewer can check it against the physical book. It also carries a
+    verification status, which is the guard that stops un-reviewed material
+    being published as official board syllabus.
+
+    Left blank on content that is not textbook-derived (e.g. the general
+    Python/JavaScript catalogue), so the existing courses stay unaffected.
+    """
+    SOURCE_TYPE_CHOICES = [
+        ('', '— Not textbook-derived —'),
+        ('official', 'Official — appears in the board textbook'),
+        ('supplementary', 'Supplementary — practice built around official topics'),
+        ('additional', 'Additional — beyond the textbook, clearly labelled'),
+    ]
+    VERIFICATION_STATUS_CHOICES = [
+        ('', '— Not tracked —'),
+        ('unverified', 'Not yet checked against the textbook'),
+        ('verified', 'Verified against the textbook'),
+        ('needs_review', 'Flagged for manual review — textbook wording unclear'),
+    ]
+
+    source_type = models.CharField(
+        max_length=20, choices=SOURCE_TYPE_CHOICES, blank=True, default='',
+        help_text='How this content relates to the board textbook'
+    )
+    verification_status = models.CharField(
+        max_length=20, choices=VERIFICATION_STATUS_CHOICES, blank=True, default='',
+        help_text='Official content must be verified before it is published'
+    )
+    textbook_board = models.CharField(
+        max_length=50, blank=True, default='',
+        help_text='e.g. "Sindh Board"'
+    )
+    textbook_class = models.CharField(
+        max_length=20, blank=True, default='',
+        help_text='e.g. "Class X"'
+    )
+    textbook_unit = models.CharField(
+        max_length=100, blank=True, default='',
+        help_text='Unit/chapter exactly as printed, e.g. "Unit 3"'
+    )
+    textbook_topic = models.CharField(
+        max_length=200, blank=True, default='',
+        help_text='Original topic name exactly as printed, e.g. "3.3.4 Escape Sequences"'
+    )
+    textbook_pages = models.CharField(
+        max_length=50, blank=True, default='',
+        help_text='Printed page number or range, e.g. "56" or "56-57"'
+    )
+
+    class Meta:
+        abstract = True
+
+    @property
+    def has_textbook_reference(self):
+        return bool(self.source_type)
+
+    @property
+    def textbook_reference_label(self):
+        """Human-readable citation, or '' when the content is not textbook-derived."""
+        parts = [p for p in (self.textbook_unit, self.textbook_topic) if p]
+        if not parts:
+            return ''
+        label = ' > '.join(parts)
+        return f'{label} (p. {self.textbook_pages})' if self.textbook_pages else label
+
+    def clean(self):
+        super().clean()
+        if self.source_type == 'official' and self.verification_status != 'verified':
+            raise ValidationError({
+                'verification_status': (
+                    'Official board-textbook content can only be saved as '
+                    '"verified" once it has been checked against the textbook. '
+                    'Use "needs_review" or set the source type to '
+                    '"supplementary"/"additional" instead.'
+                )
+            })
+        if self.source_type and not self.textbook_class:
+            raise ValidationError({
+                'textbook_class': (
+                    'Textbook-derived content must state which class it belongs to.'
+                )
+            })
+
+
+class Chapter(SourceReference):
     """A chapter within a course, grouping related lessons."""
     course = models.ForeignKey(
         Course,
@@ -230,7 +406,7 @@ class Chapter(models.Model):
         verbose_name_plural = 'chapters'
 
 
-class Lesson(models.Model):
+class Lesson(SourceReference):
     """A single lesson within a chapter."""
     CONTENT_TYPE_CHOICES = [
         ('video', 'Video'),
@@ -277,8 +453,15 @@ class Lesson(models.Model):
         unique_together = ['chapter', 'slug']
 
 
-class Exercise(models.Model):
-    """An exercise within a lesson. Supports multiple types."""
+class Exercise(SourceReference):
+    """
+    An exercise within a lesson. Supports multiple types.
+
+    Carries its own source reference because the textbook's EXERCISE and LAB
+    ACTIVITIES blocks sit on different pages than the teaching content they
+    follow — a question lifted from p.46 needs to cite p.46, not the lesson's
+    pages.
+    """
     TYPE_CHOICES = [
         ('code', 'Code Exercise'),
         ('multiple_choice', 'Multiple Choice'),
@@ -566,7 +749,7 @@ class SnippetRun(models.Model):
 # different `action__in` list and emits a spurious remove/recreate pair.
 UNIQUE_AWARD_ACTIONS = frozenset({
     'lesson_complete', 'exercise_complete', 'chapter_complete', 'course_complete',
-    'achievement_bonus',
+    'achievement_bonus', 'challenge_complete',
 })
 
 
@@ -577,6 +760,7 @@ class XPTransaction(models.Model):
         ('exercise_complete', 'Exercise Complete'),
         ('chapter_complete', 'Chapter Complete'),
         ('course_complete', 'Course Complete'),
+        ('challenge_complete', 'Challenge Complete'),
         ('hint_used', 'Hint Used'),
         ('achievement_bonus', 'Achievement Bonus'),
         ('streak_bonus', 'Streak Bonus'),
@@ -630,16 +814,31 @@ class Achievement(models.Model):
         ('excellence', 'Excellence Award'),
         ('project', 'Project Builder'),
     ]
+    # The platform-wide difficulty taxonomy. Distinct from the XP-derived
+    # ``badge_art.level_label`` tier: difficulty says how demanding earning
+    # the badge is, the tier says how valuable the award is.
+    DIFFICULTY_CHOICES = [
+        ('beginner', 'Beginner'),
+        ('intermediate', 'Intermediate'),
+        ('advanced', 'Advanced'),
+    ]
 
     slug = models.SlugField(max_length=100, unique=True)
     title = models.CharField(max_length=200)
     description = models.TextField()
     icon = models.CharField(max_length=50, blank=True, default='')
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='special')
+    difficulty = models.CharField(
+        max_length=20, choices=DIFFICULTY_CHOICES, default='beginner'
+    )
     xp_bonus = models.PositiveIntegerField(default=0)
     # Condition for earning (JSON for flexibility)
     condition_type = models.CharField(max_length=100, help_text='e.g., course_complete, streak_7')
     condition_value = models.CharField(max_length=200, blank=True, default='', help_text='e.g., course slug, number')
+    how_to_earn = models.TextField(
+        blank=True, default='',
+        help_text='Learner-facing guidance shown on locked badges'
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -717,6 +916,50 @@ class UserAchievement(models.Model):
                 return candidate
 
 
+class UserNotification(models.Model):
+    """In-app notification generated by verified platform events.
+
+    Rows are only ever written by server-side services when the underlying
+    event actually happened (badge truly unlocked, streak truly extended,
+    course truly completed). ``read_at`` marks the moment the learner saw
+    and dismissed it.
+    """
+
+    class Type(models.TextChoices):
+        BADGE_UNLOCK = 'badge_unlock', 'Badge unlocked'
+        STREAK_RECORD = 'streak_record', 'New streak record'
+        TRACK_COMPLETE = 'track_complete', 'Learning track completed'
+        XP_MILESTONE = 'xp_milestone', 'XP milestone reached'
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='notifications'
+    )
+    type = models.CharField(max_length=20, choices=Type.choices)
+    title = models.CharField(max_length=200)
+    body = models.TextField(blank=True, default='')
+    link = models.CharField(
+        max_length=300, blank=True, default='',
+        help_text='In-app path the notification opens, e.g. /achievements'
+    )
+    read_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.username}: {self.title}"
+
+    @property
+    def is_unread(self) -> bool:
+        return self.read_at is None
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'read_at'], name='notif_user_read'),
+        ]
+
+
 class Project(models.Model):
     """A hands-on project for building practical skills."""
     DIFFICULTY_CHOICES = [
@@ -769,21 +1012,70 @@ class ProjectMilestone(models.Model):
 
 
 class Challenge(models.Model):
-    """A standalone coding challenge (separate from course exercises)."""
+    """A standalone coding challenge (separate from course exercises).
+
+    A challenge is a self-contained program problem: the learner writes a
+    program that reads from standard input and writes to standard output, so
+    it can be genuinely executed and graded by the same sandbox that handles
+    course exercises (see ``learning.services.sandbox``). ``sample_tests`` are
+    shown in the workspace for "Run"; ``hidden_tests`` are used only by
+    "Submit" and are never sent to a client.
+    """
     DIFFICULTY_CHOICES = [
         ('beginner', 'Beginner'),
         ('intermediate', 'Intermediate'),
         ('advanced', 'Advanced'),
     ]
+    LANGUAGE_CHOICES = [
+        ('python', 'Python'),
+        ('cpp', 'C++'),
+    ]
 
     slug = models.SlugField(max_length=100, unique=True)
     title = models.CharField(max_length=200)
-    description = models.TextField()
+    description = models.TextField(help_text='One-line summary shown on the card')
     difficulty = models.CharField(max_length=20, choices=DIFFICULTY_CHOICES, default='beginner')
     topic = models.CharField(max_length=100)
     estimated_minutes = models.PositiveIntegerField(default=0)
-    starter_code = models.TextField(blank=True, default='')
-    solution_code = models.TextField(blank=True, default='')
+    # Languages offered in the workspace. Only these appear in the selector and
+    # only the ones with matching starter/solution/test code can be submitted.
+    languages = models.JSONField(
+        default=list, blank=True,
+        help_text="Ordered language codes the learner may choose, e.g. ['python', 'cpp']"
+    )
+    starter_code = models.TextField(blank=True, default='', help_text='Python starter code')
+    starter_code_cpp = models.TextField(blank=True, default='', help_text='C++ starter code')
+    solution_code = models.TextField(blank=True, default='', help_text='Reference Python solution')
+    solution_code_cpp = models.TextField(blank=True, default='', help_text='Reference C++ solution')
+
+    # Rich, learner-facing problem content.
+    problem_statement = models.TextField(blank=True, default='')
+    requirements = models.JSONField(default=list, blank=True, help_text='Bullet list of what to do')
+    input_description = models.TextField(blank=True, default='')
+    output_description = models.TextField(blank=True, default='')
+    constraints = models.JSONField(default=list, blank=True, help_text='List of constraint lines')
+    examples = models.JSONField(
+        default=list, blank=True,
+        help_text="List of {input, output, explanation} shown in the workspace"
+    )
+    hints = models.JSONField(
+        default=list, blank=True,
+        help_text="Ordered list of hint strings, revealed one at a time"
+    )
+    solution_explanation = models.TextField(blank=True, default='')
+    time_complexity = models.CharField(max_length=100, blank=True, default='')
+    space_complexity = models.CharField(max_length=100, blank=True, default='')
+
+    # Grading. Sample tests are visible; hidden tests grade submissions.
+    sample_tests = models.JSONField(
+        default=list, blank=True,
+        help_text="Visible tests [{'input', 'expected_output'}] run by 'Run'"
+    )
+    hidden_tests = models.JSONField(
+        default=list, blank=True,
+        help_text="Hidden tests used only by 'Submit'; never sent to clients"
+    )
+
     xp_reward = models.PositiveIntegerField(default=50)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -791,6 +1083,15 @@ class Challenge(models.Model):
 
     def __str__(self):
         return f"[{self.difficulty}] {self.title}"
+
+    def starter_for(self, language: str) -> str:
+        return self.starter_code_cpp if language == 'cpp' else self.starter_code
+
+    def solution_for(self, language: str) -> str:
+        return self.solution_code_cpp if language == 'cpp' else self.solution_code
+
+    def supported_languages(self) -> list[str]:
+        return list(self.languages) if self.languages else ['python']
 
     class Meta:
         ordering = ['topic', 'difficulty', 'title']
@@ -1008,6 +1309,54 @@ class LearningActivity(models.Model):
         indexes = [
             models.Index(fields=['user', 'activity_date']),
             models.Index(fields=['user', 'activity_type', '-occurred_at']),
+        ]
+
+
+class ChallengeSubmission(models.Model):
+    """One scored submission of a challenge, kept as history and completion.
+
+    Mirrors the integrity rules of ``ExerciseAttempt``: a repeat request that
+    carries an already-processed ``submission_id`` replays its stored result,
+    and XP is awarded at most once per user + challenge (guarded by the
+    ``challenge_complete`` unique constraint on XPTransaction).
+    """
+    STATUS_CHOICES = [
+        ('correct', 'Correct'),
+        ('incorrect', 'Incorrect'),
+        ('error', 'Error'),
+        ('running', 'Running'),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='challenge_submissions'
+    )
+    challenge = models.ForeignKey(
+        Challenge,
+        on_delete=models.CASCADE,
+        related_name='submissions'
+    )
+    submission_id = models.UUIDField(null=True, blank=True, db_index=True)
+    language = models.CharField(max_length=10, default='python')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='running')
+    submitted_code = models.TextField(blank=True, default='')
+    output = models.TextField(blank=True, default='')
+    error_message = models.TextField(blank=True, default='')
+    feedback = models.TextField(blank=True, default='')
+    test_results = models.JSONField(default=list, blank=True)
+    xp_earned = models.PositiveIntegerField(default=0)
+    time_spent_seconds = models.PositiveIntegerField(default=0)
+    attempt_number = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.challenge.title} ({self.status})"
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'challenge', 'status']),
         ]
 
 
