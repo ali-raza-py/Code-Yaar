@@ -46,7 +46,7 @@ export default function AboutPage() {
             Code-Yaar is a practical learning platform for people who are done collecting tutorials and ready to turn understanding into working software.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <Link href="/learn" className="focus-ring inline-flex items-center gap-2 rounded-lg bg-cta px-5 py-3 text-sm font-bold text-cta-fg hover:bg-cta-hover">
+            <Link href="/tracks" className="focus-ring inline-flex items-center gap-2 rounded-lg bg-cta px-5 py-3 text-sm font-bold text-cta-fg hover:bg-cta-hover">
               Explore learning paths <ArrowRight className="h-4 w-4" />
             </Link>
             <Link href="#contact" className="focus-ring inline-flex items-center gap-2 rounded-lg border border-white/20 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">

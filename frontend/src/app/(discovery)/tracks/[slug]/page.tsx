@@ -15,14 +15,22 @@ import { NetworkError, NotFoundError } from '@/components/learning/workspace/err
 import { formatAcademicClass, trackDifficultyTone } from '@/components/learning/tracks/shared';
 
 /**
- * Track detail: overview, objectives and the track's courses in the
- * recommended sequence. Courses keep their existing pages — this page only
- * organizes them, it never duplicates lesson content.
+ * PUBLIC track detail: overview, objectives and the track's courses in the
+ * recommended sequence. Visitors read everything and land on the public
+ * course page; enrollment and the lesson workspace stay inside the app.
  */
 
-function CourseRow({ course, index }: { course: Course; index: number }) {
+function CourseRow({ course, index, signedIn }: { course: Course; index: number; signedIn: boolean }) {
   const inProgress = course.enrolled && (course.progress_percentage ?? 0) > 0;
   const done = (course.progress_percentage ?? 0) >= 100;
+  // Signed-in learners jump straight into the workspace; visitors get the
+  // public course page, which is the honest next step without an account.
+  const href = !signedIn
+    ? `/courses/${course.slug}`
+    : inProgress || course.enrolled
+      ? `/learn/${course.slug}`
+      : `/learn/${course.slug}/dashboard`;
+  const cta = !signedIn ? 'View course' : inProgress ? 'Continue' : course.enrolled ? 'Open course' : 'Start course';
   return (
     <li className="flex flex-col gap-3 rounded-card border border-border bg-card p-4 transition-colors hover:border-primary/50 sm:flex-row sm:items-center">
       <span
@@ -67,10 +75,10 @@ function CourseRow({ course, index }: { course: Course; index: number }) {
         )}
       </div>
       <Link
-        href={inProgress || course.enrolled ? `/learn/${course.slug}` : `/learn/${course.slug}/dashboard`}
+        href={href}
         className="focus-ring inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-lg bg-cta px-4 py-2 text-sm font-bold text-cta-fg transition-colors hover:bg-cta-hover"
       >
-        {inProgress ? 'Continue' : course.enrolled ? 'Open course' : 'Start course'}
+        {cta}
         <ArrowRight aria-hidden="true" className="h-4 w-4" />
       </Link>
     </li>
@@ -155,11 +163,13 @@ export default function TrackDetailPage() {
   if (!track) return null;
 
   const enrolled = track.enrolled_course_count > 0;
+  // Visitors return to the exact track they were reading after signing up.
+  const joinHref = `/sign-up?next=${encodeURIComponent(`/tracks/${track.slug}`)}`;
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 lg:px-8">
       <nav className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        <Link href="/learn/tracks" className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:text-foreground">
+        <Link href="/tracks" className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:text-foreground">
           Tracks
         </Link>
         <span aria-hidden="true">/</span>
@@ -234,12 +244,20 @@ export default function TrackDetailPage() {
                   {enrolling ? 'Enrolling...' : 'Enroll in track'}
                 </button>
               ) : (
-                <Link
-                  href="/sign-in"
-                  className="focus-ring inline-flex min-h-10 items-center gap-2 rounded-lg bg-cta px-5 py-2.5 text-sm font-bold text-cta-fg transition-colors hover:bg-cta-hover"
-                >
-                  Sign in to enroll
-                </Link>
+                <>
+                  <Link
+                    href={joinHref}
+                    className="focus-ring inline-flex min-h-10 items-center gap-2 rounded-lg bg-cta px-5 py-2.5 text-sm font-bold text-cta-fg transition-colors hover:bg-cta-hover"
+                  >
+                    Create a free account to enroll
+                  </Link>
+                  <Link
+                    href={`/sign-in?next=${encodeURIComponent(`/tracks/${track.slug}`)}`}
+                    className="focus-ring inline-flex min-h-10 items-center rounded-lg border border-border px-4 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+                  >
+                    Sign in
+                  </Link>
+                </>
               ))}
             {track.continue_url_slug && (
               <Link
@@ -297,6 +315,7 @@ export default function TrackDetailPage() {
                   key={course.id}
                   course={course}
                   index={track.courses.indexOf(course) + 1}
+                  signedIn={isAuthenticated}
                 />
               ))}
             </ul>

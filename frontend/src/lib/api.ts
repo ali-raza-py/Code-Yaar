@@ -679,6 +679,7 @@ export const courses = {
       xp_awarded: number;
       exercises_remaining: number;
       message: string;
+      awarded_badges: BadgeUnlock[];
     }>(`/lessons/${lessonId}/complete/`, { method: 'POST' }),
 };
 
@@ -1386,4 +1387,147 @@ export const badges = {
     if (!res.ok) throw await readError(res);
     triggerBlobDownload(await res.blob(), `code-yaar-${identifier}-share-${preset}.png`);
   },
+};
+
+// ─── Achievement catalogue (earned + locked, with progress) ────────────────
+
+export const achievements = {
+  /** Full badge grid from `GET /api/achievements/`: difficulty, progress, etc. */
+  list: async (): Promise<AchievementDefinition[]> => {
+    const data = await request<Paginated<AchievementDefinition>>('/achievements/');
+    return unwrapList(data);
+  },
+};
+
+// ─── In-app notifications ──────────────────────────────────────────────────
+
+export interface NotificationListResult {
+  results: AppNotification[];
+  unread_count: number;
+  next: boolean;
+  previous: boolean;
+}
+
+export const notifications = {
+  list: (params?: { page?: number; page_size?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.page) query.set('page', String(params.page));
+    if (params?.page_size) query.set('page_size', String(params.page_size));
+    const qs = query.toString();
+    return request<NotificationListResult>(`/notifications/${qs ? `?${qs}` : ''}`);
+  },
+
+  markRead: (id: number) =>
+    request<{ id: number; unread: boolean }>(`/notifications/${id}/read/`, { method: 'POST' }),
+
+  markAllRead: () =>
+    request<{ marked_read: number }>('/notifications/read-all/', { method: 'POST' }),
+};
+
+// ─── Avatar upload / removal (multipart) ───────────────────────────────────
+
+/**
+ * Multipart POST/DELETE that keeps the token-refresh-on-401 behaviour of
+ * `authorizedFetch` but lets the browser set the `multipart/form-data`
+ * boundary (the JSON content type in `send` would break the encoding).
+ */
+async function multipartRequest<T>(endpoint: string, init: RequestInit): Promise<T> {
+  const build = (): Promise<Response> => {
+    const headers: Record<string, string> = {};
+    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+    return fetchOrThrow(`${API_BASE}${endpoint}`, { ...init, headers, credentials: 'include' });
+  };
+  let res = await build();
+  if (res.status === 401) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) res = await build();
+  }
+  if (!res.ok) throw await readError(res);
+  const text = await res.text();
+  return (text ? JSON.parse(text) : {}) as T;
+}
+
+export const avatar = {
+  /** Upload a cropped avatar; returns the authoritative stored URL. */
+  upload: (blob: Blob) => {
+    const form = new FormData();
+    form.append('file', blob, 'avatar.jpg');
+    return multipartRequest<{ avatar: string }>('/profile/avatar/', {
+      method: 'POST',
+      body: form,
+    });
+  },
+
+  /** Remove the picture, restoring the default initials avatar. */
+  remove: () =>
+    multipartRequest<{ avatar: string; detail: string }>('/profile/avatar/', {
+      method: 'DELETE',
+    }),
+};
+
+// ─── Account-level notification preferences ────────────────────────────────
+
+export const preferences = {
+  patch: (data: Partial<NotificationPreferences>) =>
+    request<{ notification_preferences: NotificationPreferences }>('/profile/preferences/', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+};
+
+// ─── Public (shareable) profile ────────────────────────────────────────────
+
+export interface PublicProfileData {
+  username: string;
+  display_name: string;
+  avatar: string;
+  bio: string;
+  location: string;
+  joined_at: string;
+  github_url: string;
+  linkedin_url: string;
+  website_url: string;
+  stats: {
+    level: number;
+    xp_points: number;
+    streak_days: number;
+    longest_streak: number;
+    courses_completed: number;
+    badges_earned: number;
+  };
+  show_badges: boolean;
+  show_courses: boolean;
+  show_activity: boolean;
+  badges: Array<{
+    slug: string;
+    title: string;
+    description: string;
+    icon: string;
+    category: string;
+    difficulty: string;
+    earned_at: string;
+    verification_url: string;
+  }>;
+  tracks_completed: Array<{ slug: string; title: string }>;
+  recent_activity: Array<{
+    amount: number;
+    action: string;
+    description: string;
+    created_at: string;
+  }>;
+}
+
+export const users = {
+  /** Unauthenticated public profile; 404 when private or unknown. */
+  publicProfile: (username: string) =>
+    request<PublicProfileData>(`/users/${encodeURIComponent(username)}/`),
+};
+
+// ─── Account deletion request (recorded, never executed inline) ────────────
+
+export const account = {
+  requestDeletion: () =>
+    request<{ detail: string; requested_at: string }>('/account/deletion-request/', {
+      method: 'POST',
+    }),
 };

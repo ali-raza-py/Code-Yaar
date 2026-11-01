@@ -1,10 +1,25 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { leaderboard as leaderboardApi, auth, ApiError, type LeaderboardEntry } from '@/lib/api';
+import { useAuth } from '@/hooks/use-auth';
 import { NetworkError } from '@/components/learning/workspace/error-states';
 
+/**
+ * PUBLIC leaderboard, dual mode by design: visitors see a top-10 teaser and
+ * a join CTA (rankings are real API data, never invented), while signed-in
+ * students get the full board with their own row highlighted. The API
+ * answers anonymous reads, so this page is a marketing surface — not a
+ * security boundary.
+ */
+
+// Visitors get a teaser; students get the whole board.
+const ANON_LIMIT = 10;
+const STUDENT_LIMIT = 50;
+
 export default function LeaderboardPage() {
+  const { user, loading: authLoading } = useAuth();
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -14,7 +29,7 @@ export default function LeaderboardPage() {
     let cancelled = false;
     (async () => {
       try {
-        const data = await leaderboardApi.list({ limit: 50 });
+        const data = await leaderboardApi.list({ limit: user ? STUDENT_LIMIT : ANON_LIMIT });
         if (cancelled) return;
         setEntries(data.entries);
         setError(null);
@@ -26,19 +41,20 @@ export default function LeaderboardPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [user]);
 
   useEffect(() => {
+    if (!user) { setCurrentUserId(null); return; }
     let cancelled = false;
     auth.getProfile()
       .then((profile) => {
         if (!cancelled) setCurrentUserId((profile as { user: { id: number } }).user.id);
       })
       .catch(() => {
-        // Not authenticated — rankings still show
+        // Profile read failed — rankings still show without the highlight.
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [user]);
 
   const getRankBadge = (rank: number) => {
     if (rank === 1) return { bg: 'bg-warning/20', text: 'text-tone-amber-fg', icon: '🥇' };
@@ -49,12 +65,14 @@ export default function LeaderboardPage() {
 
   if (error === 'network') return <NetworkError />;
 
+  const signedIn = Boolean(user);
+
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
       {/* Header */}
       <div className="mb-8">
         <div className="mb-3 inline-flex items-center gap-2 rounded-pill border border-primary/25 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 18.75h-9m9 0a3 3 0 013 3h-15a3 3 0 013-3m9 0v-3.375c0-.621-.503-1.125-1.125-1.125h-.871M7.5 18.75v-3.375c0-.621.504-1.125 1.125-1.125h.872m5.007 0H9.497m5.007 0a7.454 7.454 0 01-.982-3.172M9.497 14.25a7.454 7.454 0 00.981-3.172M5.25 4.236c-.982.143-1.954.317-2.916.52A6.003 6.003 0 007.73 9.728M5.25 4.236V4.5c0 2.108.966 3.99 2.48 5.228M5.25 4.236V2.721C7.456 2.41 9.71 2.25 12 2.25c2.291 0 4.545.16 6.75.47v1.516M18.75 4.236c.982.143 1.954.317 2.916.52A6.003 6.003 0 0116.27 9.728M18.75 4.236V4.5c0 2.108-.966 3.99-2.48 5.228m0 0a6.023 6.023 0 01-2.77.852m0 0l-.5.075a7.48 7.48 0 01-1 .067 7.48 7.48 0 01-1-.067l-.5-.075m3 0a6.022 6.022 0 01-2.77-.852" />
           </svg>
           LEADERBOARD
@@ -68,9 +86,9 @@ export default function LeaderboardPage() {
       </div>
 
       {/* Leaderboard Table */}
-      {loading ? (
+      {loading || authLoading ? (
         <div className="space-y-2">
-          {Array.from({ length: 10 }).map((_, i) => (
+          {Array.from({ length: signedIn ? 10 : ANON_LIMIT }).map((_, i) => (
             <div key={i} className="flex items-center gap-4 rounded-card border border-border bg-card p-4 animate-pulse">
               <div className="h-8 w-8 rounded-full bg-muted" />
               <div className="h-4 w-24 rounded bg-muted" />
@@ -81,7 +99,7 @@ export default function LeaderboardPage() {
         </div>
       ) : entries.length === 0 ? (
         <div className="card-hairline p-12 text-center">
-          <svg className="mx-auto h-10 w-10 text-muted-foreground/50" fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor">
+          <svg className="mx-auto h-10 w-10 text-muted-foreground/50" fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor" aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 18.75h-9m9 0a3 3 0 013 3h-15a3 3 0 013-3m9 0v-3.375c0-.621-.503-1.125-1.125-1.125h-.871M7.5 18.75v-3.375c0-.621.504-1.125 1.125-1.125h.872m5.007 0H9.497m5.007 0a7.454 7.454 0 01-.982-3.172M9.497 14.25a7.454 7.454 0 00.981-3.172M5.25 4.236c-.982.143-1.954.317-2.916.52A6.003 6.003 0 007.73 9.728M5.25 4.236V4.5c0 2.108.966 3.99 2.48 5.228M5.25 4.236V2.721C7.456 2.41 9.71 2.25 12 2.25c2.291 0 4.545.16 6.75.47v1.516M18.75 4.236c.982.143 1.954.317 2.916.52A6.003 6.003 0 0116.27 9.728M18.75 4.236V4.5c0 2.108-.966 3.99-2.48 5.228m0 0a6.023 6.023 0 01-2.77.852m0 0l-.5.075a7.48 7.48 0 01-1 .067 7.48 7.48 0 01-1-.067l-.5-.075m3 0a6.022 6.022 0 01-2.77-.852" />
           </svg>
           <h2 className="mt-4 text-lg font-semibold text-foreground">No rankings yet</h2>
@@ -138,6 +156,31 @@ export default function LeaderboardPage() {
               </div>
             );
           })}
+
+          {/* Visitors get a teaser — the join CTA is the point of the page. */}
+          {!signedIn && (
+            <div className="rounded-card border border-primary/25 bg-primary/[0.04] p-6 text-center">
+              <h2 className="text-lg font-bold text-foreground">Your name could be on this board</h2>
+              <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
+                Every lesson, exercise and challenge you complete earns XP. Create a free
+                account to start climbing the rankings.
+              </p>
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+                <Link
+                  href="/sign-up?next=%2Fleaderboard"
+                  className="inline-flex h-10 items-center rounded-lg bg-cta px-4 text-sm font-semibold text-cta-fg transition-colors hover:bg-cta-hover"
+                >
+                  Get started free
+                </Link>
+                <Link
+                  href="/sign-in?next=%2Fleaderboard"
+                  className="inline-flex h-10 items-center rounded-lg border border-border px-4 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+                >
+                  Sign in
+                </Link>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

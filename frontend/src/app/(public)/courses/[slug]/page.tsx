@@ -160,7 +160,7 @@ export default function CourseLandingPage() {
         <div className="mx-auto max-w-4xl px-4 py-10 sm:px-6 lg:px-8">
           {/* Breadcrumb */}
           <nav className="mb-6 flex items-center gap-2 text-sm text-muted-foreground">
-            <Link href="/learn" className="hover:text-foreground">Courses</Link>
+            <Link href="/courses" className="hover:text-foreground">Courses</Link>
             <span>/</span>
             <span className="text-foreground">{course.track_title}</span>
           </nav>
@@ -199,7 +199,7 @@ export default function CourseLandingPage() {
               )
             ) : (
               <Link
-                href="/sign-up"
+                href={`/sign-up?next=${encodeURIComponent(`/courses/${course.slug}`)}`}
                 className="inline-flex items-center rounded-lg bg-cta px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-cta-hover transition-colors"
               >
                 Sign up to start
@@ -207,7 +207,7 @@ export default function CourseLandingPage() {
             )}
             {firstLessonSlug && (
               <Link
-                href={`/learn/${course.slug}?lesson=${firstLessonSlug}`}
+                href={`/courses/${course.slug}/lesson/${firstLessonSlug}`}
                 className="inline-flex items-center rounded-lg border border-border px-5 py-2.5 text-sm font-semibold text-foreground hover:bg-muted transition-colors"
               >
                 Preview first lesson

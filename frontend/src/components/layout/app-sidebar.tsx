@@ -54,7 +54,10 @@ const navGroups: NavGroup[] = [
   {
     label: "Learn",
     items: [
-      { href: "/learn?view=tracks", label: "Tracks", icon: Layers, query: { view: "tracks" } },
+      // Tracks live on the public discovery surface (/tracks) — signed-in
+      // students land there with the header chrome; enrollment state and
+      // "Continue learning" CTAs come from the same API.
+      { href: "/tracks", label: "Tracks", icon: Layers },
       { href: "/learn?view=courses", label: "Courses", icon: BookOpen, query: { view: "courses" } },
       { href: "/learn/practicals", label: "Practicals", icon: ClipboardCheck },
       { href: "/challenges", label: "Practice", icon: Dumbbell },

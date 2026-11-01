@@ -57,6 +57,10 @@ export default function ChallengeWorkspacePage() {
   const params = useParams<{ slug: string }>();
   const slug = params?.slug ?? "";
   const { isAuthenticated, emailVerified, refresh } = useAuth();
+  // Signed-out visitors read the problem freely; the auth round trip lands
+  // them back on this exact challenge so the funnel never loses context.
+  const joinHref = `/sign-up?next=${encodeURIComponent(`/challenges/${slug}`)}`;
+  const signInHref = `/sign-in?next=${encodeURIComponent(`/challenges/${slug}`)}`;
 
   const [detail, setDetail] = useState<ChallengeDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -306,7 +310,7 @@ export default function ChallengeWorkspacePage() {
               {!isAuthenticated && (
                 <div className="flex items-center gap-2 rounded-md border border-[var(--challenge-border)] bg-[var(--challenge-surface)] px-3 py-2 text-xs text-[var(--challenge-muted)]">
                   <Lock aria-hidden="true" className="h-3.5 w-3.5" />
-                  You can read this challenge, but <Link href="/sign-in" className="font-bold text-[var(--challenge-accent-strong)] hover:underline">sign in</Link> to run code and earn XP.
+                  You can read this challenge, but <Link href={signInHref} className="font-bold text-[var(--challenge-accent-strong)] hover:underline">sign in</Link> or <Link href={joinHref} className="font-bold text-[var(--challenge-accent-strong)] hover:underline">create a free account</Link> to run code and earn XP.
                 </div>
               )}
 
@@ -332,7 +336,7 @@ export default function ChallengeWorkspacePage() {
                 <div role="alert" className="flex items-center gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-tone-amber-fg">
                   <AlertCircle aria-hidden="true" className="h-4 w-4 shrink-0" />
                   <span>{actionError}</span>
-                  {actionError.startsWith("Sign in") && <Link href="/sign-in" className="ml-auto shrink-0 font-bold underline underline-offset-2">Sign in</Link>}
+                  {actionError.startsWith("Sign in") && <Link href={signInHref} className="ml-auto shrink-0 font-bold underline underline-offset-2">Sign in</Link>}
                   {actionError.startsWith("Please verify") && <Link href="/verify-email" className="ml-auto shrink-0 font-bold underline underline-offset-2">Verify email</Link>}
                 </div>
               )}

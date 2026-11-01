@@ -8,10 +8,11 @@ import { NetworkError } from '@/components/learning/workspace/error-states';
 import { trackDifficultyTone } from '@/components/learning/tracks/shared';
 
 /**
- * LEARN > Tracks: the discovery layer of the platform. Everything on this
+ * PUBLIC /tracks: the discovery layer of the platform. Everything on this
  * page is served by GET /api/tracks/ — published tracks with at least one
  * published course — so nothing here is hardcoded and empty shelves (like a
- * track awaiting its first course) never surface.
+ * track awaiting its first course) never surface. Visitors browse freely;
+ * following a track (progress, enrollment) happens inside the app.
  */
 
 const CATEGORY_LABELS: Record<TrackCategory, string> = {
@@ -25,7 +26,7 @@ const CATEGORY_LABELS: Record<TrackCategory, string> = {
 function TrackCard({ track }: { track: TrackSummary }) {
   return (
     <Link
-      href={`/learn/tracks/${track.slug}`}
+      href={`/tracks/${track.slug}`}
       className="group flex flex-col overflow-hidden rounded-card border border-border bg-card transition-all hover:border-primary/50 hover:shadow-[var(--shadow-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       {/* Cover: admin-uploaded artwork when set, a calm navy panel otherwise. */}
@@ -145,8 +146,8 @@ export default function TracksPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
-      <header className="mb-6 overflow-hidden rounded-card bg-hero-navy p-8 text-white sm:p-10">
-        <p className="text-xs font-bold uppercase tracking-[0.14em] text-white/60">Learn</p>
+      <header className="mb-6 overflow-hidden rounded-card border border-border bg-hero-navy p-8 text-white sm:p-10">
+        <p className="text-xs font-bold uppercase tracking-[0.14em] text-white/60">Curriculum</p>
         <h1 className="mt-2 text-2xl font-bold sm:text-3xl">Learning Tracks</h1>
         <p className="mt-3 max-w-2xl text-sm text-white/70 sm:text-base">
           Structured paths that group related courses in the right order — pick a track

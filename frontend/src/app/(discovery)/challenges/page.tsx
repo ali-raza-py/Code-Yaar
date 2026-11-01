@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AlertCircle, Check, RotateCcw } from "lucide-react";
@@ -16,7 +16,10 @@ import { DifficultyTabs, type Difficulty } from "@/components/challenges/difficu
 
 const baseTopics = ["Arrays", "Strings", "Data Structures", "Algorithms", "Trees", "Graphs", "System Design", "Dynamic Programming", "Stacks", "Linked Lists"];
 
-export default function ChallengesPage() {
+// The filter/sort state is driven by the query string, so this component
+// reads useSearchParams and must render inside a Suspense boundary — the
+// default export below provides it, letting the page still prerender.
+function ChallengesContent() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -146,10 +149,18 @@ export default function ChallengesPage() {
 
         <section className="mt-5" aria-label="Challenge results">
           {error === "network" && <div role="alert" className="flex items-center justify-between gap-4 rounded-card border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger"><span className="inline-flex items-center gap-2"><AlertCircle aria-hidden="true" className="h-4 w-4" />Could not load the challenge library.</span><button type="button" onClick={() => { setLoading(true); void loadChallenges(); }} className="focus-ring rounded font-bold underline underline-offset-2">Try again</button></div>}
-          {error === "auth" && <div role="alert" className="rounded-card border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-tone-amber-fg">Sign in to view your challenge progress. <Link href="/sign-in" className="focus-ring rounded font-bold underline underline-offset-2">Sign in</Link></div>}
+          {error === "auth" && <div role="alert" className="rounded-card border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-tone-amber-fg">Sign in to view your challenge progress. <Link href="/sign-in?next=%2Fchallenges" className="focus-ring rounded font-bold underline underline-offset-2">Sign in</Link></div>}
           {loading ? <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">{Array.from({ length: 6 }).map((_, index) => <ChallengeSkeleton key={index} />)}</div> : !error && filtered.length === 0 ? <EmptyState filtered={hasFilters} onClear={clearFilters} /> : !error && <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">{filtered.map((challenge) => <ChallengeCard key={challenge.id} challenge={challenge} />)}</div>}
         </section>
       </div>
     </main>
+  );
+}
+
+export default function ChallengesPage() {
+  return (
+    <Suspense fallback={null}>
+      <ChallengesContent />
+    </Suspense>
   );
 }

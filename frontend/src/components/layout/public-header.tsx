@@ -10,11 +10,13 @@ import Image from "next/image";
 
 const MotionLink = motion.create(Link);
 
+// Visitor navigation uses discovery nouns; the student shell (/dashboard,
+// /learn…) never appears here — signed-in users get a single way back in.
 const navItems = [
-  { href: "/learn", label: "Learn" },
-  { href: "/projects", label: "Projects" },
-  { href: "/challenges", label: "Challenges" },
+  { href: "/courses", label: "Courses" },
+  { href: "/tracks", label: "Tracks" },
   { href: "/leaderboard", label: "Leaderboard" },
+  { href: "/about", label: "About" },
 ];
 
 export function PublicHeader() {
@@ -108,7 +110,7 @@ export function PublicHeader() {
           <div className="hidden items-center gap-2 md:flex">
             {user ? (
               <Link href="/dashboard" className="rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90">
-                Dashboard
+                Open Dashboard
               </Link>
             ) : (
               <>
@@ -150,7 +152,7 @@ export function PublicHeader() {
               <div className="mt-3 flex flex-col gap-2 border-t border-[var(--color-section-border)] pt-3">
                 {user ? (
                   <Link href="/dashboard" className="dc-btn-primary w-full justify-center">
-                    Dashboard
+                    Open Dashboard
                   </Link>
                 ) : (
                   <>

@@ -7,20 +7,20 @@ const footerLinks = [
   {
     title: "Platform",
     links: [
-      { label: "Learn", href: "/learn" },
-      { label: "Projects", href: "/projects" },
+      { label: "Courses", href: "/courses" },
+      { label: "Learning Tracks", href: "/tracks" },
       { label: "Challenges", href: "/challenges" },
       { label: "Leaderboard", href: "/leaderboard" },
       { label: "Dashboard", href: "/dashboard" },
     ],
   },
   {
-    title: "Resources",
+    title: "Credentials",
     links: [
-      { label: "Documentation", href: "/learn" },
-      { label: "Blog", href: "/learn" },
-      { label: "Community", href: "/leaderboard" },
-      { label: "FAQ", href: "/about#faq" },
+      { label: "Verify a certificate", href: "/verify/certificate/" },
+      { label: "Verify a badge", href: "/verify/badge/" },
+      { label: "Certificates", href: "/certificates" },
+      { label: "Achievements", href: "/achievements" },
     ],
   },
   {
