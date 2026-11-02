@@ -2,7 +2,7 @@ from datetime import timedelta
 
 from rest_framework import serializers, viewsets, permissions, status, filters
 from rest_framework.decorators import api_view, permission_classes, action, throttle_classes
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from django.contrib.contenttypes.models import ContentType
@@ -21,6 +21,7 @@ from .models import (
     Skill, UserSkill,
     PracticalClass, PracticalSubject, Practical, PracticalProgress,
     PracticalBookmark, LearningActivity, UserNotification,
+    Portfolio, StudentProject, ProjectImage,
 )
 from .services.sandbox import get_sandbox, DevelopmentSandbox
 from .services.xp import award_xp, deduct_xp
@@ -31,7 +32,7 @@ from .services.progress import (
     record_learning_activity,
     streak_summary,
 )
-from .permissions import IsEmailVerified, IsAdministrator
+from .permissions import IsEmailVerified, IsAdministrator, IsOwnerOrAdministrator
 from .serializers import (
     CareerTrackSerializer, CareerTrackListSerializer,
     CourseListSerializer, CourseDetailSerializer,
@@ -55,6 +56,9 @@ from .serializers import (
     PracticalProgressSerializer, PracticalBookmarkSerializer,
     PracticalClassAdminSerializer, PracticalSubjectAdminSerializer,
     PracticalAdminSerializer,
+    PortfolioSerializer, PublicPortfolioSerializer,
+    StudentProjectSerializer, StudentProjectPublicSerializer,
+    ProjectImageSerializer, ProjectReorderSerializer,
 )
 from .services.sandbox import validate_submission
 
@@ -2264,3 +2268,197 @@ def public_profile_view(request, username):
         'tracks_completed': tracks_completed,
         'recent_activity': activity,
     })
+
+
+# ─── Developer Portfolio ────────────────────────────────────────────────────
+
+class PortfolioMediaThrottle(ScopedRateThrottle):
+    """Guards portfolio image uploads against abuse (mirrors avatar upload)."""
+    scope = 'portfolio_media_upload'
+
+
+def _get_portfolio(user):
+    portfolio, _ = Portfolio.objects.get_or_create(user=user)
+    return portfolio
+
+
+@api_view(['GET', 'PATCH'])
+@permission_classes([permissions.IsAuthenticated])
+def portfolio_me_view(request):
+    """The signed-in learner's portfolio settings and identity.
+
+    Created lazily on first access so a student always has a portfolio row to
+    manage. ``PATCH`` updates only the portfolio-owned fields; sensitive
+    account data lives on ``UserProfile`` and is never writable through here.
+    """
+    portfolio = _get_portfolio(request.user)
+    if request.method == 'GET':
+        return Response(PortfolioSerializer(portfolio, context={'request': request}).data)
+    serializer = PortfolioSerializer(
+        portfolio, data=request.data, partial=True, context={'request': request},
+    )
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response(serializer.data)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def portfolio_publish_view(request):
+    """Publish the learner's portfolio for public viewing."""
+    portfolio = _get_portfolio(request.user)
+    portfolio.is_published = True
+    portfolio.save(update_fields=['is_published', 'updated_at'])
+    return Response(PortfolioSerializer(portfolio, context={'request': request}).data)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def portfolio_unpublish_view(request):
+    """Hide the learner's portfolio from public viewing."""
+    portfolio = _get_portfolio(request.user)
+    portfolio.is_published = False
+    portfolio.save(update_fields=['is_published', 'updated_at'])
+    return Response(PortfolioSerializer(portfolio, context={'request': request}).data)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def public_portfolio_view(request, username):
+    """Shareable public portfolio.
+
+    Returns 404 when the account is unknown/private or the portfolio has not
+    been published, so a probe cannot distinguish those cases. Only content the
+    owner approved for public display is ever serialized.
+    """
+    from django.contrib.auth import get_user_model
+
+    user = (
+        get_user_model().objects
+        .filter(username__iexact=username)
+        .select_related('profile')
+        .first()
+    )
+    profile = getattr(user, 'profile', None) if user else None
+    portfolio = getattr(user, 'portfolio', None) if user else None
+    if (
+        user is None or profile is None or portfolio is None
+        or not profile.is_profile_public or not portfolio.is_published
+    ):
+        return Response({'detail': 'Portfolio not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    return Response(PublicPortfolioSerializer(portfolio, context={'request': request}).data)
+
+
+class StudentProjectViewSet(viewsets.ModelViewSet):
+    """CRUD for the signed-in learner's portfolio projects.
+
+    Ownership is enforced server-side: the queryset is always scoped to the
+    request user, so a learner can never read, edit or delete another's
+    projects regardless of the id supplied.
+    """
+    serializer_class = StudentProjectSerializer
+    permission_classes = [permissions.IsAuthenticated, IsOwnerOrAdministrator]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['title', 'short_description', 'overview']
+    ordering_fields = ['display_order', 'created_at', 'updated_at', 'title']
+
+    def get_queryset(self):
+        qs = StudentProject.objects.filter(user=self.request.user).prefetch_related('images')
+        params = self.request.query_params
+        category = params.get('category')
+        if category:
+            qs = qs.filter(category=category)
+        visibility = params.get('visibility')
+        if visibility:
+            qs = qs.filter(visibility=visibility)
+        featured = params.get('featured')
+        if featured is not None:
+            qs = qs.filter(featured=featured.lower() in ('1', 'true'))
+        return qs
+
+    def get_throttles(self):
+        # Only guard the media-bearing writes, not plain reads/listing.
+        if self.action in ('create', 'update', 'partial_update', 'add_image', 'remove_image'):
+            return [PortfolioMediaThrottle()]
+        return []
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        next_order = (
+            StudentProject.objects.filter(user=user).aggregate(m=models_max('display_order'))['m']
+            or 0
+        ) + 1
+        serializer.save(user=user, display_order=next_order)
+
+    @action(detail=False, methods=['post'], url_path='reorder')
+    def reorder(self, request):
+        """Persist a new display order for the caller's projects."""
+        serializer = ProjectReorderSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        items = serializer.validated_data['items']
+        with transaction.atomic():
+            for item in items:
+                StudentProject.objects.filter(
+                    user=request.user, id=item['id']
+                ).update(display_order=item['display_order'])
+        return Response(self.get_serializer(
+            self.get_queryset(), many=True,
+        ).data)
+
+    @action(detail=True, methods=['post'], url_path='images')
+    def add_image(self, request, pk=None):
+        project = self.get_object()
+        serializer = ProjectImageSerializer(
+            data=request.data, context={'request': request},
+        )
+        serializer.is_valid(raise_exception=True)
+        next_order = project.images.count()
+        image = serializer.save(project=project, display_order=next_order)
+        return Response(ProjectImageSerializer(image, context={'request': request}).data,
+                        status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['delete'], url_path='images/(?P<image_id>[0-9]+)')
+    def remove_image(self, request, pk=None, image_id=None):
+        project = self.get_object()
+        image = get_object_or_404(project.images, pk=image_id)
+        if image.image:
+            image.image.delete(save=False)
+        image.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def models_max(field):
+    """Small helper so ``perform_create`` stays readable."""
+    from django.db.models import Max
+    return Max(field)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def public_project_detail_view(request, username, slug):
+    """A single public project detail page for a published portfolio."""
+    from django.contrib.auth import get_user_model
+
+    user = (
+        get_user_model().objects
+        .filter(username__iexact=username)
+        .select_related('profile')
+        .first()
+    )
+    profile = getattr(user, 'profile', None) if user else None
+    portfolio = getattr(user, 'portfolio', None) if user else None
+    if (
+        user is None or profile is None or portfolio is None
+        or not profile.is_profile_public or not portfolio.is_published
+    ):
+        return Response({'detail': 'Project not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    project = get_object_or_404(
+        StudentProject.objects.filter(user=user, visibility='public').prefetch_related('images'),
+        slug=slug,
+    )
+    return Response(StudentProjectPublicSerializer(
+        project, context={'request': request},
+    ).data)

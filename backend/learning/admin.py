@@ -10,6 +10,7 @@ from .models import (
     Skill, UserSkill, EmailVerificationToken, PasswordResetToken,
     AuthenticationAuditLog, PracticalClass, PracticalSubject, Practical,
     PracticalProgress, PracticalBookmark, LearningActivity,
+    Portfolio, StudentProject, ProjectImage,
 )
 
 User = get_user_model()
@@ -488,6 +489,29 @@ class ProjectAdmin(admin.ModelAdmin):
     search_fields = ['title', 'description']
     prepopulated_fields = {'slug': ('title',)}
     inlines = [ProjectMilestoneInline]
+
+
+class ProjectImageInline(admin.TabularInline):
+    model = ProjectImage
+    extra = 0
+
+
+@admin.register(Portfolio)
+class PortfolioAdmin(admin.ModelAdmin):
+    list_display = ['user', 'is_published', 'show_skills', 'show_achievements', 'updated_at']
+    list_filter = ['is_published', 'show_skills', 'show_achievements', 'show_learning_progress']
+    search_fields = ['user__username', 'headline']
+    readonly_fields = ['created_at', 'updated_at']
+
+
+@admin.register(StudentProject)
+class StudentProjectAdmin(admin.ModelAdmin):
+    list_display = ['title', 'user', 'category', 'status', 'featured', 'visibility', 'display_order']
+    list_filter = ['category', 'status', 'visibility', 'featured']
+    search_fields = ['title', 'short_description', 'user__username']
+    prepopulated_fields = {'slug': ('title',)}
+    ordering = ['user', 'display_order']
+    inlines = [ProjectImageInline]
 
 
 @admin.register(Challenge)

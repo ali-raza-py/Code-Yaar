@@ -23,6 +23,7 @@ router.register(r'practical-subjects', api_views.PracticalSubjectViewSet, basena
 router.register(r'practicals', api_views.PracticalViewSet, basename='practical')
 router.register(r'practical-progress', api_views.PracticalProgressViewSet, basename='practical-progress')
 router.register(r'practical-bookmarks', api_views.PracticalBookmarkViewSet, basename='practical-bookmark')
+router.register(r'portfolio/projects', api_views.StudentProjectViewSet, basename='student-project')
 router.register(r'admin/practical-classes', api_views.PracticalClassAdminViewSet, basename='admin-practical-class')
 router.register(r'admin/practical-subjects', api_views.PracticalSubjectAdminViewSet, basename='admin-practical-subject')
 router.register(r'admin/practicals', api_views.PracticalAdminViewSet, basename='admin-practical')
@@ -63,6 +64,13 @@ urlpatterns = [
 
     # Leaderboard
     path('leaderboard/', api_views.leaderboard_view, name='api-leaderboard'),
+
+    # Portfolio management (owner). These specific segments are matched before
+    # the ``portfolio/<username>/`` public routes below and before the router,
+    # so they never collide with ``portfolio/projects/``.
+    path('portfolio/me/', api_views.portfolio_me_view, name='api-portfolio-me'),
+    path('portfolio/publish/', api_views.portfolio_publish_view, name='api-portfolio-publish'),
+    path('portfolio/unpublish/', api_views.portfolio_unpublish_view, name='api-portfolio-unpublish'),
 
     # Course chapters
     path(
@@ -142,4 +150,13 @@ urlpatterns = [
 
     # Router URLs
     path('', include(router.urls)),
+
+    # Public portfolio routes are matched AFTER the router so that
+    # ``portfolio/projects/`` (an owner endpoint) is never captured here as a
+    # ``username``. The public project detail route is listed before the
+    # portfolio catch so ``<username>`` does not swallow ``projects``.
+    path('portfolio/<str:username>/projects/<slug:slug>/',
+         api_views.public_project_detail_view, name='api-portfolio-public-project'),
+    path('portfolio/<str:username>/',
+         api_views.public_portfolio_view, name='api-portfolio-public'),
 ]

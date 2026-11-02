@@ -352,5 +352,6 @@ REST_FRAMEWORK = {
         ),
         'auth_refresh': os.getenv('THROTTLE_AUTH_REFRESH', '120/min'),
         'avatar_upload': os.getenv('THROTTLE_AVATAR_UPLOAD', '10/min'),
+        'portfolio_media_upload': os.getenv('THROTTLE_PORTFOLIO_MEDIA_UPLOAD', '20/min'),
     },
 }
