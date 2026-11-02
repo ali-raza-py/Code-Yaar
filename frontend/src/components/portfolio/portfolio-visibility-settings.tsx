@@ -130,7 +130,7 @@ export function PortfolioVisibilitySettings({ portfolio: data }: { portfolio: Po
             >
               <span
                 className={cn(
-                  "absolute top-0.5 rounded-full bg-white shadow transition-transform",
+                  "absolute left-0.5 top-0.5 rounded-full bg-white shadow transition-transform",
                   state[key] ? "translate-x-5" : "translate-x-0.5",
                 )}
                 style={{ height: 18, width: 18 }}
