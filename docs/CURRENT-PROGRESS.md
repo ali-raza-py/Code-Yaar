@@ -52,14 +52,15 @@ checklist and final report of the Master Academy implementation.
 ## Frontend Checks
 
 - `tsc --noEmit` clean, ESLint clean (only two pre-existing `no-img-element`
-  warnings in the practicals workspace), `next build` succeeds (35 routes incl.
+  warnings in the practicals workspace), `next build` succeeds (38 routes incl.
   `/sign-in`, `/sign-up`, `/verify-email`, `/forgot-password`,
   `/reset-password`, `/certificates`, `/certificates/[id]`, `/achievements`,
   `/profile`, `/profile/[username]`, `/dashboard`, `/settings`, `/leaderboard`,
   `/verify/certificate/[id]`, `/verify/badge/[id]` and the legacy
   `/verify/[publicId]` resolver). `/profile/[username]` renders as a dynamic
-  server component (so `robots: noindex` can be set per-response) and is
-  reachable by anonymous visitors via the `(app)` layout browse-route rule.
+  server component (so `robots: noindex` can be set per-response) and lives in
+  the `(discovery)` group, whose adaptive chrome lets anonymous visitors reach
+  it; the `(app)` group stays fully `RequireAuth`-guarded.
 
 ## Remaining Gaps / Next Steps
 
