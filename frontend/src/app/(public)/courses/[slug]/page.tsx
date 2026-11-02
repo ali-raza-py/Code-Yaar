@@ -5,23 +5,11 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ApiError, courses as coursesApi } from '@/lib/api';
 import { useAuth } from '@/hooks/use-auth';
-import { Course, Chapter, Difficulty } from '@/types';
+import { Course, Chapter } from '@/types';
 import { NetworkError, NotFoundError } from '@/components/learning/workspace/error-states';
+import { DifficultyPill } from '@/components/ui/difficulty-pill';
 
 // ─── Components ─────────────────────────────────────────────────────────────
-
-function DifficultyBadge({ difficulty }: { difficulty: Difficulty }) {
-  const colors = {
-    beginner: 'bg-difficulty-easy-soft text-difficulty-easy',
-    intermediate: 'bg-difficulty-medium-soft text-difficulty-medium',
-    advanced: 'bg-difficulty-hard-soft text-difficulty-hard',
-  };
-  return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${colors[difficulty]}`}>
-      {difficulty}
-    </span>
-  );
-}
 
 function CheckIcon() {
   return (
@@ -218,7 +206,7 @@ export default function CourseLandingPage() {
 
           {/* Meta */}
           <div className="mt-6 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-            <DifficultyBadge difficulty={course.difficulty} />
+            <DifficultyPill difficulty={course.difficulty} />
             <span>{course.estimated_hours} hours</span>
             <span>{chapters.length} Chapters</span>
             <span>{course.lesson_count} Lessons</span>

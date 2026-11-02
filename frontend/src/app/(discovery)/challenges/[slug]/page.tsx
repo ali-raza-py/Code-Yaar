@@ -12,12 +12,8 @@ import type { ChallengeDetail, ChallengeRunResult, ChallengeSubmitResult } from 
 import { useAuth } from "@/hooks/use-auth";
 import CodeEditor from "@/components/learning/workspace/code-editor";
 import { TestResults } from "@/components/challenges/test-results";
-
-const DIFFICULTY_STYLES: Record<string, string> = {
-  beginner: "bg-difficulty-easy-soft text-difficulty-easy",
-  intermediate: "bg-difficulty-medium-soft text-difficulty-medium",
-  advanced: "bg-difficulty-hard-soft text-difficulty-hard",
-};
+import { useBadgeToasts } from "@/components/notifications/badge-toast";
+import { DifficultyPill } from "@/components/ui/difficulty-pill";
 
 const LANG_LABELS: Record<string, string> = { python: "Python", cpp: "C++" };
 
@@ -57,6 +53,7 @@ export default function ChallengeWorkspacePage() {
   const params = useParams<{ slug: string }>();
   const slug = params?.slug ?? "";
   const { isAuthenticated, emailVerified, refresh } = useAuth();
+  const { notify: notifyBadges } = useBadgeToasts();
   // Signed-out visitors read the problem freely; the auth round trip lands
   // them back on this exact challenge so the funnel never loses context.
   const joinHref = `/sign-up?next=${encodeURIComponent(`/challenges/${slug}`)}`;
@@ -156,6 +153,7 @@ export default function ChallengeWorkspacePage() {
         time_spent_seconds: Math.max(0, Math.round((Date.now() - startedAt.current) / 1000)),
       });
       setSubmitResult(result);
+      if (result.awarded_badges?.length) notifyBadges(result.awarded_badges);
       if (result.solved && !solved) {
         setSolved(true);
         await refresh(); // surface the newly awarded XP in the shell/dashboard
@@ -167,7 +165,6 @@ export default function ChallengeWorkspacePage() {
     }
   };
 
-  const difficultyClass = detail ? DIFFICULTY_STYLES[detail.difficulty] : "";
   const sampleInputs = useMemo(() => detail?.examples ?? [], [detail]);
 
   return (
@@ -182,7 +179,7 @@ export default function ChallengeWorkspacePage() {
             <h1 className="mt-2 truncate text-2xl font-semibold tracking-[-0.03em]">{detail?.title ?? "Challenge"}</h1>
             {detail && (
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
-                <span className={`rounded-pill px-2.5 py-1 font-bold capitalize ${difficultyClass}`}>{detail.difficulty}</span>
+                {detail && <DifficultyPill difficulty={detail.difficulty} size="sm" />}
                 <span className="rounded-md bg-[var(--challenge-surface-muted)] px-2 py-1 font-semibold text-[var(--challenge-text-soft)]">{detail.topic}</span>
                 <span className="inline-flex items-center gap-1 text-[var(--challenge-muted)]"><Clock3 aria-hidden="true" className="h-3.5 w-3.5" />{detail.estimated_minutes} min</span>
                 <span className="font-semibold text-success">+{detail.xp_reward} XP</span>

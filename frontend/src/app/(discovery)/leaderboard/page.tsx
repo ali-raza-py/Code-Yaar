@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { leaderboard as leaderboardApi, auth, ApiError, type LeaderboardEntry } from '@/lib/api';
+import { leaderboard as leaderboardApi, ApiError, type LeaderboardEntry } from '@/lib/api';
 import { useAuth } from '@/hooks/use-auth';
 import { NetworkError } from '@/components/learning/workspace/error-states';
+import { Avatar } from '@/components/ui/avatar';
 
 /**
  * PUBLIC leaderboard, dual mode by design: visitors see a top-10 teaser and
@@ -23,7 +24,9 @@ export default function LeaderboardPage() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
+  // The signed-in user's id comes straight from the auth context — no extra
+  // profile round trip needed to highlight their own row.
+  const currentUserId = user?.id ?? null;
 
   useEffect(() => {
     let cancelled = false;
@@ -40,19 +43,6 @@ export default function LeaderboardPage() {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
-  }, [user]);
-
-  useEffect(() => {
-    if (!user) { setCurrentUserId(null); return; }
-    let cancelled = false;
-    auth.getProfile()
-      .then((profile) => {
-        if (!cancelled) setCurrentUserId((profile as { user: { id: number } }).user.id);
-      })
-      .catch(() => {
-        // Profile read failed — rankings still show without the highlight.
-      });
     return () => { cancelled = true; };
   }, [user]);
 
@@ -126,15 +116,15 @@ export default function LeaderboardPage() {
                   {entry.rank <= 3 ? badge.icon : entry.rank}
                 </div>
 
-                {/* Avatar */}
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
-                  {entry.username.charAt(0).toUpperCase()}
-                </div>
+                {/* Avatar — shared initials primitive (no invented photos) */}
+                <Avatar username={entry.username} name={entry.username} size={36} />
 
                 {/* Username */}
                 <div className="flex-1 min-w-0">
                   <p className={`text-sm font-semibold truncate ${isCurrentUser ? 'text-primary' : 'text-foreground'}`}>
-                    {entry.username}
+                    <Link href={`/profile/${entry.username}`} className="hover:underline">
+                      {entry.username}
+                    </Link>
                     {isCurrentUser && <span className="ml-2 text-xs font-normal text-primary">(You)</span>}
                   </p>
                   <p className="text-xs text-muted-foreground">
