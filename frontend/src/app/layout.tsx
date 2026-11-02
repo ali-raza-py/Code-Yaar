@@ -38,9 +38,11 @@ export const metadata: Metadata = {
     "A platform for becoming better at actually building software. Learn concepts, build projects, prove your skills.",
   icons: {
     icon: [
-      { url: "/favicon.svg", type: "image/svg+xml" },
+      // Vector tile first: modern browsers scale it crisply on any DPI;
+      // src/app/favicon.ico (auto-linked by Next) covers legacy fallbacks.
+      { url: "/favicon.svg", type: "image/svg+xml", sizes: "any" },
     ],
-    apple: "/favicon.svg",
+    apple: "/apple-touch-icon.png",
   },
   openGraph: {
     title: "Code-Yaar — Think. Build. Evolve.",

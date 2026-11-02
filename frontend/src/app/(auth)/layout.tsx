@@ -11,6 +11,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
             src="/logo-light.png"
             alt="Code-Yaar"
             fill
+            sizes="32px"
             className="object-contain"
             priority
           />

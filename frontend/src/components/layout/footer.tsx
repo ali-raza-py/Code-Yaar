@@ -52,6 +52,7 @@ export function Footer() {
                   src="/logo-light.png"
                   alt="Code-Yaar"
                   fill
+                  sizes="24px"
                   className="object-contain"
                 />
               </div>

@@ -13,8 +13,8 @@ const MotionLink = motion.create(Link);
 // Visitor navigation uses discovery nouns; the student shell (/dashboard,
 // /learn…) never appears here — signed-in users get a single way back in.
 const navItems = [
-  { href: "/courses", label: "Courses" },
-  { href: "/tracks", label: "Tracks" },
+  { href: "/tracks", label: "Learning Tracks" },
+  { href: "/courses", label: "Explore Courses" },
   { href: "/leaderboard", label: "Leaderboard" },
   { href: "/about", label: "About" },
 ];
@@ -51,6 +51,7 @@ export function PublicHeader() {
               src="/logo-light.png"
               alt=""
               fill
+              sizes="28px"
               className="object-contain"
               priority
             />
