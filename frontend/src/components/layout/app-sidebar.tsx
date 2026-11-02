@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Award,
@@ -336,14 +336,15 @@ function TrackNode({
   const [open, setOpen] = useState(false);
   const [classes, setClasses] = useState<{ slug: string; label: string }[] | null>(null);
   const [error, setError] = useState(false);
-  const requested = useRef(false);
 
   const href = `/tracks/${track.slug}`;
   const loading = isBoard && open && classes === null && !error;
 
   useEffect(() => {
-    if (!isBoard || !open || requested.current) return;
-    requested.current = true;
+    // Guard on `classes === null` (state), not a persistent ref: under a
+    // StrictMode double-invoke the first cleanup cancels its own result, so
+    // the second run must be free to re-fetch and actually apply the data.
+    if (!isBoard || !open || classes !== null) return;
     let alive = true;
     (async () => {
       try {
@@ -364,7 +365,7 @@ function TrackNode({
     return () => {
       alive = false;
     };
-  }, [isBoard, open, track.slug]);
+  }, [isBoard, open, classes, track.slug]);
 
   return (
     <TreeRow
@@ -417,12 +418,12 @@ function LearningTracksNav({
   const [open, setOpen] = useState(true);
   const [tracks, setTracks] = useState<TrackSummary[] | null>(null);
   const [error, setError] = useState(false);
-  const requested = useRef(false);
   const loading = open && tracks === null && !error;
 
   useEffect(() => {
-    if (!open || requested.current) return;
-    requested.current = true;
+    // Same StrictMode-safe guard as TrackNode: rely on state, not a ref, so a
+    // re-mounted effect re-fetches instead of stranding the row on "Loading".
+    if (!open || tracks !== null) return;
     let alive = true;
     (async () => {
       try {
@@ -435,7 +436,7 @@ function LearningTracksNav({
     return () => {
       alive = false;
     };
-  }, [open]);
+  }, [open, tracks]);
 
   return (
     <TreeRow
@@ -582,47 +583,32 @@ function SidebarPanel({
       </nav>
 
       <div className="shrink-0 border-t border-white/10 p-3">
-        <div className="rounded-lg border border-white/10 bg-white/[0.045] p-3">
-          <div className="flex items-start justify-between gap-3 text-xs">
-            <div>
-              <p className="font-semibold text-white">Getting started</p>
-              <p className="mt-1 text-[11px] text-white/65">One small win today.</p>
-            </div>
-            <span className="font-bold text-[var(--sidebar-accent-soft)]">0/4</span>
-          </div>
-          <div className="mt-3 h-1 overflow-hidden rounded-full bg-white/10">
-            <div className="h-full min-w-1.5 w-0 rounded-full bg-[var(--sidebar-accent-strong)]" />
-          </div>
-        </div>
+        <Link
+          href="/profile"
+          onClick={onNavigate}
+          className="flex items-center gap-3 rounded-lg p-2 text-white transition-colors hover:bg-white/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]"
+        >
+          <Avatar
+            src={profile?.avatar}
+            name={displayName}
+            username={user?.username}
+            size={32}
+            className="shrink-0 ring-1 ring-white/25"
+          />
+          <span className="min-w-0">
+            <span className="block truncate text-xs font-semibold">{displayName}</span>
+            <span className="block text-[11px] text-white/65">View profile</span>
+          </span>
+        </Link>
 
-        <div className="mt-3 border-t border-white/10 pt-3">
-          <Link
-            href="/profile"
-            onClick={onNavigate}
-            className="flex items-center gap-3 rounded-lg p-2 text-white transition-colors hover:bg-white/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]"
-          >
-            <Avatar
-              src={profile?.avatar}
-              name={displayName}
-              username={user?.username}
-              size={32}
-              className="shrink-0 ring-1 ring-white/25"
-            />
-            <span className="min-w-0">
-              <span className="block truncate text-xs font-semibold">{displayName}</span>
-              <span className="block text-[11px] text-white/65">View profile</span>
-            </span>
-          </Link>
-
-          <button
-            type="button"
-            onClick={onSignOut}
-            className="mt-1 flex min-h-10 w-full items-center gap-3 rounded-lg px-2 text-sm font-medium text-red-200 transition-colors hover:bg-red-400/10 hover:text-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200"
-          >
-            <LogOut aria-hidden="true" className="h-5 w-5 stroke-[1.7]" />
-            <span>Sign out</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onSignOut}
+          className="mt-1 flex min-h-10 w-full items-center gap-3 rounded-lg px-2 text-sm font-medium text-red-200 transition-colors hover:bg-red-400/10 hover:text-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200"
+        >
+          <LogOut aria-hidden="true" className="h-5 w-5 stroke-[1.7]" />
+          <span>Sign out</span>
+        </button>
       </div>
     </div>
   );
