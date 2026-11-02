@@ -7,6 +7,7 @@ from .models import (
     UserAchievement, Progress, Certification, UserCertification,
     Skill, UserSkill, PracticalClass, PracticalSubject, Practical,
     PracticalProgress, PracticalBookmark, UserNotification,
+    UserProfile, Portfolio, StudentProject, ProjectImage,
 )
 
 
@@ -1123,3 +1124,396 @@ class ExerciseSubmitSerializer(serializers.Serializer):
     )
     # NOTE: any client-suggested 'xp_earned' / 'xp' is deliberately ignored —
     # the backend is the only authority on XP.
+
+
+# ─── Portfolio Serializers ─────────────────────────────────────────────────
+
+MAX_PROJECT_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MB
+ALLOWED_PROJECT_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
+MAX_FEATURED_PROJECTS = 3
+
+
+def _validate_project_image(image, field_name):
+    """Enforce type + size on an uploaded project image."""
+    if image is None:
+        return image
+    content_type = getattr(image, 'content_type', None)
+    if content_type and content_type not in ALLOWED_PROJECT_IMAGE_TYPES:
+        raise serializers.ValidationError({
+            field_name: 'Unsupported image type. Use JPEG, PNG or WebP.'
+        })
+    size = getattr(image, 'size', None)
+    if size is not None and size > MAX_PROJECT_IMAGE_BYTES:
+        raise serializers.ValidationError({
+            field_name: 'Image is too large. Maximum size is 5 MB.'
+        })
+    return image
+
+
+class ProjectImageSerializer(serializers.ModelSerializer):
+    image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProjectImage
+        fields = ['id', 'image', 'image_url', 'alt_text', 'display_order', 'created_at']
+        read_only_fields = ['created_at', 'image_url']
+
+    def get_image_url(self, obj):
+        request = self.context.get('request')
+        if not obj.image:
+            return ''
+        url = obj.image.url
+        if request is not None and url.startswith('/'):
+            return request.build_absolute_uri(url)
+        return url
+
+    def validate_image(self, value):
+        return _validate_project_image(value, 'image')
+
+
+class StudentProjectSerializer(serializers.ModelSerializer):
+    """Owner-facing read/write serializer for a portfolio project."""
+    images = ProjectImageSerializer(many=True, read_only=True)
+    category_label = serializers.CharField(source='get_category_display', read_only=True)
+    status_label = serializers.CharField(source='get_status_display', read_only=True)
+    cover_image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StudentProject
+        fields = [
+            'id', 'title', 'slug', 'short_description', 'overview',
+            'category', 'category_label', 'status', 'status_label',
+            'cover_image', 'cover_image_url', 'github_url', 'live_demo_url', 'docs_url',
+            'problem_statement', 'solution', 'technical_details',
+            'challenges', 'lessons_learned', 'contributions',
+            'technologies', 'start_date', 'completion_date',
+            'featured', 'display_order', 'visibility',
+            'images', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'slug', 'created_at', 'updated_at', 'display_order']
+
+    def get_cover_image_url(self, obj):
+        request = self.context.get('request')
+        if not obj.cover_image:
+            return ''
+        url = obj.cover_image.url
+        if request is not None and url.startswith('/'):
+            return request.build_absolute_uri(url)
+        return url
+
+    def validate_cover_image(self, value):
+        return _validate_project_image(value, 'cover_image')
+
+    def validate_technologies(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError('Technologies must be a list.')
+        cleaned = [str(v).strip() for v in value if str(v).strip()]
+        return cleaned[:40]
+
+    def _unique_slug(self, title, instance=None):
+        from django.utils.text import slugify
+        base = slugify(title) or 'project'
+        qs = StudentProject.objects.filter(user=self.context['request'].user)
+        if instance is not None:
+            qs = qs.exclude(pk=instance.pk)
+        slug = base
+        counter = 2
+        while qs.filter(slug=slug).exists():
+            slug = f'{base}-{counter}'
+            counter += 1
+        return slug
+
+    def validate(self, attrs):
+        title = attrs.get('title') or (self.instance.title if self.instance else '')
+        if self.instance is None:
+            attrs['slug'] = self._unique_slug(title)
+        elif 'title' in attrs and attrs['title'] != self.instance.title:
+            attrs['slug'] = self._unique_slug(attrs['title'], self.instance)
+
+        # Enforce the featured cap without double-counting the edited row.
+        if attrs.get('featured'):
+            user = self.context['request'].user
+            featured_qs = StudentProject.objects.filter(user=user, featured=True)
+            if self.instance is not None:
+                featured_qs = featured_qs.exclude(pk=self.instance.pk)
+            if featured_qs.count() >= MAX_FEATURED_PROJECTS:
+                raise serializers.ValidationError({
+                    'featured': f'You can feature at most {MAX_FEATURED_PROJECTS} projects.'
+                })
+        return attrs
+
+
+class StudentProjectPublicSerializer(serializers.ModelSerializer):
+    """Safe projection served through public endpoints (owner-filtered)."""
+    images = ProjectImageSerializer(many=True, read_only=True)
+    category_label = serializers.CharField(source='get_category_display', read_only=True)
+    status_label = serializers.CharField(source='get_status_display', read_only=True)
+    cover_image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StudentProject
+        fields = [
+            'id', 'title', 'slug', 'short_description', 'overview',
+            'category', 'category_label', 'status', 'status_label',
+            'cover_image_url', 'github_url', 'live_demo_url', 'docs_url',
+            'problem_statement', 'solution', 'technical_details',
+            'challenges', 'lessons_learned', 'contributions',
+            'technologies', 'start_date', 'completion_date',
+            'featured', 'images',
+        ]
+
+    def get_cover_image_url(self, obj):
+        request = self.context.get('request')
+        if not obj.cover_image:
+            return ''
+        url = obj.cover_image.url
+        if request is not None and url.startswith('/'):
+            return request.build_absolute_uri(url)
+        return url
+
+
+class ProjectReorderSerializer(serializers.Serializer):
+    """Validated list of {id, display_order} belonging to the requesting user."""
+    items = serializers.ListField(
+        child=serializers.DictField(child=serializers.IntegerField()),
+        allow_empty=False,
+    )
+
+    def validate_items(self, value):
+        user = self.context['request'].user
+        ids = [int(item['id']) for item in value]
+        owned = set(
+            StudentProject.objects.filter(user=user, id__in=ids).values_list('id', flat=True)
+        )
+        missing = [i for i in ids if i not in owned]
+        if missing:
+            raise serializers.ValidationError(
+                f'Unknown project ids for this user: {missing}'
+            )
+        return value
+
+
+class PortfolioSerializer(serializers.ModelSerializer):
+    """Owner-facing portfolio settings + identity pulled from ``UserProfile``."""
+    full_name = serializers.SerializerMethodField()
+    username = serializers.SerializerMethodField()
+    avatar_url = serializers.SerializerMethodField()
+    location = serializers.SerializerMethodField()
+    github_url = serializers.SerializerMethodField()
+    linkedin_url = serializers.SerializerMethodField()
+    website_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Portfolio
+        fields = [
+            'id', 'headline', 'about', 'interests', 'currently_learning',
+            'enjoys_building', 'is_published', 'show_skills', 'show_achievements',
+            'show_learning_progress', 'show_social_links', 'show_location',
+            'show_contact', 'created_at', 'updated_at',
+            'full_name', 'username', 'avatar_url', 'location',
+            'github_url', 'linkedin_url', 'website_url',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def _profile(self, obj):
+        return getattr(obj.user, 'profile', None)
+
+    def get_full_name(self, obj):
+        return obj.user.get_full_name().strip() or obj.user.username
+
+    def get_username(self, obj):
+        return obj.user.username
+
+    def get_avatar_url(self, obj):
+        profile = self._profile(obj)
+        return profile.avatar_url() if profile else ''
+
+    def get_location(self, obj):
+        profile = self._profile(obj)
+        return profile.location if profile else ''
+
+    def get_github_url(self, obj):
+        profile = self._profile(obj)
+        return profile.github_url if profile else ''
+
+    def get_linkedin_url(self, obj):
+        profile = self._profile(obj)
+        return profile.linkedin_url if profile else ''
+
+    def get_website_url(self, obj):
+        profile = self._profile(obj)
+        return profile.website_url if profile else ''
+
+
+class PublicPortfolioSerializer(serializers.ModelSerializer):
+    """Privacy-filtered public portfolio payload.
+
+    The view only reaches this serializer once the owner has published the
+    portfolio and keeps their account public, so it never needs to decide
+    whether the whole page is visible. Each section is still independently
+    gated by the owner's toggles, and skills/achievements/journey are derived
+    from real platform records - nothing here is fabricated or auto-written.
+    """
+    display_name = serializers.SerializerMethodField()
+    username = serializers.SerializerMethodField()
+    avatar = serializers.SerializerMethodField()
+    location = serializers.SerializerMethodField()
+    social_links = serializers.SerializerMethodField()
+    contact_enabled = serializers.SerializerMethodField()
+    about = serializers.SerializerMethodField()
+    projects = serializers.SerializerMethodField()
+    skills = serializers.SerializerMethodField()
+    achievements = serializers.SerializerMethodField()
+    learning_journey = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Portfolio
+        fields = [
+            'username', 'display_name', 'avatar', 'headline', 'location',
+            'social_links', 'contact_enabled', 'about', 'projects', 'skills',
+            'achievements', 'learning_journey',
+        ]
+
+    def _profile(self, obj):
+        return getattr(obj.user, 'profile', None)
+
+    def get_display_name(self, obj):
+        return obj.user.get_full_name().strip() or obj.user.username
+
+    def get_username(self, obj):
+        return obj.user.username
+
+    def get_avatar(self, obj):
+        profile = self._profile(obj)
+        return profile.avatar_url() if profile else ''
+
+    def get_location(self, obj):
+        profile = self._profile(obj)
+        if self.show_location and profile:
+            return profile.location
+        return ''
+
+    @property
+    def show_location(self):
+        return self.instance.show_location if self.instance else False
+
+    def get_social_links(self, obj):
+        profile = self._profile(obj)
+        if not obj.show_social_links or profile is None:
+            return {}
+        links = {}
+        for key in ('github_url', 'linkedin_url', 'website_url'):
+            value = getattr(profile, key, '')
+            if value:
+                links[key] = value
+        return links
+
+    def get_contact_enabled(self, obj):
+        return bool(obj.show_contact)
+
+    def get_about(self, obj):
+        return {
+            'text': obj.about,
+            'interests': obj.interests or [],
+            'currently_learning': obj.currently_learning,
+            'enjoys_building': obj.enjoys_building,
+        }
+
+    def get_projects(self, obj):
+        public_projects = (
+            StudentProject.objects
+            .filter(user=obj.user, visibility='public')
+            .prefetch_related('images')
+            .order_by('-featured', 'display_order', '-updated_at')
+        )
+        return StudentProjectPublicSerializer(
+            public_projects, many=True, context=self.context,
+        ).data
+
+    def _demonstrated_skill_names(self, obj):
+        """Skills backed by an actual completed course on the platform."""
+        names = set()
+        completed = Enrollment.objects.filter(
+            user=obj.user, status='completed'
+        ).select_related('course')
+        for enrollment in completed:
+            course = enrollment.course
+            if course.language:
+                names.add(course.language.lower())
+        return names
+
+    def get_skills(self, obj):
+        if not obj.show_skills:
+            return {'visible': False, 'groups': []}
+        profile_rows = UserSkill.objects.filter(
+            user=obj.user,
+        ).select_related('skill')
+        demonstrated = self._demonstrated_skill_names(obj)
+        proficiency_labels = dict(UserSkill.PROFICIENCY_CHOICES)
+        groups = {}
+        for row in profile_rows:
+            category = row.skill.category or 'Other'
+            groups.setdefault(category, []).append({
+                'name': row.skill.name,
+                'proficiency': row.proficiency,
+                'proficiency_label': proficiency_labels.get(row.proficiency, ''),
+                # Self-reported unless a completed Code Yaar course evidences it.
+                'demonstrated': row.skill.name.lower() in demonstrated,
+            })
+        return {
+            'visible': True,
+            'groups': [
+                {'category': category, 'items': items}
+                for category, items in sorted(groups.items())
+            ],
+        }
+
+    def get_achievements(self, obj):
+        profile = self._profile(obj)
+        show_badges = getattr(profile, 'show_badges', True) if profile else True
+        if not obj.show_achievements or not show_badges:
+            return {'visible': False, 'items': []}
+        earned = UserAchievement.objects.filter(
+            user=obj.user, status='active', achievement__is_active=True,
+        ).select_related('achievement').order_by('-earned_at')
+        items = [{
+            'slug': ua.achievement.slug,
+            'title': ua.achievement.title,
+            'description': ua.achievement.description,
+            'icon': ua.achievement.icon,
+            'category': ua.achievement.category,
+            'difficulty': ua.achievement.difficulty,
+            'earned_at': ua.earned_at.isoformat(),
+            'verification_url': ua.verification_url(),
+        } for ua in earned]
+        return {'visible': True, 'items': items}
+
+    def get_learning_journey(self, obj):
+        if not obj.show_learning_progress:
+            return {'visible': False, 'tracks_completed': [], 'courses_completed': []}
+        profile = self._profile(obj)
+        show_courses = getattr(profile, 'show_courses', True) if profile else True
+        tracks_completed, courses_completed = [], []
+        if show_courses:
+            completed = Enrollment.objects.filter(
+                user=obj.user, status='completed',
+            ).select_related('course', 'course__track')
+            seen_tracks = set()
+            for enrollment in completed:
+                course = enrollment.course
+                courses_completed.append({
+                    'title': course.title,
+                    'track': course.track.title,
+                    'completed_at': enrollment.completed_at.isoformat()
+                    if enrollment.completed_at else None,
+                })
+                if course.track.pk not in seen_tracks:
+                    seen_tracks.add(course.track.pk)
+                    tracks_completed.append({
+                        'slug': course.track.slug, 'title': course.track.title,
+                    })
+        return {
+            'visible': True,
+            'tracks_completed': tracks_completed,
+            'courses_completed': courses_completed,
+        }
