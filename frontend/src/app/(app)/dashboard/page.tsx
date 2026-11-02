@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowRight, Trophy, BookOpen } from "lucide-react";
+import { ArrowRight, Trophy, BookOpen, Award } from "lucide-react";
 import { leaderboard as leaderboardApi, profileStats } from "@/lib/api";
 import type { LeaderboardEntry, ProfileStatsData } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
 import { NetworkError } from "@/components/learning/workspace/error-states";
+import { AchievementIcon } from "@/components/achievements/achievement-icon";
 
 function timeAgo(iso: string): string {
   const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
@@ -228,6 +229,55 @@ export default function DashboardPage() {
               </div>
             </Link>
           </div>
+
+          {/* Achievements snapshot — earned badges + the next one in reach */}
+          {stats && (
+            <div className="card-hairline p-6">
+              <div className="flex items-center justify-between">
+                <h2 className="flex items-center gap-2 font-bold text-foreground">
+                  <Award className="h-5 w-5 text-primary" />
+                  Achievements
+                </h2>
+                <Link href="/achievements" className="text-sm font-medium text-primary hover:underline">
+                  View all
+                </Link>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {stats.stats.achievements_earned} of {stats.stats.total_achievements} badges earned
+              </p>
+              {(() => {
+                const earned = stats.achievements.filter((a) => a.earned).slice(0, 6);
+                if (earned.length === 0) {
+                  return (
+                    <p className="mt-4 text-sm text-muted-foreground">
+                      No badges yet — complete lessons, exercises and courses to earn your first one.
+                    </p>
+                  );
+                }
+                return (
+                  <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-6">
+                    {earned.map((b) => (
+                      <div key={b.id} className="flex flex-col items-center text-center">
+                        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+                          <AchievementIcon name={b.icon} className="h-6 w-6" />
+                        </span>
+                        <span className="mt-1 line-clamp-2 text-[10px] leading-tight text-muted-foreground">{b.title}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+              {stats.next_badge && (
+                <div className="mt-4 rounded-lg border border-border bg-background p-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Next badge</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">{stats.next_badge.title}</p>
+                  <div className="mt-2 h-1.5 w-full overflow-hidden rounded-pill bg-muted">
+                    <div className="h-full rounded-pill bg-primary" style={{ width: `${stats.next_badge.progress.target > 0 ? Math.min(100, Math.round((stats.next_badge.progress.current / stats.next_badge.progress.target) * 100)) : 0}%` }} />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* RIGHT — Sidebar (1/3) */}

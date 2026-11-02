@@ -6,21 +6,9 @@ import { AlertCircle, Check, Clock, FolderGit2, RotateCcw, Search } from "lucide
 import { ApiError, projects as projectsApi } from "@/lib/api";
 import { demoProjects } from "@/data/projects";
 import type { Project } from "@/types";
+import { DifficultyPill } from "@/components/ui/difficulty-pill";
 
 const DIFFICULTY_TABS = ["all", "beginner", "intermediate", "advanced"] as const;
-
-function DifficultyBadge({ difficulty }: { difficulty: Project["difficulty"] }) {
-  const colors: Record<Project["difficulty"], string> = {
-    beginner: "bg-difficulty-easy-soft text-difficulty-easy",
-    intermediate: "bg-difficulty-medium-soft text-difficulty-medium",
-    advanced: "bg-difficulty-hard-soft text-difficulty-hard",
-  };
-  return (
-    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ${colors[difficulty]}`}>
-      {difficulty}
-    </span>
-  );
-}
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -196,7 +184,7 @@ export default function ProjectsPage() {
                 <div className="p-5">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Project</span>
-                    <DifficultyBadge difficulty={project.difficulty} />
+                    <DifficultyPill difficulty={project.difficulty} />
                   </div>
                   <h3 className="mt-2 text-lg font-bold text-foreground group-hover:text-[var(--primary)]">{project.title}</h3>
                   <p className="mt-1 text-sm text-muted-foreground line-clamp-2">{project.description}</p>

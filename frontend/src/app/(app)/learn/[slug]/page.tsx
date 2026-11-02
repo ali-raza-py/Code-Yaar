@@ -14,6 +14,7 @@ import CodeEditor from '@/components/learning/workspace/code-editor';
 import OutputPanel from '@/components/learning/workspace/output-panel';
 import XPBadge from '@/components/learning/workspace/xp-badge';
 import CertificatePanel from '@/components/learning/certificate-panel';
+import { useBadgeToasts } from '@/components/notifications/badge-toast';
 
 const EDITOR_FILENAMES: Record<string, string> = {
   python: 'main.py',
@@ -46,6 +47,7 @@ function Workspace() {
   const searchParams = useSearchParams();
   const requestedLessonSlug = searchParams.get('lesson');
   const { user } = useAuth();
+  const { notify: notifyBadges } = useBadgeToasts();
 
   // Data
   const [course, setCourse] = useState<Course | null>(null);
@@ -273,6 +275,7 @@ function Workspace() {
       }
       const submitResult = await exercisesApi.submit(exercise.id, payload);
       setResult(submitResult);
+      if (submitResult.awarded_badges?.length) notifyBadges(submitResult.awarded_badges);
       if (submitResult.status === 'correct') {
         setXpAnimation(submitResult.xp_earned);
         setTimeout(() => setXpAnimation(null), 2000);
@@ -285,7 +288,7 @@ function Workspace() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [exercise, user, selectedAnswer, textAnswer, code, refreshProgress]);
+  }, [exercise, user, selectedAnswer, textAnswer, code, refreshProgress, notifyBadges]);
 
   const handleHint = useCallback(async () => {
     if (!exercise) return;
@@ -360,6 +363,7 @@ function Workspace() {
     try {
       const res = await coursesApi.completeLesson(lesson.id);
       setNotice(res.message);
+      if (res.awarded_badges?.length) notifyBadges(res.awarded_badges);
       if (res.status === 'completed') {
         if (res.xp_awarded > 0) {
           setXpAnimation(res.xp_awarded);
@@ -374,7 +378,7 @@ function Workspace() {
     } finally {
       setCompleting(false);
     }
-  }, [lesson, user, refreshProgress]);
+  }, [lesson, user, refreshProgress, notifyBadges]);
 
   const isCodeExercise = !exercise || exercise.exercise_type === 'code' || exercise.exercise_type === 'debugging';
 

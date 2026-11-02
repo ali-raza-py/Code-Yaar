@@ -1,17 +1,13 @@
 /**
  * Shared presentation helpers for the Tracks discovery layer. Labels and
- * tones live here so the list and detail pages never drift apart.
+ * tones live here so the list and detail pages never drift apart. The tone
+ * itself defers to the single governed difficulty primitive.
  */
-
-const DIFFICULTY_TONES: Record<string, string> = {
-  beginner: 'bg-difficulty-easy-soft text-difficulty-easy',
-  intermediate: 'bg-difficulty-medium-soft text-difficulty-medium',
-  advanced: 'bg-difficulty-hard-soft text-difficulty-hard',
-};
+import { difficultyTone } from '@/components/ui/difficulty-pill';
 
 /** Governed pill classes for a track/course difficulty value. */
 export function trackDifficultyTone(difficulty: string): string {
-  return DIFFICULTY_TONES[difficulty] ?? 'bg-muted text-muted-foreground';
+  return difficultyTone(difficulty);
 }
 
 /** "Class X" reads better as a section label than "class x" ever would. */
