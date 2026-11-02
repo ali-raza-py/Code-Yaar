@@ -138,7 +138,7 @@ export default function CertificatePanel({ courseSlug, enrolled }: Props) {
               Public link
             </Link>
             <Link
-              href="/certificates"
+              href="/progress?tab=certificates"
               className="focus-ring inline-flex min-h-9 items-center rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted/60"
             >
               All certificates

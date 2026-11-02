@@ -119,7 +119,7 @@ export default function DashboardPage() {
       {/* Top bar */}
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <div className="flex items-center gap-3"><h1 className="text-2xl font-bold text-foreground">My Activity</h1><Link href="/progress" className="rounded-lg bg-cta/10 px-3 py-1.5 text-xs font-bold text-cta hover:bg-cta/20">View progress</Link></div>
+          <div className="flex items-center gap-3"><h1 className="text-2xl font-bold text-foreground">My Activity</h1><Link href="/progress?tab=overview" className="rounded-lg bg-cta/10 px-3 py-1.5 text-xs font-bold text-cta hover:bg-cta/20">View progress</Link></div>
           <p className="mt-1 text-sm text-muted-foreground">Level {profile?.level ?? 1} · {displayName}</p>
         </div>
       </div>
@@ -238,7 +238,7 @@ export default function DashboardPage() {
                   <Award className="h-5 w-5 text-primary" />
                   Achievements
                 </h2>
-                <Link href="/achievements" className="text-sm font-medium text-primary hover:underline">
+                <Link href="/progress?tab=achievements" className="text-sm font-medium text-primary hover:underline">
                   View all
                 </Link>
               </div>

@@ -6,7 +6,6 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Award,
   Activity,
   BookOpen,
   ChevronDown,
@@ -14,7 +13,6 @@ import {
   ChevronRight,
   Dumbbell,
   FolderGit2,
-  FolderKanban,
   Home,
   Layers,
   LogOut,
@@ -22,7 +20,6 @@ import {
   Menu,
   Settings,
   Swords,
-  Trophy,
   User,
   X,
 } from "lucide-react";
@@ -71,14 +68,13 @@ const applyItems: NavItem[] = [
   },
 ];
 
-// My Account is preserved verbatim in this phase.
+// Student destinations, simplified to four entries: Progress and Profile
+// carry Achievements/Certificates and Portfolio as in-page tabs, so the
+// sidebar stays minimal while every experience remains one click away.
 const secondaryItems: NavItem[] = [
-  { href: "/progress", label: "Progress", icon: Activity },
+  { href: "/progress", label: "My Progress", icon: Activity },
   { href: "/leaderboard", label: "Leaderboard", icon: Medal, badge: "NEW" },
-  { href: "/achievements", label: "Achievements", icon: Trophy },
-  { href: "/certificates", label: "Certificates", icon: Award },
-  { href: "/profile", label: "Profile", icon: User },
-  { href: "/profile/portfolio", label: "Portfolio", icon: FolderKanban },
+  { href: "/profile", label: "My Profile", icon: User },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
