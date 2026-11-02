@@ -86,7 +86,7 @@ export function Avatar({ src, name, username, size = 40, className = "", alt }: 
     <span
       aria-hidden="true"
       className={`inline-flex shrink-0 select-none items-center justify-center font-bold uppercase ${round} ${toneFor(
-        username ?? name
+        username ?? name ?? undefined
       )} ${className}`.trim()}
       style={{ width: size, height: size, fontSize: Math.round(size * 0.4) }}
     >

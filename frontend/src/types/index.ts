@@ -71,6 +71,22 @@ export interface ChallengeRunResult {
   summary?: string;
 }
 
+/**
+ * A badge the server just awarded, echoed on a completion response so the
+ * client can raise a toast. Mirrors `BadgeUnlock` in the API client.
+ */
+export interface BadgeUnlockPayload {
+  slug: string;
+  title: string;
+  description: string;
+  icon: string;
+  category: string;
+  difficulty: string;
+  xp_bonus: number;
+  public_id: string;
+  credential_id: string;
+}
+
 export interface ChallengeSubmitResult {
   status: string;
   feedback: string;
@@ -84,6 +100,8 @@ export interface ChallengeSubmitResult {
   time_complexity?: string;
   space_complexity?: string;
   reference_solution?: string;
+  /** Badges unlocked by this submission — drives the unlock toast. */
+  awarded_badges?: BadgeUnlockPayload[];
 }
 
 export interface LearningPath {
@@ -281,6 +299,8 @@ export interface ExerciseResult {
   correct_answer?: unknown;
   explain?: string;
   attempt_id: number;
+  /** Badges unlocked by this action — drives the unlock toast. */
+  awarded_badges?: BadgeUnlockPayload[];
 }
 
 export interface TestResult {

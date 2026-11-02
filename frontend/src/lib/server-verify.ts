@@ -6,7 +6,11 @@
  * Only privacy-safe fields are consumed; nothing account-related is exposed.
  */
 
+import type { PublicProfileData } from '@/lib/api';
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+
+export type PublicProfileResult = PublicProfileData;
 
 export interface CertificateVerifyResult {
   found: boolean;
@@ -77,6 +81,15 @@ export function verifyBadgeServer(id: string) {
   return lookup<BadgeVerifyResult>(
     `/badges/verify/${encodeURIComponent(id)}/`
   );
+}
+
+/**
+ * Server-side public-profile lookup for the `/profile/[username]` route.
+ * Returns `missing` when the profile is private or the user is unknown (the
+ * API answers 404), so the page can set `robots: noindex` accordingly.
+ */
+export function fetchPublicProfileServer(username: string) {
+  return lookup<PublicProfileResult>(`/users/${encodeURIComponent(username)}/`);
 }
 
 export function badgeOgImageUrl(id: string): string {
