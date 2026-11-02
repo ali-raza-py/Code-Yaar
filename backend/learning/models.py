@@ -1011,6 +1011,164 @@ class ProjectMilestone(models.Model):
         ordering = ['project', 'order']
 
 
+class Portfolio(models.Model):
+    """A student's public developer portfolio.
+
+    Portfolio-specific identity and publish state live here, deliberately
+    separate from ``UserProfile``: a learner's account may be public while
+    their portfolio stays unpublished, and vice versa. A public view is only
+    served when ``is_published`` is true AND the owner's ``UserProfile`` is
+    public (enforced at the API edge).
+    """
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='portfolio',
+    )
+    headline = models.CharField(
+        max_length=160, blank=True, default='',
+        help_text='Short professional introduction shown under the name'
+    )
+    about = models.TextField(
+        blank=True, default='',
+        help_text='A concise self-written introduction (never auto-generated)'
+    )
+    interests = models.JSONField(
+        default=list, blank=True,
+        help_text='Areas of interest as a list of short strings'
+    )
+    currently_learning = models.CharField(max_length=200, blank=True, default='')
+    enjoys_building = models.CharField(max_length=200, blank=True, default='')
+
+    is_published = models.BooleanField(
+        default=False,
+        help_text='Publish the portfolio so it is viewable at /profile/<username>/portfolio'
+    )
+    # ── Section visibility (what a public visitor may see) ──
+    show_skills = models.BooleanField(default=True)
+    show_achievements = models.BooleanField(default=True)
+    show_learning_progress = models.BooleanField(default=True)
+    show_social_links = models.BooleanField(default=True)
+    show_location = models.BooleanField(default=True)
+    show_contact = models.BooleanField(
+        default=False,
+        help_text='Offer a contact affordance; the email itself is never exposed'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def owner_can_contact(self) -> bool:
+        return self.show_contact
+
+    def __str__(self):
+        return f"{self.user.username}'s portfolio"
+
+    class Meta:
+        ordering = ['-updated_at']
+
+
+class StudentProject(models.Model):
+    """A project a learner has actually built, shown on their portfolio.
+
+    Distinct from the curriculum ``Project`` model, which is a platform-defined
+    learning template. A ``StudentProject`` is owned by a learner, carries the
+    narrative behind the work (problem, decisions, challenges, lessons) and
+    links out to real repositories and demos. Nothing here is fabricated: a
+    demo/repo link is only shown when the owner supplied it.
+    """
+    CATEGORY_CHOICES = [
+        ('web_development', 'Web Development'),
+        ('ai', 'Artificial Intelligence'),
+        ('machine_learning', 'Machine Learning'),
+        ('backend', 'Backend Development'),
+        ('frontend', 'Frontend Development'),
+        ('mobile', 'Mobile Applications'),
+        ('developer_tools', 'Developer Tools'),
+        ('automation', 'Automation'),
+        ('data_science', 'Data Science'),
+        ('other', 'Other'),
+    ]
+    STATUS_CHOICES = [
+        ('in_progress', 'In progress'),
+        ('completed', 'Completed'),
+        ('archived', 'Archived'),
+    ]
+    VISIBILITY_CHOICES = [
+        ('public', 'Public'),
+        ('private', 'Private'),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='portfolio_projects',
+    )
+    title = models.CharField(max_length=200)
+    slug = models.SlugField(max_length=220)
+    short_description = models.CharField(max_length=300)
+    overview = models.TextField(blank=True, default='', help_text='Longer explanation of what/why')
+    category = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='other')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='completed')
+    cover_image = models.ImageField(
+        upload_to='portfolio-covers/', null=True, blank=True,
+        help_text='Cover image for the project card'
+    )
+    github_url = models.URLField(blank=True, default='')
+    live_demo_url = models.URLField(blank=True, default='')
+    docs_url = models.URLField(blank=True, default='')
+    problem_statement = models.TextField(blank=True, default='')
+    solution = models.TextField(blank=True, default='')
+    technical_details = models.TextField(blank=True, default='')
+    challenges = models.TextField(blank=True, default='')
+    lessons_learned = models.TextField(blank=True, default='')
+    contributions = models.TextField(blank=True, default='', help_text='The owner\'s role/contributions')
+    technologies = models.JSONField(
+        default=list, blank=True,
+        help_text='List of technology name strings used in the project'
+    )
+    start_date = models.DateField(null=True, blank=True)
+    completion_date = models.DateField(null=True, blank=True)
+    featured = models.BooleanField(default=False)
+    display_order = models.PositiveIntegerField(default=0)
+    visibility = models.CharField(
+        max_length=10, choices=VISIBILITY_CHOICES, default='public',
+        help_text='Private projects never appear through public endpoints'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.title}"
+
+    class Meta:
+        ordering = ['display_order', '-updated_at']
+        unique_together = ['user', 'slug']
+        indexes = [
+            models.Index(fields=['user', 'featured']),
+            models.Index(fields=['user', 'visibility']),
+        ]
+
+
+class ProjectImage(models.Model):
+    """Additional screenshots for a ``StudentProject``."""
+    project = models.ForeignKey(
+        StudentProject,
+        on_delete=models.CASCADE,
+        related_name='images',
+    )
+    image = models.ImageField(upload_to='portfolio-project-images/')
+    alt_text = models.CharField(max_length=200, blank=True, default='')
+    display_order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.project.title} image #{self.display_order}"
+
+    class Meta:
+        ordering = ['display_order']
+
+
 class Challenge(models.Model):
     """A standalone coding challenge (separate from course exercises).
 
