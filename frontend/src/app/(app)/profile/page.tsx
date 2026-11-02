@@ -2,28 +2,15 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { Award, BookOpen, Braces, Flame, GraduationCap, Medal, Sparkles, Star } from 'lucide-react';
+import { Award, FolderKanban, Globe, MapPin, Settings2, Star } from 'lucide-react';
 import { profileStats, ApiError, type ProfileStatsData } from '@/lib/api';
 import { NetworkError } from '@/components/learning/workspace/error-states';
+import { Avatar } from '@/components/ui/avatar';
+import { DifficultyPill } from '@/components/ui/difficulty-pill';
+import { AchievementIcon } from '@/components/achievements/achievement-icon';
 
 const PROFICIENCY_LABELS = ['', 'Novice', 'Beginner', 'Intermediate', 'Advanced', 'Expert'];
 const PROFICIENCY_COLORS = ['', 'bg-muted text-muted-foreground', 'bg-info/10 text-info', 'bg-success/15 text-success', 'bg-primary/10 text-primary', 'bg-warning/15 text-warning'];
-const BADGE_ICONS = {
-  course: GraduationCap,
-  chapter: BookOpen,
-  streak: Flame,
-  exercise: Braces,
-  skill: Sparkles,
-  special: Award,
-} as const;
-const BADGE_TONES = {
-  course: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
-  chapter: 'bg-sky-500/10 text-sky-700 dark:text-sky-300',
-  streak: 'bg-orange-500/10 text-orange-700 dark:text-orange-300',
-  exercise: 'bg-violet-500/10 text-violet-700 dark:text-violet-300',
-  skill: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
-  special: 'bg-primary/10 text-primary',
-} as const;
 
 export default function ProfilePage() {
   const [data, setData] = useState<ProfileStatsData | null>(null);
@@ -81,7 +68,6 @@ export default function ProfilePage() {
   }
 
   const { user, profile, stats, xp_history, skills, certifications, active_enrollments } = data;
-  const initials = `${user.first_name?.[0] || ''}${user.last_name?.[0] || ''}`.toUpperCase() || user.username[0].toUpperCase();
   const displayName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username;
   const memberSince = new Date(user.date_joined).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   const accuracy = stats.total_attempts > 0 ? Math.round((stats.correct_attempts / stats.total_attempts) * 100) : 0;
@@ -90,17 +76,13 @@ export default function ProfilePage() {
     <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
       {/* Profile Header */}
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center">
-        {/* Avatar */}
-        {profile.avatar ? (
-          <div className="h-20 w-20 shrink-0 overflow-hidden rounded-full bg-muted ring-4 ring-primary/20">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={profile.avatar} alt={displayName} className="h-full w-full object-cover" />
-          </div>
-        ) : (
-          <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary/60 to-primary text-2xl font-bold text-white ring-4 ring-primary/20">
-            {initials}
-          </div>
-        )}
+        <Avatar
+          src={profile.avatar}
+          name={displayName}
+          username={user.username}
+          size={80}
+          className="shrink-0 ring-4 ring-primary/20"
+        />
 
         <div className="flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -110,7 +92,36 @@ export default function ProfilePage() {
           <p className="text-sm text-muted-foreground">
             @{user.username} · {profile.role === 'mentor' ? 'Mentor' : 'Student'} · Member since {memberSince}
           </p>
+          {(profile.location || profile.website_url) && (
+            <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+              {profile.location && (
+                <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" aria-hidden="true" />{profile.location}</span>
+              )}
+              {profile.website_url && (
+                <a href={profile.website_url} target="_blank" rel="noopener noreferrer nofollow" className="inline-flex items-center gap-1 hover:text-primary hover:underline">
+                  <Globe className="h-3.5 w-3.5" aria-hidden="true" />Website
+                </a>
+              )}
+            </div>
+          )}
           {profile.bio && <p className="mt-1 text-sm text-muted-foreground">{profile.bio}</p>}
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1 rounded-pill border border-border bg-muted px-2 py-0.5">
+              <Globe className="h-3 w-3" aria-hidden="true" />
+              {profile.is_profile_public ? 'Public profile' : 'Private profile'}
+            </span>
+            {profile.is_profile_public && (
+              <Link href={`/profile/${user.username}`} className="font-semibold text-primary hover:underline">
+                View public page
+              </Link>
+            )}
+            <Link href="/settings?tab=profile" className="inline-flex items-center gap-1 font-semibold text-primary hover:underline">
+              <Settings2 className="h-3 w-3" aria-hidden="true" />Edit profile
+            </Link>
+            <Link href="/profile/portfolio" className="inline-flex items-center gap-1 font-semibold text-primary hover:underline">
+              <FolderKanban className="h-3 w-3" aria-hidden="true" />Manage portfolio
+            </Link>
+          </div>
         </div>
 
         {/* Level + XP Badge */}
@@ -179,39 +190,67 @@ export default function ProfilePage() {
             <p className="mb-3 text-xs text-muted-foreground">Verified learning milestones earned in your Code Yaar journey.</p>
             {data.achievements.length > 0 ? (
               <div className="grid gap-3 sm:grid-cols-2">
-                {data.achievements.map((badge) => {
-                  const Icon = BADGE_ICONS[badge.category as keyof typeof BADGE_ICONS] ?? Medal;
-                  const tone = BADGE_TONES[badge.category as keyof typeof BADGE_TONES] ?? 'bg-muted text-muted-foreground';
-                  return (
-                    <article key={badge.id} className={`flex min-w-0 items-start gap-3 rounded-card border p-3 transition-colors ${badge.earned ? 'border-border bg-card' : 'border-border/70 bg-muted/30 opacity-75'}`}>
-                      <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg ${badge.earned ? tone : 'bg-muted text-muted-foreground'}`}>
-                        <Icon className="h-5 w-5" aria-hidden="true" />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-                          <h3 className="text-sm font-semibold text-foreground">{badge.title}</h3>
-                          <span className={`text-[10px] font-semibold uppercase tracking-wide ${badge.earned ? 'text-success' : 'text-muted-foreground'}`}>{badge.earned ? 'Earned' : 'Locked'}</span>
-                        </div>
-                        <p className="mt-1 text-xs leading-5 text-muted-foreground">{badge.description}</p>
-                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
-                          <span className="capitalize">{badge.category}</span>
-                          {badge.xp_bonus > 0 && <span className="inline-flex items-center gap-1"><Star className="h-3 w-3 text-warning" /> {badge.xp_bonus} XP</span>}
-                          {badge.earned_at && <time dateTime={badge.earned_at}>Earned {new Date(badge.earned_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</time>}
-                        </div>
-                        {badge.earned && (
-                          <Link href="/achievements" className="focus-ring mt-2 inline-block text-[11px] font-semibold text-primary hover:underline">
-                            View badge &amp; share →
-                          </Link>
-                        )}
+                {data.achievements.map((badge) => (
+                  <article key={badge.id} className={`flex min-w-0 items-start gap-3 rounded-card border p-3 transition-colors ${badge.earned ? 'border-border bg-card' : 'border-border/70 bg-muted/30 opacity-75'}`}>
+                    <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg ${badge.earned ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
+                      <AchievementIcon name={badge.icon} className="h-5 w-5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+                        <h3 className="text-sm font-semibold text-foreground">{badge.title}</h3>
+                        <span className={`text-[10px] font-semibold uppercase tracking-wide ${badge.earned ? 'text-success' : 'text-muted-foreground'}`}>{badge.earned ? 'Earned' : 'Locked'}</span>
                       </div>
-                    </article>
-                  );
-                })}
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">{badge.description}</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+                        <DifficultyPill difficulty={badge.difficulty} label={badge.difficulty_label} size="sm" />
+                        {badge.xp_bonus > 0 && <span className="inline-flex items-center gap-1"><Star className="h-3 w-3 text-warning" /> {badge.xp_bonus} XP</span>}
+                        {badge.earned_at && <time dateTime={badge.earned_at}>Earned {new Date(badge.earned_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</time>}
+                      </div>
+                      {badge.earned && (
+                        <Link href="/achievements" className="focus-ring mt-2 inline-block text-[11px] font-semibold text-primary hover:underline">
+                          View badge &amp; share →
+                        </Link>
+                      )}
+                    </div>
+                  </article>
+                ))}
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">No badges are available yet.</p>
             )}
           </section>
+
+          {/* Next badge */}
+          {data.next_badge && (
+            <section>
+              <h2 className="text-base font-semibold text-foreground mb-3">Next badge</h2>
+              <div className="rounded-card border border-primary/30 bg-primary/5 p-4">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <Award className="h-5 w-5" aria-hidden="true" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm font-semibold text-foreground">{data.next_badge.title}</h3>
+                      <DifficultyPill difficulty={data.next_badge.difficulty} label={data.next_badge.difficulty_label} size="sm" />
+                    </div>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">{data.next_badge.how_to_earn}</p>
+                    <div className="mt-3">
+                      <div className="h-2 w-full overflow-hidden rounded-pill bg-muted">
+                        <div
+                          className="h-full rounded-pill bg-primary transition-all"
+                          style={{ width: `${data.next_badge.progress.target > 0 ? Math.min(100, Math.round((data.next_badge.progress.current / data.next_badge.progress.target) * 100)) : 0}%` }}
+                        />
+                      </div>
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        {data.next_badge.progress.current} / {data.next_badge.progress.target}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
 
           {/* Active Courses */}
           <section>

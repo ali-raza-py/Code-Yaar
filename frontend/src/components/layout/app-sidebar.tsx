@@ -16,6 +16,7 @@ import {
   Code2,
   Dumbbell,
   FolderGit2,
+  FolderKanban,
   Home,
   Layers,
   LogOut,
@@ -30,6 +31,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import { Avatar } from "@/components/ui/avatar";
 
 type QueryKey = "mode" | "view" | "track";
 
@@ -90,6 +92,7 @@ const secondaryItems: NavItem[] = [
   { href: "/achievements", label: "Achievements", icon: Trophy },
   { href: "/certificates", label: "Certificates", icon: Award },
   { href: "/profile", label: "Profile", icon: User },
+  { href: "/profile/portfolio", label: "Portfolio", icon: FolderKanban },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -240,9 +243,8 @@ function SidebarPanel({
   /** Present on desktop only; the mobile drawer closes with its own button. */
   onCollapse?: () => void;
 }) {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const displayName = user?.first_name || user?.username || "Your profile";
-  const initials = displayName.slice(0, 1).toUpperCase();
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--sidebar-bg)] text-white">
@@ -333,9 +335,13 @@ function SidebarPanel({
             onClick={onNavigate}
             className="flex items-center gap-3 rounded-lg p-2 text-white transition-colors hover:bg-white/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]"
           >
-            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[var(--sidebar-avatar-bg)] text-xs font-bold">
-              {initials}
-            </span>
+            <Avatar
+              src={profile?.avatar}
+              name={displayName}
+              username={user?.username}
+              size={32}
+              className="shrink-0 ring-1 ring-white/25"
+            />
             <span className="min-w-0">
               <span className="block truncate text-xs font-semibold">{displayName}</span>
               <span className="block text-[11px] text-white/65">View profile</span>
