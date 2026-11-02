@@ -73,7 +73,7 @@ function LearnContent() {
             <span className="text-[#2dbe52]">All courses</span>
           </nav>
           <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-bold sm:text-4xl">Courses</h1>
+            <h1 className="text-3xl font-bold sm:text-4xl">Explore Courses</h1>
             <span className="inline-flex items-center gap-1.5 rounded-full bg-[#2dbe52] px-3 py-1 text-xs font-bold"><BookOpen className="h-3.5 w-3.5" />Hands-on learning</span>
           </div>
           <p className="mt-3 text-white/70">Follow a structured path, practice the concept immediately, and build the confidence to use it in a real project.</p>

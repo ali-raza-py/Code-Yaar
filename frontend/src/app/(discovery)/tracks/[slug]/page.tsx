@@ -7,12 +7,17 @@ import { ArrowRight, Award, CheckCircle2, Clock, BookOpen, Target } from 'lucide
 import {
   ApiError,
   tracks as tracksApi,
+  practicals as practicalsApi,
   type TrackDetail,
 } from '@/lib/api';
-import type { Course } from '@/types';
+import type { Course, PracticalClass } from '@/types';
 import { useAuth } from '@/hooks/use-auth';
 import { NetworkError, NotFoundError } from '@/components/learning/workspace/error-states';
-import { formatAcademicClass, trackDifficultyTone } from '@/components/learning/tracks/shared';
+import {
+  canonicalClassSlug,
+  formatAcademicClass,
+  trackDifficultyTone,
+} from '@/components/learning/tracks/shared';
 
 /**
  * PUBLIC track detail: overview, objectives and the track's courses in the
@@ -85,6 +90,73 @@ function CourseRow({ course, index, signedIn }: { course: Course; index: number;
   );
 }
 
+/** A board class: its published theory course(s) plus any matching practicals. */
+interface BoardClass {
+  label: string;
+  slug: string;
+  courses: Course[];
+  practical: PracticalClass | null;
+}
+
+/**
+ * Class selection card for a Sindh Board track. Reads as an academic program
+ * (Class X / XI / XII), pairing theory with the class's practical work and
+ * showing only real, derived progress. Empty availability is stated honestly.
+ */
+function ClassCard({ trackSlug, cls }: { trackSlug: string; cls: BoardClass }) {
+  const enrolled = cls.courses.some((course) => course.enrolled);
+  const lessons = cls.courses.reduce((sum, course) => sum + (course.lesson_count ?? 0), 0);
+  const progress = enrolled
+    ? Math.round(cls.courses.reduce((sum, course) => sum + (course.progress_percentage ?? 0), 0) / cls.courses.length)
+    : 0;
+  const head = cls.courses[0];
+  return (
+    <Link
+      href={`/tracks/${trackSlug}/${cls.slug}`}
+      className="group flex flex-col rounded-card border border-border bg-card p-5 transition-colors hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+        {formatAcademicClass(cls.label)}
+      </span>
+      <h3 className="mt-1 font-bold text-foreground group-hover:text-primary">
+        {head ? head.title : `${formatAcademicClass(cls.label)} — Computer Science`}
+      </h3>
+      <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+        {head?.subtitle || head?.description || 'Theory and practical work for this class.'}
+      </p>
+      <dl className="mt-3 space-y-1 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between gap-3">
+          <dt className="font-medium">Theory</dt>
+          <dd>{lessons > 0 ? `${lessons} lesson${lessons === 1 ? '' : 's'}` : 'Not published yet'}</dd>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <dt className="font-medium">Practicals</dt>
+          <dd>
+            {cls.practical
+              ? `${cls.practical.subject_count} subject${cls.practical.subject_count === 1 ? '' : 's'}`
+              : 'Not published yet'}
+          </dd>
+        </div>
+      </dl>
+      {enrolled && (
+        <div className="mt-3">
+          <div className="flex items-center justify-between text-xs font-medium">
+            <span className="text-muted-foreground">Your progress</span>
+            <span className="text-foreground">{progress}%</span>
+          </div>
+          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full bg-cta" style={{ width: `${Math.max(progress, 2)}%` }} />
+          </div>
+        </div>
+      )}
+      <span className="mt-auto flex items-center gap-1 pt-4 text-sm font-semibold text-primary">
+        Open class
+        <ArrowRight aria-hidden="true" className="h-4 w-4" />
+      </span>
+    </Link>
+  );
+}
+
 export default function TrackDetailPage() {
   const params = useParams<{ slug: string }>();
   const { isAuthenticated } = useAuth();
@@ -93,6 +165,9 @@ export default function TrackDetailPage() {
   const [error, setError] = useState<'network' | 'not_found' | null>(null);
   const [enrolling, setEnrolling] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // Board tracks pair each class with its practical work; fetch published
+  // practical classes once so class cards can show real availability.
+  const [practicalClasses, setPracticalClasses] = useState<PracticalClass[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -112,6 +187,21 @@ export default function TrackDetailPage() {
     (async () => { await load(); })();
   }, [load]);
 
+  const isBoard = track?.category === 'school_board';
+  useEffect(() => {
+    if (!isBoard) return;
+    let alive = true;
+    (async () => {
+      try {
+        const data = await practicalsApi.classes();
+        if (alive) setPracticalClasses(data);
+      } catch {
+        // Practicals are optional; an unreachable list simply shows none.
+      }
+    })();
+    return () => { alive = false; };
+  }, [isBoard]);
+
   // Courses arrive ordered by the admin-set sequence; group them under their
   // academic class when the track is a board path (Class X → XI → XII).
   const sections = useMemo(() => {
@@ -127,6 +217,27 @@ export default function TrackDetailPage() {
     }
     return out;
   }, [track]);
+
+  // Board classes, ordered by the track's course sequence, each bound to its
+  // published practical class by a normalized label match (no DB relation).
+  const boardClasses = useMemo<BoardClass[]>(() => {
+    if (!isBoard) return [];
+    const groups = new Map<string, { label: string; courses: Course[] }>();
+    for (const course of track?.courses ?? []) {
+      const label = course.academic_class || 'Class';
+      const group = groups.get(label) ?? { label, courses: [] };
+      group.courses.push(course);
+      groups.set(label, group);
+    }
+    return Array.from(groups.values()).map((group) => {
+      const slug = canonicalClassSlug(group.label);
+      const practical =
+        practicalClasses.find(
+          (pc) => canonicalClassSlug(pc.slug) === slug || canonicalClassSlug(pc.title) === slug,
+        ) ?? null;
+      return { label: group.label, slug, courses: group.courses, practical };
+    });
+  }, [isBoard, track, practicalClasses]);
 
   const handleEnroll = async () => {
     if (!track) return;
@@ -170,7 +281,7 @@ export default function TrackDetailPage() {
     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 lg:px-8">
       <nav className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         <Link href="/tracks" className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:text-foreground">
-          Tracks
+          Learning Tracks
         </Link>
         <span aria-hidden="true">/</span>
         <span className="text-foreground">{track.title}</span>
@@ -294,34 +405,59 @@ export default function TrackDetailPage() {
         </section>
       )}
 
-      <section aria-labelledby="courses-heading" className="mt-6">
-        <h2 id="courses-heading" className="text-lg font-bold text-foreground">
-          Courses in this track
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Followed in the recommended order below — each course opens its own lessons,
-          exercises and assessments.
-        </p>
-        {sections.map((section, sectionIndex) => (
-          <div key={section.label ?? 'all'} className="mt-4">
-            {section.label && (
-              <h3 className="mb-2 text-xs font-bold uppercase tracking-[0.12em] text-muted-foreground">
-                {sectionIndex === 0 && !enrolled ? `${section.label} · Start here` : section.label}
-              </h3>
-            )}
-            <ul className="space-y-3">
-              {section.courses.map((course) => (
-                <CourseRow
-                  key={course.id}
-                  course={course}
-                  index={track.courses.indexOf(course) + 1}
-                  signedIn={isAuthenticated}
-                />
+      {isBoard ? (
+        <section aria-labelledby="classes-heading" className="mt-6">
+          <h2 id="classes-heading" className="text-lg font-bold text-foreground">
+            Choose a class
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Every class pairs its theory courses with the matching practical work.
+          </p>
+          {boardClasses.length === 0 ? (
+            <div className="mt-4 rounded-card border border-dashed border-border bg-card p-10 text-center">
+              <h3 className="font-semibold">No classes published yet</h3>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Verified class content will appear here once it is published.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {boardClasses.map((cls) => (
+                <ClassCard key={cls.slug} trackSlug={track.slug} cls={cls} />
               ))}
-            </ul>
-          </div>
-        ))}
-      </section>
+            </div>
+          )}
+        </section>
+      ) : (
+        <section aria-labelledby="courses-heading" className="mt-6">
+          <h2 id="courses-heading" className="text-lg font-bold text-foreground">
+            Courses in this track
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Followed in the recommended order below — each course opens its own lessons,
+            exercises and assessments.
+          </p>
+          {sections.map((section, sectionIndex) => (
+            <div key={section.label ?? 'all'} className="mt-4">
+              {section.label && (
+                <h3 className="mb-2 text-xs font-bold uppercase tracking-[0.12em] text-muted-foreground">
+                  {sectionIndex === 0 && !enrolled ? `${section.label} · Start here` : section.label}
+                </h3>
+              )}
+              <ul className="space-y-3">
+                {section.courses.map((course) => (
+                  <CourseRow
+                    key={course.id}
+                    course={course}
+                    index={track.courses.indexOf(course) + 1}
+                    signedIn={isAuthenticated}
+                  />
+                ))}
+              </ul>
+            </div>
+          ))}
+        </section>
+      )}
     </div>
   );
 }
