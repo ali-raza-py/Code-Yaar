@@ -38,7 +38,16 @@ class UserProfile(models.Model):
     # ``notification_preferences``; unknown keys are rejected at the API edge.
     NOTIFICATION_PREFERENCE_KEYS = (
         'achievements', 'learning_reminders', 'streak_reminders',
-        'community', 'announcements',
+        'community', 'announcements', 'competitions',
+    )
+    # Optional email categories. Security mail (verification, password
+    # changes) deliberately has no key here: it is never optional.
+    EMAIL_NOTIFICATION_PREFERENCE_KEYS = (
+        'email_learning', 'email_competitions', 'email_achievements',
+        'email_certificates', 'email_announcements',
+    )
+    EMAIL_DIGEST_CHOICES = (
+        ('none', 'No digest'), ('daily', 'Daily digest'), ('weekly', 'Weekly digest'),
     )
 
     user = models.OneToOneField(
@@ -923,28 +932,80 @@ class UserNotification(models.Model):
     event actually happened (badge truly unlocked, streak truly extended,
     course truly completed). ``read_at`` marks the moment the learner saw
     and dismissed it.
+
+    ``type`` records what happened, ``category`` drives the notification
+    center filters, and ``dedupe_key`` lets repeatable code paths (commands,
+    concurrent requests, replays) announce the same event exactly once.
     """
 
     class Type(models.TextChoices):
+        # Legacy types — kept so historical rows stay valid; new services map
+        # richer events onto the additions below.
         BADGE_UNLOCK = 'badge_unlock', 'Badge unlocked'
         STREAK_RECORD = 'streak_record', 'New streak record'
         TRACK_COMPLETE = 'track_complete', 'Learning track completed'
         XP_MILESTONE = 'xp_milestone', 'XP milestone reached'
+        # Account & security
+        WELCOME = 'welcome', 'Welcome to Code Yaar'
+        EMAIL_VERIFIED = 'email_verified', 'Email verified'
+        PASSWORD_CHANGED = 'password_changed', 'Password changed'
+        ACCOUNT_SECURITY = 'account_security', 'Account security update'
+        # Learning & practice
+        COURSE_ENROLLED = 'course_enrolled', 'Course enrolled'
+        COURSE_COMPLETED = 'course_completed', 'Course completed'
+        STREAK_MILESTONE = 'streak_milestone', 'Streak milestone reached'
+        CHALLENGE_SOLVED = 'challenge_solved', 'Challenge solved'
+        # Competitions
+        COMPETITION_REGISTERED = 'competition_registered', 'Competition registration confirmed'
+        COMPETITION_APPROVED = 'competition_approved', 'Competition registration approved'
+        COMPETITION_REJECTED = 'competition_rejected', 'Competition registration rejected'
+        COMPETITION_REMINDER = 'competition_reminder', 'Competition reminder'
+        TEAM_INVITATION = 'team_invitation', 'Competition team invitation'
+        COMP_SUBMISSION_RECEIVED = 'submission_received', 'Competition submission received'
+        COMP_SUBMISSION_REVIEWED = 'submission_reviewed', 'Competition submission reviewed'
+        COMP_RESULTS_PUBLISHED = 'results_published', 'Competition results published'
+        # Credentials & platform
+        CERTIFICATE_ISSUED = 'certificate_issued', 'Certificate issued'
+        ANNOUNCEMENT = 'announcement', 'Platform announcement'
+
+    class Category(models.TextChoices):
+        LEARNING = 'learning', 'Learning'
+        COMPETITION = 'competition', 'Competitions'
+        ACCOUNT = 'account', 'Account'
+        ANNOUNCEMENT = 'announcement', 'Announcements'
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='notifications'
     )
-    type = models.CharField(max_length=20, choices=Type.choices)
+    type = models.CharField(max_length=40, choices=Type.choices)
+    category = models.CharField(
+        max_length=20, choices=Category.choices, default=Category.LEARNING,
+        help_text='Notification center filter group; derived from the type',
+    )
     title = models.CharField(max_length=200)
     body = models.TextField(blank=True, default='')
     link = models.CharField(
         max_length=300, blank=True, default='',
         help_text='In-app path the notification opens, e.g. /achievements'
     )
+    related_object_type = models.CharField(
+        max_length=50, blank=True, default='',
+        help_text='Loose identifier of the backing object, e.g. "competition"',
+    )
+    related_object_id = models.CharField(
+        max_length=64, blank=True, default='',
+        help_text='Natural identifier of the backing object (pk, slug or credential id)',
+    )
+    dedupe_key = models.CharField(
+        max_length=150, null=True, blank=True, unique=True,
+        help_text=('Event-derived idempotency token; a repeatable code path '
+                   'writing the same key is a no-op'),
+    )
     read_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True, null=True)
 
     def __str__(self):
         return f"{self.user.username}: {self.title}"
@@ -953,10 +1014,70 @@ class UserNotification(models.Model):
     def is_unread(self) -> bool:
         return self.read_at is None
 
+    @property
+    def is_read(self) -> bool:
+        return self.read_at is not None
+
     class Meta:
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['user', 'read_at'], name='notif_user_read'),
+            models.Index(
+                fields=['user', 'read_at', 'category'], name='notif_user_read_cat',
+            ),
+            models.Index(fields=['user', '-created_at'], name='notif_user_created'),
+        ]
+
+
+class NotificationEmailLog(models.Model):
+    """Delivery ledger for every event-triggered email, keyed for idempotency.
+
+    ``email_key`` is an event-derived string (e.g. ``comp-reg:42``). The first
+    claim creates the row inside the caller's transaction; the send itself
+    only runs after that transaction commits. A ``sent`` or ``render_only``
+    row turns later replays of the same event into no-ops, so command loops
+    and concurrent requests can never mail the same event twice. Failures
+    store an abbreviated transport reason — never credentials or bodies —
+    which keeps retries possible and silent failures impossible.
+    """
+
+    class Status(models.TextChoices):
+        QUEUED = 'queued', 'Queued for delivery after commit'
+        SENT = 'sent', 'Sent'
+        RENDER_ONLY = 'render_only', 'Rendered locally (no real transport configured)'
+        FAILED = 'failed', 'Failed'
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='notification_email_log',
+    )
+    notification = models.ForeignKey(
+        UserNotification,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='email_log',
+    )
+    email_key = models.CharField(max_length=180, unique=True)
+    kind = models.CharField(
+        max_length=60,
+        help_text="Email preference kind, e.g. 'email_learning' or 'security'",
+    )
+    category = models.CharField(max_length=20, blank=True, default='')
+    subject = models.CharField(max_length=200)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.QUEUED)
+    error = models.CharField(max_length=500, blank=True, default='')
+    attempted_at = models.DateTimeField(null=True, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.email_key}: {self.status}"
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'created_at'], name='notif_email_user_created'),
         ]
 
 
@@ -1515,6 +1636,152 @@ class ChallengeSubmission(models.Model):
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['user', 'challenge', 'status']),
+        ]
+
+
+class Competition(models.Model):
+    """A published learner competition managed by an authorized organizer."""
+
+    FORMAT_CHOICES = [('individual', 'Individual'), ('team', 'Team'), ('both', 'Individual or team')]
+    DELIVERY_CHOICES = [('online', 'Online'), ('offline', 'Offline'), ('hybrid', 'Hybrid')]
+    DIFFICULTY_CHOICES = [('beginner', 'Beginner'), ('intermediate', 'Intermediate'), ('advanced', 'Advanced')]
+
+    organizer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='organized_competitions')
+    title = models.CharField(max_length=200)
+    slug = models.SlugField(max_length=220, unique=True)
+    short_description = models.CharField(max_length=400)
+    description = models.TextField()
+    banner = models.ImageField(upload_to='competition-banners/%Y/', blank=True, default='')
+    category = models.CharField(max_length=80)
+    difficulty = models.CharField(max_length=20, choices=DIFFICULTY_CHOICES, default='beginner')
+    format = models.CharField(max_length=20, choices=FORMAT_CHOICES, default='individual')
+    delivery_mode = models.CharField(max_length=20, choices=DELIVERY_CHOICES, default='online')
+    location = models.CharField(max_length=250, blank=True, default='')
+    registration_start = models.DateTimeField()
+    registration_deadline = models.DateTimeField()
+    competition_start = models.DateTimeField()
+    competition_end = models.DateTimeField()
+    submission_deadline = models.DateTimeField()
+    judging_end = models.DateTimeField(null=True, blank=True)
+    results_announcement = models.DateTimeField(null=True, blank=True)
+    participant_limit = models.PositiveIntegerField(null=True, blank=True)
+    minimum_team_size = models.PositiveIntegerField(default=1)
+    maximum_team_size = models.PositiveIntegerField(default=1)
+    eligibility_rules = models.JSONField(default=list, blank=True)
+    competition_rules = models.JSONField(default=list, blank=True)
+    problem_statement = models.TextField(blank=True, default='')
+    submission_configuration = models.JSONField(default=dict, blank=True)
+    prize_information = models.TextField(blank=True, default='')
+    is_published = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['is_published', 'registration_deadline'])]
+
+    def __str__(self):
+        return self.title
+
+    @property
+    def status(self):
+        if not self.is_published:
+            return 'draft'
+        now = timezone.now()
+        if now < self.registration_start:
+            return 'upcoming'
+        if now <= self.registration_deadline:
+            if (self.registration_deadline - now).total_seconds() <= 72 * 3600:
+                return 'registration_closing_soon'
+            return 'registration_open'
+        if now < self.competition_start:
+            return 'registration_closed'
+        if now <= self.submission_deadline:
+            return 'submission_open' if now > self.competition_end else 'ongoing'
+        if self.judging_end and now <= self.judging_end:
+            return 'judging'
+        return 'completed'
+
+
+class CompetitionRegistration(models.Model):
+    STATUS_CHOICES = [
+        ('registered', 'Registered'), ('pending', 'Pending Approval'),
+        ('approved', 'Approved'), ('rejected', 'Rejected'),
+        ('withdrawn', 'Withdrawn'), ('disqualified', 'Disqualified'),
+    ]
+    competition = models.ForeignKey(Competition, on_delete=models.CASCADE, related_name='registrations')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='competition_registrations')
+    team = models.ForeignKey('CompetitionTeam', on_delete=models.SET_NULL, null=True, blank=True, related_name='registrations')
+    registration_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='registered')
+    registration_data = models.JSONField(default=dict, blank=True)
+    rules_accepted_at = models.DateTimeField()
+    registered_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['competition', 'user'], name='unique_competition_registration'),
+        ]
+        ordering = ['-registered_at']
+
+
+class CompetitionTeam(models.Model):
+    competition = models.ForeignKey(Competition, on_delete=models.CASCADE, related_name='teams')
+    name = models.CharField(max_length=120)
+    leader = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='competition_teams_led')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['competition', 'name'], name='unique_competition_team_name'),
+        ]
+
+
+class CompetitionTeamMember(models.Model):
+    INVITATION_CHOICES = [('pending', 'Pending'), ('accepted', 'Accepted'), ('rejected', 'Rejected')]
+    team = models.ForeignKey(CompetitionTeam, on_delete=models.CASCADE, related_name='members')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='competition_team_memberships')
+    invitation_status = models.CharField(max_length=20, choices=INVITATION_CHOICES, default='pending')
+    joined_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['team', 'user'], name='unique_team_member'),
+        ]
+
+
+class CompetitionSubmission(models.Model):
+    STATUS_CHOICES = [
+        ('draft', 'Draft'), ('submitted', 'Submitted'), ('under_review', 'Under Review'),
+        ('accepted', 'Accepted'), ('rejected', 'Rejected'), ('needs_revision', 'Needs Revision'),
+    ]
+    registration = models.OneToOneField(CompetitionRegistration, on_delete=models.CASCADE, related_name='submission')
+    project_title = models.CharField(max_length=200, blank=True, default='')
+    description = models.TextField(blank=True, default='')
+    github_url = models.URLField(blank=True, default='')
+    demo_url = models.URLField(blank=True, default='')
+    additional_data = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    organizer_feedback = models.TextField(blank=True, default='')
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+
+class CompetitionResult(models.Model):
+    competition = models.ForeignKey(Competition, on_delete=models.CASCADE, related_name='results')
+    registration = models.OneToOneField(CompetitionRegistration, on_delete=models.CASCADE, related_name='result')
+    rank = models.PositiveIntegerField()
+    final_score = models.DecimalField(max_digits=7, decimal_places=2)
+    award = models.CharField(max_length=120, blank=True, default='')
+    is_published = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['rank', '-final_score']
+        constraints = [
+            models.UniqueConstraint(fields=['competition', 'rank'], name='unique_competition_rank'),
         ]
 
 

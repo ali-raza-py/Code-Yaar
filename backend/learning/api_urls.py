@@ -27,6 +27,7 @@ router.register(r'portfolio/projects', api_views.StudentProjectViewSet, basename
 router.register(r'admin/practical-classes', api_views.PracticalClassAdminViewSet, basename='admin-practical-class')
 router.register(r'admin/practical-subjects', api_views.PracticalSubjectAdminViewSet, basename='admin-practical-subject')
 router.register(r'admin/practicals', api_views.PracticalAdminViewSet, basename='admin-practical')
+router.register(r'competitions', api_views.CompetitionViewSet, basename='competition')
 
 urlpatterns = [
     # Authentication lives in `learning.auth_urls` (mounted at /api/auth/).
@@ -38,16 +39,23 @@ urlpatterns = [
     # Profile picture upload / removal (multipart, throttled)
     path('profile/avatar/', api_views.avatar_view, name='api-avatar'),
 
-    # Account-level notification preferences
+    # Notification preferences: both the long-standing profile route and the
+    # notifications-scoped alias (GET shows effective values, PATCH updates).
     path('profile/preferences/', api_views.notification_preferences_view,
          name='api-notification-preferences'),
+    path('notifications/preferences/', api_views.notification_preferences_api_view,
+         name='api-notification-preferences-alias'),
 
     # In-app notifications
     path('notifications/', api_views.notifications_view, name='api-notifications'),
+    path('notifications/unread-count/', api_views.notifications_unread_count_view,
+         name='api-notifications-unread-count'),
     path('notifications/read-all/', api_views.notifications_read_all_view,
          name='api-notifications-read-all'),
     path('notifications/<int:pk>/read/', api_views.notification_read_view,
          name='api-notification-read'),
+    path('notifications/<int:pk>/', api_views.notification_delete_view,
+         name='api-notification-delete'),
 
     # Public, shareable profile
     path('users/<str:username>/', api_views.public_profile_view, name='api-public-profile'),

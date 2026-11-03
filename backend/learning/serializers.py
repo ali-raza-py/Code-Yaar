@@ -8,11 +8,83 @@ from .models import (
     Skill, UserSkill, PracticalClass, PracticalSubject, Practical,
     PracticalProgress, PracticalBookmark, UserNotification,
     UserProfile, Portfolio, StudentProject, ProjectImage,
+    Competition, CompetitionRegistration, CompetitionTeam,
+    CompetitionSubmission, CompetitionResult,
 )
 
 
 # ─── Content Serializers ────────────────────────────────────────────────────
 # Authentication serializers live in `learning.auth_serializers`.
+
+
+class CompetitionListSerializer(serializers.ModelSerializer):
+    status = serializers.CharField(read_only=True)
+    organizer_name = serializers.CharField(source='organizer.get_full_name', read_only=True)
+    participant_count = serializers.IntegerField(read_only=True)
+    registration_status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Competition
+        fields = [
+            'id', 'slug', 'title', 'short_description', 'banner', 'category',
+            'difficulty', 'format', 'delivery_mode', 'registration_deadline',
+            'competition_start', 'competition_end', 'participant_limit',
+            'participant_count', 'prize_information', 'status', 'organizer_name',
+            'registration_status',
+        ]
+
+    def get_registration_status(self, obj):
+        user = self.context.get('request').user
+        if not user.is_authenticated:
+            return None
+        return obj.registrations.filter(user=user).values_list(
+            'registration_status', flat=True
+        ).first()
+
+
+class CompetitionDetailSerializer(CompetitionListSerializer):
+    class Meta(CompetitionListSerializer.Meta):
+        fields = CompetitionListSerializer.Meta.fields + [
+            'description', 'location', 'registration_start', 'submission_deadline',
+            'judging_end', 'results_announcement', 'minimum_team_size',
+            'maximum_team_size', 'eligibility_rules', 'competition_rules',
+            'problem_statement', 'submission_configuration',
+        ]
+
+
+class CompetitionRegistrationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CompetitionRegistration
+        fields = ['id', 'team', 'registration_status', 'registration_data', 'rules_accepted_at', 'registered_at']
+        read_only_fields = ['id', 'registration_status', 'registered_at']
+
+
+class CompetitionSubmissionSerializer(serializers.ModelSerializer):
+    competition_slug = serializers.CharField(source='registration.competition.slug', read_only=True)
+
+    class Meta:
+        model = CompetitionSubmission
+        fields = [
+            'id', 'competition_slug', 'project_title', 'description', 'github_url',
+            'demo_url', 'additional_data', 'status', 'organizer_feedback',
+            'submitted_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'competition_slug', 'status', 'organizer_feedback', 'submitted_at', 'updated_at']
+
+
+class CompetitionResultSerializer(serializers.ModelSerializer):
+    participant_name = serializers.SerializerMethodField()
+    project_title = serializers.CharField(source='registration.submission.project_title', read_only=True)
+
+    class Meta:
+        model = CompetitionResult
+        fields = ['rank', 'participant_name', 'project_title', 'final_score', 'award']
+
+    def get_participant_name(self, obj):
+        if obj.registration.team_id:
+            return obj.registration.team.name
+        profile = getattr(obj.registration.user, 'profile', None)
+        return profile.full_name if profile else obj.registration.user.username
 
 
 class PracticalClassSerializer(serializers.ModelSerializer):
@@ -1009,7 +1081,10 @@ class UserNotificationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UserNotification
-        fields = ['id', 'type', 'title', 'body', 'link', 'unread', 'created_at']
+        fields = [
+            'id', 'type', 'category', 'title', 'body', 'link', 'unread',
+            'created_at',
+        ]
         read_only_fields = fields
 
     def get_unread(self, obj):
@@ -1017,13 +1092,32 @@ class UserNotificationSerializer(serializers.ModelSerializer):
 
 
 class NotificationPreferenceSerializer(serializers.Serializer):
-    """Validates the fixed set of account-level notification toggles."""
+    """Validates the fixed set of account-level notification preferences.
+
+    In-app toggles gate the notifications stored for the user; the ``email_*``
+    toggles gate the transactional mail sent alongside them. Security email
+    (verification, resets, password changes) intentionally has no key — it is
+    never optional. ``email_digest`` folds in-app notifications the user has
+    not already been emailed individually into a daily or weekly email.
+    """
 
     achievements = serializers.BooleanField(required=False)
     learning_reminders = serializers.BooleanField(required=False)
     streak_reminders = serializers.BooleanField(required=False)
     community = serializers.BooleanField(required=False)
     announcements = serializers.BooleanField(required=False)
+    competitions = serializers.BooleanField(required=False)
+
+    email_learning = serializers.BooleanField(required=False)
+    email_competitions = serializers.BooleanField(required=False)
+    email_achievements = serializers.BooleanField(required=False)
+    email_certificates = serializers.BooleanField(required=False)
+    email_announcements = serializers.BooleanField(required=False)
+
+    email_digest = serializers.ChoiceField(
+        choices=['none', 'daily', 'weekly'],
+        required=False,
+    )
 
 
 class AvatarUploadSerializer(serializers.Serializer):

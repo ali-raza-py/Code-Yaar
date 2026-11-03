@@ -16,3 +16,8 @@ class LearningConfig(AppConfig):
             sender=self,
             dispatch_uid='learning.sync_role_groups',
         )
+        # Organizer-side competition events (registration approvals,
+        # submission reviews, result publication, team invitations) are admin
+        # state changes today; signals route them through the notification
+        # service no matter which surface makes the change.
+        from . import signals  # noqa: F401

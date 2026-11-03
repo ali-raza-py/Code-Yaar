@@ -7,7 +7,8 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.conf import settings
+from django.db import IntegrityError, transaction
 from django.db.models import F, Sum, Count, Q, Avg, Case, When, Value, IntegerField
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404
@@ -22,11 +23,14 @@ from .models import (
     PracticalClass, PracticalSubject, Practical, PracticalProgress,
     PracticalBookmark, LearningActivity, UserNotification,
     Portfolio, StudentProject, ProjectImage,
+    Competition, CompetitionRegistration, CompetitionTeam,
+    CompetitionTeamMember, CompetitionSubmission, CompetitionResult,
 )
 from .services.sandbox import get_sandbox, DevelopmentSandbox
 from .services.xp import award_xp, deduct_xp
 from .services.achievements import award_eligible_achievements
 from .services.completion import evaluate_course_completion
+from .services.notifications import notify, format_event_dt
 from .services.progress import (
     MEANINGFUL_ACTIVITY_TYPES,
     record_learning_activity,
@@ -59,8 +63,212 @@ from .serializers import (
     PortfolioSerializer, PublicPortfolioSerializer,
     StudentProjectSerializer, StudentProjectPublicSerializer,
     ProjectImageSerializer, ProjectReorderSerializer,
+    CompetitionListSerializer, CompetitionDetailSerializer,
+    CompetitionRegistrationSerializer, CompetitionSubmissionSerializer,
+    CompetitionResultSerializer,
 )
 from .services.sandbox import validate_submission
+
+
+def _is_competition_manager(user):
+    profile = getattr(user, 'profile', None)
+    return bool(user.is_staff or (profile and profile.role in {'admin', 'mentor'}))
+
+
+class CompetitionViewSet(viewsets.ReadOnlyModelViewSet):
+    """Public competition discovery with authenticated participation actions."""
+
+    lookup_field = 'slug'
+    permission_classes = [permissions.AllowAny]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['title', 'short_description', 'description', 'organizer__username', 'organizer__first_name', 'organizer__last_name']
+    ordering_fields = ['created_at', 'registration_deadline', 'competition_start', 'participant_count']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        queryset = Competition.objects.filter(is_published=True).select_related('organizer').annotate(
+            participant_count=Count(
+                'registrations',
+                filter=Q(registrations__registration_status__in=['registered', 'approved']),
+            )
+        )
+        status_filter = self.request.query_params.get('status')
+        if status_filter:
+            now = timezone.now()
+            status_ranges = {
+                'upcoming': Q(registration_start__gt=now),
+                'registration_open': Q(registration_start__lte=now, registration_deadline__gte=now),
+                'ongoing': Q(competition_start__lte=now, submission_deadline__gte=now),
+                'completed': Q(submission_deadline__lt=now),
+            }
+            if status_filter in status_ranges:
+                queryset = queryset.filter(status_ranges[status_filter])
+        for field in ('category', 'difficulty', 'format', 'delivery_mode'):
+            value = self.request.query_params.get(field)
+            if value:
+                queryset = queryset.filter(**{field: value})
+        return queryset
+
+    def get_serializer_class(self):
+        return CompetitionDetailSerializer if self.action == 'retrieve' else CompetitionListSerializer
+
+    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def mine(self, request):
+        registrations = CompetitionRegistration.objects.filter(user=request.user).select_related('competition')
+        competitions = Competition.objects.filter(
+            registrations__in=registrations
+        ).annotate(participant_count=Count('registrations')).distinct()
+        return Response(CompetitionListSerializer(
+            competitions, many=True, context={'request': request}
+        ).data)
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated, IsEmailVerified])
+    def register(self, request, slug=None):
+        competition = self.get_object()
+        now = timezone.now()
+        if competition.status not in {'registration_open', 'registration_closing_soon'}:
+            return Response({'detail': 'Registration is not open for this competition.'}, status=status.HTTP_400_BAD_REQUEST)
+        if competition.participant_limit and competition.registrations.filter(
+            registration_status__in=['registered', 'approved']
+        ).count() >= competition.participant_limit:
+            return Response({'detail': 'This competition is full.'}, status=status.HTTP_400_BAD_REQUEST)
+        rules_accepted = request.data.get('rules_accepted')
+        if competition.competition_rules and rules_accepted is not True:
+            return Response({'detail': 'You must accept the competition rules before registering.'}, status=status.HTTP_400_BAD_REQUEST)
+        team_id = request.data.get('team')
+        if competition.format == 'team' and not team_id:
+            return Response({'detail': 'This competition requires team participation.'}, status=status.HTTP_400_BAD_REQUEST)
+        team = None
+        if team_id:
+            team = get_object_or_404(CompetitionTeam, pk=team_id, competition=competition)
+            if team.leader_id != request.user.id and not team.members.filter(
+                user=request.user, invitation_status='accepted'
+            ).exists():
+                return Response({'detail': 'You are not a member of this competition team.'}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            with transaction.atomic():
+                registration = CompetitionRegistration.objects.create(
+                    competition=competition,
+                    user=request.user,
+                    team=team,
+                    registration_data=request.data.get('registration_data') or {},
+                    rules_accepted_at=now,
+                )
+        except IntegrityError:
+            return Response({'detail': 'You are already registered for this competition.'}, status=status.HTTP_409_CONFLICT)
+        notify(
+            request.user,
+            type='competition_registered',
+            title=f'Registration confirmed: {competition.title}',
+            body=(
+                'You are registered. Keep an eye on the dates below your '
+                'dashboard — a reminder will land before it starts.'
+            ),
+            link=f'/competitions/{competition.slug}',
+            related_object_type='competition',
+            related_object_id=competition.slug,
+            dedupe_key=f'comp-register:{registration.pk}',
+            email_subject=f'Competition registration confirmed — {competition.title}',
+            email_context={
+                'preheader': f'You are registered for {competition.title}.',
+                'heading': 'Competition registration confirmed',
+                'competition_title': competition.title,
+                'message': (
+                    f'Your registration for {competition.title} is confirmed. '
+                    'Mark the dates below — submissions only count if they '
+                    'arrive before the deadline.'
+                ),
+                'cta_url': f'{settings.FRONTEND_URL}/competitions/{competition.slug}',
+                'cta_label': 'View competition',
+                'info_rows': [
+                    ['Competition', competition.title],
+                    ['Starts', format_event_dt(competition.competition_start)],
+                    ['Submission deadline', format_event_dt(competition.submission_deadline)],
+                ],
+            },
+            email_key=f'comp-register:{registration.pk}',
+        )
+        return Response(CompetitionRegistrationSerializer(registration).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated, IsEmailVerified])
+    def team(self, request, slug=None):
+        competition = self.get_object()
+        if competition.format == 'individual':
+            return Response({'detail': 'This competition does not support teams.'}, status=status.HTTP_400_BAD_REQUEST)
+        name = str(request.data.get('name', '')).strip()
+        if not name:
+            return Response({'name': 'A team name is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            with transaction.atomic():
+                team = CompetitionTeam.objects.create(competition=competition, name=name, leader=request.user)
+                CompetitionTeamMember.objects.create(
+                    team=team, user=request.user, invitation_status='accepted', joined_at=timezone.now()
+                )
+        except IntegrityError:
+            return Response({'detail': 'You already have a team with this name in this competition.'}, status=status.HTTP_409_CONFLICT)
+        return Response({'id': team.id, 'name': team.name, 'leader_id': team.leader_id}, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'], permission_classes=[permissions.AllowAny])
+    def leaderboard(self, request, slug=None):
+        competition = self.get_object()
+        results = competition.results.filter(is_published=True).select_related(
+            'registration__user__profile', 'registration__team', 'registration__submission'
+        )
+        return Response(CompetitionResultSerializer(results, many=True).data)
+
+    @action(detail=True, methods=['get', 'post'], permission_classes=[permissions.IsAuthenticated, IsEmailVerified])
+    def submission(self, request, slug=None):
+        competition = self.get_object()
+        registration = get_object_or_404(
+            CompetitionRegistration, competition=competition, user=request.user,
+            registration_status__in=['registered', 'approved'],
+        )
+        submission, _ = CompetitionSubmission.objects.get_or_create(registration=registration)
+        if request.method == 'GET':
+            return Response(CompetitionSubmissionSerializer(submission).data)
+        if competition.submission_deadline < timezone.now():
+            return Response({'detail': 'The submission deadline has passed.'}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = CompetitionSubmissionSerializer(submission, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        submission = serializer.save()
+        if request.data.get('submit') is True:
+            if not submission.project_title or not submission.description:
+                return Response({'detail': 'Project title and description are required to submit.'}, status=status.HTTP_400_BAD_REQUEST)
+            submission.status = 'submitted'
+            submission.submitted_at = timezone.now()
+            submission.save(update_fields=['status', 'submitted_at', 'updated_at'])
+            notify(
+                request.user,
+                type='submission_received',
+                title=f'Submission received: {competition.title}',
+                body=(
+                    'Your project was submitted successfully. Organizers '
+                    'review entries and publish results after judging ends.'
+                ),
+                link=f'/competitions/{competition.slug}',
+                related_object_type='competition',
+                related_object_id=str(submission.pk),
+                dedupe_key=f'comp-submit:{submission.pk}',
+                email_subject=f'Submission received — {competition.title}',
+                email_context={
+                    'preheader': 'Your competition submission was received.',
+                    'heading': 'Submission received',
+                    'competition_title': competition.title,
+                    'message': (
+                        f'Your project “{submission.project_title or "untitled"}” '
+                        f'was submitted for {competition.title}. Organizers '
+                        'review entries and publish results after judging ends.'
+                    ),
+                    'cta_url': f'{settings.FRONTEND_URL}/competitions/{competition.slug}',
+                    'cta_label': 'View competition',
+                    'info_rows': [
+                        ['Competition', competition.title],
+                        ['Received', format_event_dt(submission.submitted_at)],
+                    ],
+                },
+                email_key=f'comp-submit:{submission.pk}',
+            )
+        return Response(CompetitionSubmissionSerializer(submission).data)
 
 
 # ─── Leaderboard Serializer ────────────────────────────────────────────────
@@ -210,7 +418,26 @@ class CareerTrackViewSet(viewsets.ReadOnlyModelViewSet):
             )
             enrolled.append(enrollment)
             if created:
-                newly.append(course.slug)
+                newly.append(course)
+        if newly:
+            # One summary for the whole track (a single email per course would
+            # be noisy); individual course enrollments mail when enrolled
+            # directly.
+            notify(
+                request.user,
+                type='course_enrolled',
+                title=f'Enrolled in track: {track.title}',
+                body=(
+                    f'{len(newly)} course'
+                    f'{"s are" if len(newly) != 1 else " is"} waiting for you '
+                    f'in {track.title}. Work through them in order or pick '
+                    'what interests you.'
+                ),
+                link=f'/tracks/{track.slug}',
+                related_object_type='track',
+                related_object_id=track.slug,
+                dedupe_key=f'track-enrolled:{request.user.pk}:{track.slug}',
+            )
         return Response(
             EnrollmentSerializer(enrolled, many=True).data,
             status=status.HTTP_201_CREATED if newly else status.HTTP_200_OK,
@@ -265,6 +492,33 @@ class CourseViewSet(viewsets.ReadOnlyModelViewSet):
         record_learning_activity(
             request.user, 'course_started', f'Started {course.title}',
             course=course,
+        )
+        notify(
+            request.user,
+            type='course_enrolled',
+            title=f'Enrolled in {course.title}',
+            body=(
+                'Your enrollment is confirmed. Jump in whenever suits you — '
+                'progress is saved lesson by lesson.'
+            ),
+            link=f'/learn/{course.slug}',
+            related_object_type='course',
+            related_object_id=course.slug,
+            dedupe_key=f'course-enrolled:{request.user.pk}:{course.slug}',
+            email_subject=f'Enrolled: {course.title}',
+            email_context={
+                'preheader': f'You are enrolled in {course.title}.',
+                'heading': 'Course enrollment confirmed',
+                'message': (
+                    f'You are enrolled in {course.title}. Your progress is '
+                    'saved lesson by lesson, and you will see XP land as you '
+                    'finish work.'
+                ),
+                'cta_url': f'{settings.FRONTEND_URL}/learn/{course.slug}',
+                'cta_label': 'Start learning',
+                'info_rows': [['Course', course.title]],
+            },
+            email_key=f'course-enrolled:{request.user.pk}:{course.slug}',
         )
         return Response(
             EnrollmentSerializer(enrollment).data,
@@ -1078,6 +1332,21 @@ class ChallengeViewSet(viewsets.ReadOnlyModelViewSet):
                 )
 
         awarded = award_eligible_achievements(request.user)
+
+        if created is not None:
+            # ``created`` (the one-time XPTransaction) is also exactly the
+            # first-solve signal, so the feed records the completion once per
+            # learner and never per attempt or replay.
+            notify(
+                request.user,
+                type='challenge_solved',
+                title=f'Challenge solved: {challenge.title}',
+                body=f'All tests passed and {xp_awarded} XP landed. Try the next one.',
+                link=f'/challenges/{challenge.slug}',
+                related_object_type='challenge',
+                related_object_id=challenge.slug,
+                dedupe_key=f'challenge-solved:{request.user.pk}:{challenge.slug}',
+            )
 
         payload = self._submission_payload(
             challenge,
@@ -2099,9 +2368,31 @@ def avatar_view(request):
 @api_view(['GET'])
 @permission_classes([permissions.IsAuthenticated])
 def notifications_view(request):
-    """List the learner's notifications, newest first, with an unread count."""
-    qs = UserNotification.objects.filter(user=request.user)
-    unread = qs.filter(read_at__isnull=True).count()
+    """List the learner's notifications, newest first, with an unread count.
+
+    Filters (all server-validated, never client-derived):
+    - ``?status=unread|read`` — read state.
+    - ``?category=learning|competition|account|announcement`` — filter group.
+    """
+    body_qs = UserNotification.objects.filter(user=request.user)
+    unread = body_qs.filter(read_at__isnull=True).count()
+
+    qs = body_qs
+    status_filter = request.query_params.get('status')
+    if status_filter == 'unread':
+        qs = qs.filter(read_at__isnull=True)
+    elif status_filter == 'read':
+        qs = qs.filter(read_at__isnull=False)
+
+    category = request.query_params.get('category')
+    if category:
+        if category not in UserNotification.Category.values:
+            return Response(
+                {'detail': 'Unknown category.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        qs = qs.filter(category=category)
+
     page = self_paginate(request, qs)
     data = UserNotificationSerializer(page.object_list, many=True).data
     return Response({
@@ -2109,7 +2400,19 @@ def notifications_view(request):
         'unread_count': unread,
         'next': page.has_next(),
         'previous': page.has_previous(),
+        'count': page.paginator.count,
+        'total_pages': page.paginator.num_pages,
     })
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def notifications_unread_count_view(request):
+    """Compact unread counter for the header bell; polled and refreshed."""
+    unread = UserNotification.objects.filter(
+        user=request.user, read_at__isnull=True,
+    ).count()
+    return Response({'unread_count': unread})
 
 
 def self_paginate(request, queryset, default_size=20):
@@ -2150,18 +2453,64 @@ def notifications_read_all_view(request):
     return Response({'marked_read': updated})
 
 
-@api_view(['PATCH'])
+@api_view(['DELETE'])
 @permission_classes([permissions.IsAuthenticated])
-def notification_preferences_view(request):
-    """Persist account-level notification toggles on the profile."""
+def notification_delete_view(request, pk):
+    """Dismiss one notification. Ownership is enforced by the user filter,
+    so another learner's notification id simply 404s."""
+    notification = get_object_or_404(UserNotification, pk=pk, user=request.user)
+    notification.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _apply_notification_preferences(request, profile):
+    """Validate + merge preference payload into the profile JSON store."""
     serializer = NotificationPreferenceSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    profile, _ = UserProfile.objects.get_or_create(user=request.user)
     prefs = dict(profile.notification_preferences or {})
     prefs.update(serializer.validated_data)
     profile.notification_preferences = prefs
     profile.save(update_fields=['notification_preferences'])
-    return Response({'notification_preferences': prefs})
+    return prefs
+
+
+def _effective_preferences(profile):
+    """Echo the profile's effective preferences (defaults resolved)."""
+    from .models import UserProfile as _Profile
+    stored = dict(profile.notification_preferences or {})
+    keys = list(_Profile.NOTIFICATION_PREFERENCE_KEYS) + list(
+        _Profile.EMAIL_NOTIFICATION_PREFERENCE_KEYS)
+    effective = {key: profile.get_notification_preference(key) for key in keys}
+    digest = stored.get('email_digest')
+    effective['email_digest'] = digest if digest in ('none', 'daily', 'weekly') else 'none'
+    return effective
+
+
+@api_view(['GET', 'PATCH'])
+@permission_classes([permissions.IsAuthenticated])
+def notification_preferences_api_view(request):
+    """Read or update notification preferences
+    (``/api/notifications/preferences/``).
+
+    The response always echoes effective values: booleans resolve through the
+    profile's default-on semantics, and the digest reports its stored choice
+    (``none`` when absent), so the frontend toggles never lie.
+    """
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    if request.method == 'PATCH':
+        _apply_notification_preferences(request, profile)
+    return Response({'notification_preferences': _effective_preferences(profile)})
+
+
+@api_view(['PATCH'])
+@permission_classes([permissions.IsAuthenticated])
+def notification_preferences_view(request):
+    """Persist account-level notification toggles on the profile
+    (``/api/profile/preferences/``, the route the settings page has long
+    used)."""
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    _apply_notification_preferences(request, profile)
+    return Response({'notification_preferences': _effective_preferences(profile)})
 
 
 @api_view(['POST'])
