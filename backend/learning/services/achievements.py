@@ -10,6 +10,7 @@ back. Duplicate awards are impossible at the database level via
 ``UserAchievement``'s unique (user, achievement) constraint.
 """
 
+from django.conf import settings
 from django.db import transaction
 
 from ..models import (
@@ -23,7 +24,7 @@ from ..models import (
     UserAchievement,
     UserProfile,
 )
-from .notifications import create_notification
+from .notifications import notify
 from .xp import award_xp
 
 
@@ -188,11 +189,28 @@ def award_eligible_achievements(user, *, lesson=None) -> list[UserAchievement]:
                 obj=achievement,
                 description=f'Achievement earned: {achievement.title}',
             )
-        create_notification(
+        notify(
             user,
             type='badge_unlock',
             title=f'Badge unlocked: {achievement.title}',
             body=achievement.description,
             link=f'/achievements?badge={achievement.slug}',
+            related_object_type='achievement',
+            related_object_id=achievement.slug,
+            dedupe_key=f'badge-unlock:{user.pk}:{achievement.slug}',
+            email_subject=f'Badge unlocked: {achievement.title}',
+            email_context={
+                'preheader': f'New badge unlocked: {achievement.title}.',
+                'heading': f'Badge unlocked — {achievement.title}',
+                'message': achievement.description,
+                'achievement_description': achievement.description,
+                'xp_bonus': achievement.xp_bonus,
+                'badge_title': achievement.title,
+                'cta_url': (
+                    f'{settings.FRONTEND_URL}/achievements?badge={achievement.slug}'
+                ),
+                'cta_label': 'View your badges',
+            },
+            email_key=f'badge-unlock:{user.pk}:{achievement.slug}',
         )
     return newly_awarded

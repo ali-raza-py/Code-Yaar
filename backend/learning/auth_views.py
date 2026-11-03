@@ -32,7 +32,7 @@ from .auth_serializers import (
     ResendVerificationSerializer,
     me_payload,
 )
-from .models import AuthenticationAuditLog
+from .models import AuthenticationAuditLog, UserNotification
 from .services.auth import (
     audit,
     clear_refresh_cookie,
@@ -41,12 +41,14 @@ from .services.auth import (
     issue_email_verification,
     issue_password_reset,
     mail_transport_ready,
+    notify_password_changed,
     refresh_token_from_request,
     reset_password,
     revoke_refresh_tokens,
     set_refresh_cookie,
     verify_email,
 )
+from .services.notifications import notify
 
 User = get_user_model()
 
@@ -142,6 +144,32 @@ class RegisterView(APIView):
             identifier=user.email,
         )
         verification_sent = issue_email_verification(user, request=request)
+        # The welcome receipt points at what to do next (confirm the email in
+        # the verified flow). The welcome email itself is only appropriate
+        # when no verification email carries the signup — i.e. the gate is
+        # off — so the learner never gets two near-identical signup mails,
+        # and the welcome message never implies access before verification.
+        notify(
+            user,
+            type=UserNotification.Type.WELCOME,
+            title='Welcome to Code Yaar',
+            body=(
+                'Confirm the email we just sent to unlock courses, '
+                'competitions and credentials.'
+                if settings.AUTH_REQUIRE_EMAIL_VERIFICATION else
+                'Pick a track and start building. Confirm your email from '
+                'your dashboard to unlock competitions and credentials.'
+            ),
+            link='/learn',
+            dedupe_key=f'welcome:{user.pk}',
+            related_object_type='account',
+            related_object_id=str(user.pk),
+            email_subject='Welcome to Code Yaar — your account is ready',
+            email_key=(
+                f'welcome:{user.pk}'
+                if not settings.AUTH_REQUIRE_EMAIL_VERIFICATION else None
+            ),
+        )
         payload = {
             'user': AuthUserSerializer(user).data,
             'verification_email_sent': verification_sent,
@@ -526,6 +554,8 @@ class ChangePasswordView(APIView):
             request=request,
             user=user,
         )
+        # Security notification + (always-on) password change email.
+        notify_password_changed(user)
 
         response = Response(
             {

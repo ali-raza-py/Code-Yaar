@@ -18,7 +18,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.mail import EmailMessage, mailers
+from django.core.mail import mailers
 from django.db import transaction
 from django.utils import timezone
 from rest_framework_simplejwt.token_blacklist.models import (
@@ -29,10 +29,14 @@ from rest_framework_simplejwt.token_blacklist.models import (
 from ..models import (
     AuthenticationAuditLog,
     EmailVerificationToken,
+    NotificationEmailLog,
     PasswordResetToken,
+    UserNotification,
     UserProfile,
     hash_auth_token,
 )
+from .email_service import send_security_email
+from .notifications import notify
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +285,23 @@ def verify_email(raw_token, request=None):
         user=user,
         identifier=user.email,
     )
+    # Post-verification receipt: an in-app confirmation so the learner sees
+    # the account state change even without opening the email client again.
+    notify(
+        user,
+        type=UserNotification.Type.EMAIL_VERIFIED,
+        title='Email verified',
+        body=(
+            'Your email address is confirmed. Courses, competitions and '
+            'credentials are all unlocked now.'
+        ),
+        link='/dashboard',
+        dedupe_key=(
+            f"email-verified:{user.pk}:{int(profile.email_verified_at.timestamp())}"
+        ),
+        related_object_type='account',
+        related_object_id=str(user.pk),
+    )
     return 'ok', user
 
 
@@ -407,62 +428,69 @@ def mail_transport_ready():
     return True
 
 
-def _send_email(subject, body, recipient):
-    if not recipient:
-        logger.warning('Skipping auth email "%s": no recipient address', subject)
-        return False
-    backend = mailers.default
-    backend_name = type(backend).__module__
-    try:
-        message = EmailMessage(
-            subject, body, settings.DEFAULT_FROM_EMAIL, [recipient]
-        )
-        # `mailers.default` honours the MAILERS setting (console in dev, SMTP
-        # in production, locmem under test).
-        accepted = backend.send_messages([message])
-    except Exception:  # pragma: no cover - depends on the configured backend
-        logger.exception('Failed to send authentication email "%s"', subject)
-        return False
-    if backend_name in RENDER_ONLY_BACKENDS:
-        logger.warning(
-            'Authentication email "%s" was rendered by %s and never left the '
-            'server; set EMAIL_BACKEND to django.core.mail.backends.smtp.'
-            'EmailBackend to send real mail.',
-            subject,
-            backend_name,
-        )
-        return False
-    return bool(accepted)
-
-
 def send_verification_email(user, raw_token):
+    """Deliver the branded single-use verification email.
+
+    The plain-text part keeps the bare ``/verify-email?token=…`` link, so mail
+    clients that strip HTML never hide the action. Returns True only when the
+    transport actually accepted the message (render-only backends report
+    False, keeping the ``delivered`` audit flag honest).
+    """
     link = f"{settings.FRONTEND_URL}/verify-email?token={raw_token}"
-    hours = settings.AUTH_EMAIL_VERIFICATION_TTL_HOURS
-    return _send_email(
-        'Verify your Code Yaar email address',
-        (
-            f'Hi {user.get_full_name().strip() or user.username},\n\n'
-            'Confirm your email address to finish setting up your Code Yaar '
-            f'account. This link expires in {hours} hours and can be used once.\n\n'
-            f'{link}\n\n'
-            'If you did not create a Code Yaar account, you can ignore this email.'
-        ),
-        user.email,
+    log = send_security_email(
+        user,
+        template='email_verification',
+        subject='Verify your Code Yaar email address',
+        context={
+            'preheader': 'Confirm your email to activate your Code Yaar account.',
+            'cta_url': link,
+            'ttl_hours': settings.AUTH_EMAIL_VERIFICATION_TTL_HOURS,
+        },
+        # Every issued token is a new single-use key: resends are new tokens,
+        # so each issuance legitimately mails once and only once.
+        email_key=f"auth-verify:{hash_auth_token(raw_token)[:32]}",
     )
+    return bool(log and log.status == NotificationEmailLog.Status.SENT)
 
 
 def send_password_reset_email(user, raw_token):
     link = f"{settings.FRONTEND_URL}/reset-password?token={raw_token}"
-    minutes = settings.AUTH_PASSWORD_RESET_TTL_MINUTES
-    return _send_email(
-        'Reset your Code Yaar password',
-        (
-            f'Hi {user.get_full_name().strip() or user.username},\n\n'
-            'A password reset was requested for your Code Yaar account. This '
-            f'link expires in {minutes} minutes and can be used once.\n\n'
-            f'{link}\n\n'
-            'If you did not request a password reset, no action is needed — '
-            'your password has not changed.'
+    log = send_security_email(
+        user,
+        template='password_reset',
+        subject='Reset your Code Yaar password',
+        context={
+            'preheader': 'Reset your Code Yaar password — link valid for a limited time.',
+            'cta_url': link,
+            'ttl_minutes': settings.AUTH_PASSWORD_RESET_TTL_MINUTES,
+        },
+        email_key=f"auth-reset:{hash_auth_token(raw_token)[:32]}",
+    )
+    return bool(log and log.status == NotificationEmailLog.Status.SENT)
+
+
+def notify_password_changed(user):
+    """Announce a completed password change: in-app notification + email.
+
+    The email is a security message: always sent, never preference-gated, and
+    recorded in the delivery ledger so failures are visible and retryable.
+    """
+    return notify(
+        user,
+        type=UserNotification.Type.PASSWORD_CHANGED,
+        title='Your password was changed',
+        body=(
+            "The password for your account was changed and other signed-in "
+            "devices were signed out. If this wasn't you, reset it right away."
         ),
-        user.email,
+        link='/settings?tab=password',
+        related_object_type='account',
+        related_object_id=str(user.pk),
+        email_subject='Your Code Yaar password was changed',
+        email_context={
+            'preheader': 'Your Code Yaar password was just changed.',
+            'cta_url': f"{settings.FRONTEND_URL}/settings?tab=password",
+            'cta_label': 'Review your account',
+        },
+        email_key=f"pwd-changed:{user.pk}:{int(timezone.now().timestamp())}",
     )
