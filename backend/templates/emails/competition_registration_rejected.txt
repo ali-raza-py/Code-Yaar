@@ -1,0 +1,13 @@
+Code Yaar — Think. Build. Evolve.
+
+{{ heading }}
+
+{% if first_name %}Hi {{ first_name }},{% else %}Hello,{% endif %}
+
+Your registration for {{ competition_title }} was not approved by the organizers.
+Your other competitions and learning progress are unaffected — new competitions open regularly.
+
+Browse competitions: {{ cta_url }}
+
+Manage your email preferences: {{ preferences_url }}
+© {{ current_year }} Code Yaar — Think. Build. Evolve.

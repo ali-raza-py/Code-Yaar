@@ -1,0 +1,13 @@
+Code Yaar — Think. Build. Evolve.
+
+{{ heading }}
+
+{% if first_name %}Hi {{ first_name }},{% else %}Hello,{% endif %}
+
+Your Certificate of Completion for {{ course_title }} has been issued. It is publicly verifiable and carries the credential ID below.
+{% if final_score is not None %}Final score: {{ final_score }}%{% endif %}
+
+View your certificate: {{ cta_url }}
+
+Manage your email preferences: {{ preferences_url }}
+© {{ current_year }} Code Yaar — Think. Build. Evolve.

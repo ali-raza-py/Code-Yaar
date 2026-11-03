@@ -1,0 +1,10 @@
+{% extends "emails/base.html" %}
+{% block preheader %}You are registered for {{ competition_title }}.{% endblock %}
+{% block heading %}Competition registration confirmed{% endblock %}
+{% block body %}
+<p style="margin: 0 0 10px; font-family: Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.6; color: #374151;">Your registration for <strong>{{ competition_title }}</strong> is confirmed.</p>
+<p style="margin: 0 0 10px; font-family: Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.6; color: #374151;">Mark the dates below — submissions only count if they arrive before the deadline.</p>
+{% endblock %}
+{% block cta_url %}{{ cta_url }}{% endblock %}
+{% block cta_label %}View competition{% endblock %}
+{% block footer_note %}You receive competition emails while they are enabled in your notification settings.{% endblock %}

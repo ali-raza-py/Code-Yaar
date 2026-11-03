@@ -1,0 +1,15 @@
+Code Yaar — Think. Build. Evolve.
+
+{{ heading }}
+
+{% if first_name %}Hi {{ first_name }},{% else %}Hello,{% endif %}
+
+{{ message }}
+{% if info_rows %}
+{% for row in info_rows %}{{ row.0 }}: {{ row.1 }}
+{% endfor %}{% endif %}
+
+{{ cta_label|default:"View competition" }}: {{ cta_url }}
+
+Manage your email preferences: {{ preferences_url }}
+© {{ current_year }} Code Yaar — Think. Build. Evolve.

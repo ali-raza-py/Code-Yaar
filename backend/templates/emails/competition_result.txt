@@ -1,0 +1,14 @@
+Code Yaar — Think. Build. Evolve.
+
+{{ heading }}
+
+{% if first_name %}Hi {{ first_name }},{% else %}Hello,{% endif %}
+
+The results for {{ competition_title }} have been published. You finished rank {{ rank }}{% if award %} and received: {{ award }}{% endif %}.
+
+Thank you for competing — the full leaderboard is on the competition page.
+
+See full results: {{ cta_url }}
+
+Manage your email preferences: {{ preferences_url }}
+© {{ current_year }} Code Yaar — Think. Build. Evolve.

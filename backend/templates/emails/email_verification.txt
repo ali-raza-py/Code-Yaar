@@ -1,0 +1,16 @@
+Code Yaar — Think. Build. Evolve.
+
+{{ heading }}
+
+{% if first_name %}Hi {{ first_name }},{% else %}Hello,{% endif %}
+
+Welcome to Code Yaar. Confirm this email address to finish setting up your account — courses, practice, competitions and credentials unlock right after.
+
+The link below is single-use and expires in {{ ttl_hours }} hours.
+
+Verify my email: {{ cta_url }}
+
+If you did not create a Code Yaar account, you can ignore this email — nothing happens until the link is opened.
+
+Manage your email preferences: {{ preferences_url }}
+© {{ current_year }} Code Yaar — Think. Build. Evolve.

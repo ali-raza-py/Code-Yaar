@@ -1,0 +1,14 @@
+Code Yaar — Think. Build. Evolve.
+
+{{ heading }}
+
+{% if first_name %}Hi {{ first_name }},{% else %}Hello,{% endif %}
+
+The organizers approved your registration for {{ competition_title }}. You are in.
+
+Check the problem statement and dates below so you are ready when it starts.
+
+View competition: {{ cta_url }}
+
+Manage your email preferences: {{ preferences_url }}
+© {{ current_year }} Code Yaar — Think. Build. Evolve.

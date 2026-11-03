@@ -1,0 +1,20 @@
+Code Yaar — Think. Build. Evolve.
+
+{{ heading }}
+
+{% if first_name %}Hi {{ first_name }},{% else %}Hello,{% endif %}
+
+Here is what happened on your Code Yaar account.
+{% if items %}
+{% for item in items %}- {{ item.title }}{% if item.body %} — {{ item.body }}{% endif %}
+  {{ item.url }}
+{% endfor %}
+{% else %}No new activity this period — keep your streak alive.
+{% endif %}
+
+Open notifications: {{ notifications_url }}
+
+Digests summarize events that did not already email you individually. Set them to daily, weekly or off in your notification settings.
+
+{{ preferences_url }}
+© {{ current_year }} Code Yaar — Think. Build. Evolve.

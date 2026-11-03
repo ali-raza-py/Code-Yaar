@@ -1,0 +1,14 @@
+Code Yaar — Think. Build. Evolve.
+
+{{ heading }}
+
+{% if first_name %}Hi {{ first_name }},{% else %}Hello,{% endif %}
+
+You completed {{ course_title }} and earned the XP that comes with it.
+{% if certification_note %}{{ certification_note }}{% endif %}
+Keep the momentum — the next course in your track is a good place to aim.
+
+Review the course: {{ cta_url }}
+
+Manage your email preferences: {{ preferences_url }}
+© {{ current_year }} Code Yaar — Think. Build. Evolve.

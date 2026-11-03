@@ -1,0 +1,13 @@
+Code Yaar — Think. Build. Evolve.
+
+{{ heading }}
+
+{% if first_name %}Hi {{ first_name }},{% else %}Hello,{% endif %}
+{% if achievement_description %}{{ achievement_description }}{% endif %}
+{% if xp_bonus %}This badge came with a +{{ xp_bonus }} XP bonus on top of what you already earned.{% endif %}
+Your badge is verifiable and can be shared straight from your profile.
+
+View your badges: {{ cta_url }}
+
+Manage your email preferences: {{ preferences_url }}
+© {{ current_year }} Code Yaar — Think. Build. Evolve.

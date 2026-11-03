@@ -1,0 +1,10 @@
+{% extends "emails/base.html" %}
+{% block preheader %}{{ competition_title }} results are out — you placed {{ rank }}.{% endblock %}
+{% block heading %}Results published{% endblock %}
+{% block body %}
+<p style="margin: 0 0 10px; font-family: Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.6; color: #374151;">The results for <strong>{{ competition_title }}</strong> have been published. You finished <strong>rank {{ rank }}</strong>{% if award %} and received: {{ award }}{% endif %}.</p>
+<p style="margin: 0 0 10px; font-family: Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.6; color: #374151;">Thank you for competing — the full leaderboard is on the competition page.</p>
+{% endblock %}
+{% block cta_url %}{{ cta_url }}{% endblock %}
+{% block cta_label %}See full results{% endblock %}
+{% block footer_note %}You receive competition emails while they are enabled in your notification settings.{% endblock %}

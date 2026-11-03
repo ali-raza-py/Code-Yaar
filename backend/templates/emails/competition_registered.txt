@@ -1,0 +1,14 @@
+Code Yaar — Think. Build. Evolve.
+
+{{ heading }}
+
+{% if first_name %}Hi {{ first_name }},{% else %}Hello,{% endif %}
+
+Your registration for {{ competition_title }} is confirmed.
+
+Mark the dates below — submissions only count if they arrive before the deadline.
+
+View competition: {{ cta_url }}
+
+Manage your email preferences: {{ preferences_url }}
+© {{ current_year }} Code Yaar — Think. Build. Evolve.

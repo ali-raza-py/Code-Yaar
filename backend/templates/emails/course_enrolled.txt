@@ -1,0 +1,14 @@
+Code Yaar — Think. Build. Evolve.
+
+{{ heading }}
+
+{% if first_name %}Hi {{ first_name }},{% else %}Hello,{% endif %}
+
+You are enrolled in {{ course_title }}. Your progress is saved lesson by lesson, and you will see XP land as you finish work.
+
+Pick it up whenever suits you — short sessions count.
+
+Start learning: {{ cta_url }}
+
+Manage your email preferences: {{ preferences_url }}
+© {{ current_year }} Code Yaar — Think. Build. Evolve.

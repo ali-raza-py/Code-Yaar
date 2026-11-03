@@ -1,0 +1,14 @@
+Code Yaar — Think. Build. Evolve.
+
+{{ heading }}
+
+{% if first_name %}Hi {{ first_name }},{% else %}Hello,{% endif %}
+
+{{ invited_by_name }} invited you to join {{ team_name }} for {{ competition_title }}.
+
+Team invitations are confirmed by the team leader when they register, so reply to them first and keep an eye on the competition dates.
+
+View competition: {{ cta_url }}
+
+Manage your email preferences: {{ preferences_url }}
+© {{ current_year }} Code Yaar — Think. Build. Evolve.

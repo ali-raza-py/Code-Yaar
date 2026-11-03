@@ -1,0 +1,13 @@
+{% extends "emails/base.html" %}
+{% block preheader %}Welcome to Code Yaar — your account is ready.{% endblock %}
+{% block heading %}Welcome to Code Yaar{% endblock %}
+{% block body %}
+<p style="margin: 0 0 10px; font-family: Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.6; color: #374151;">Your new <strong>Code Yaar</strong> account is created. You are joining a learning platform built for students in Pakistan: structured tracks, hands-on coding practice, competitions and verifiable credentials.</p>
+<p style="margin: 0 0 10px; font-family: Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.6; color: #374151;">A good first step is picking a learning track — you can also jump straight into daily practice challenges.</p>
+{% endblock %}
+{% block extra %}
+<p style="margin: 8px 0 0; font-family: Helvetica, Arial, sans-serif; font-size: 13px; line-height: 1.6; color: #6b7280;">Your email address is not verified yet. You can verify it any time from <a href="{{ dashboard_url }}" style="color: #059669; text-decoration: underline;">your dashboard</a> to keep the account secure.</p>
+{% endblock %}
+{% block cta_url %}{{ dashboard_url }}{% endblock %}
+{% block cta_label %}Go to your dashboard{% endblock %}
+{% block footer_note %}You are receiving this email because a Code Yaar account was recently registered with this address.{% endblock %}

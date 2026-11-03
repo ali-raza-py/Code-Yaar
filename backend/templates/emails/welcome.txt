@@ -1,0 +1,16 @@
+Code Yaar — Think. Build. Evolve.
+
+{{ heading }}
+
+{% if first_name %}Hi {{ first_name }},{% else %}Hello,{% endif %}
+
+Your new Code Yaar account is created. You are joining a learning platform built for students in Pakistan: structured tracks, hands-on coding practice, competitions and verifiable credentials.
+
+A good first step is picking a learning track — you can also jump straight into daily practice challenges.
+
+Your email address is not verified yet. You can verify it any time from your dashboard to keep the account secure.
+
+Open Code Yaar: {{ dashboard_url }}
+
+Manage your email preferences: {{ preferences_url }}
+© {{ current_year }} Code Yaar — Think. Build. Evolve.

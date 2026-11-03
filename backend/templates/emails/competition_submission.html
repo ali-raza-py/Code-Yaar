@@ -1,0 +1,10 @@
+{% extends "emails/base.html" %}
+{% block preheader %}{{ preheader }}{% endblock %}
+{% block cta_url %}{{ cta_url }}{% endblock %}
+{% block cta_label %}{{ cta_label|default:"View competition" }}{% endblock %}
+{% block footer_note %}You receive competition emails while they are enabled in your notification settings.{% endblock %}
+{% comment %}
+Context-driven template: heading, preheader, message and info_rows are passed
+by the submission workflow (received / reviewed with a verdict). See
+learning.services.notifications.
+{% endcomment %}

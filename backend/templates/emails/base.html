@@ -1,0 +1,94 @@
+{% comment %}
+Shared Code Yaar email layout. Event templates extend this file and override:
+  preheader — invisible inbox-preview line
+  salutation — greeting paragraph
+  heading — the email's headline
+  body — event copy (defaults to one escaped paragraph from `message`)
+Context that every event passes: cta_url / cta_label, info_rows [label, value],
+plus the shared brand context from learning.services.email_service.
+
+Layout is table-based with inline styles so Gmail, Outlook and common mobile
+clients render it correctly. User-generated content reaches these templates
+through Django's autoescaping, so it is always safe.
+{% endcomment %}<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <title>{{ subject }} — Code Yaar</title>
+  <style type="text/css">
+    body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+    table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+    img { -ms-interpolation-mode: bicubic; border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; }
+    body { margin: 0 !important; padding: 0 !important; width: 100% !important; }
+    a { text-decoration: none; }
+    @media only screen and (max-width: 640px) {
+      .cy-container { width: 100% !important; border-radius: 0 !important; }
+      .cy-pad { padding-left: 20px !important; padding-right: 20px !important; }
+      .cy-btn { display: block !important; text-align: center !important; }
+    }
+  </style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f1f4f7;">
+  <div style="display: none; max-height: 0; overflow: hidden; mso-hide: all;">{% block preheader %}{{ preheader }}{% endblock %}</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f1f4f7;">
+    <tr>
+      <td align="center" style="padding: 28px 12px;">
+        <table role="presentation" class="cy-container" width="600" cellpadding="0" cellspacing="0" border="0" style="width: 600px; max-width: 600px; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(15, 29, 50, 0.12);">
+          <tr>
+            <td style="background-color: #0f1d32; padding: 26px 32px 22px;" class="cy-pad">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="font-size: 0; line-height: 0;">
+                    <img src="{{ logo_url }}" width="34" height="34" alt="Code Yaar" style="display: block; border: 0;" />
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding-top: 10px; font-family: Helvetica, Arial, sans-serif; font-size: 16px; font-weight: bold; color: #ffffff; letter-spacing: 0.01em;">Code Yaar</td>
+                </tr>
+                <tr>
+                  <td style="padding-top: 2px; font-family: Helvetica, Arial, sans-serif; font-size: 10px; font-weight: 600; color: #8ea3bd; letter-spacing: 0.14em;">THINK. BUILD. EVOLVE.</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #ffffff; padding: 30px 32px 26px;" class="cy-pad">
+              <h1 style="margin: 0 0 14px; font-family: Helvetica, Arial, sans-serif; font-size: 21px; line-height: 1.35; color: #0f1d32; font-weight: 700;">{% block heading %}{{ heading }}{% endblock %}</h1>
+              <p style="margin: 0 0 10px; font-family: Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.6; color: #374151;">{% block salutation %}{% if first_name %}Hi {{ first_name }},{% else %}Hello,{% endif %}{% endblock %}</p>
+              {% block body %}{% if message %}<p style="margin: 0 0 10px; font-family: Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.6; color: #374151;">{{ message }}</p>{% endif %}{% endblock %}{% block extra %}{% endblock %}{% if info_rows %}
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 18px 0 4px; border: 1px solid #e5e7eb; border-radius: 8px; background-color: #f8fafc;">
+                {% for row in info_rows %}
+                <tr>
+                  <td style="padding: 10px 14px; font-family: Helvetica, Arial, sans-serif; font-size: 13px; color: #6b7280; border-bottom: 1px solid #eef1f4; white-space: nowrap; vertical-align: top;">{{ row.0 }}</td>
+                  <td style="padding: 10px 14px; font-family: Helvetica, Arial, sans-serif; font-size: 13px; color: #0f1d32; font-weight: 600; border-bottom: 1px solid #eef1f4;">{{ row.1 }}</td>
+                </tr>
+                {% endfor %}
+              </table>
+              {% endif %}
+              {% if cta_url %}
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 22px 0 10px;">
+                <tr>
+                  <td align="center" bgcolor="#059669" style="border-radius: 8px; mso-padding-alt: 11px 28px;">
+                    <a class="cy-btn" href="{{ cta_url }}" style="display: inline-block; padding: 11px 28px; font-family: Helvetica, Arial, sans-serif; font-size: 15px; font-weight: 600; color: #ffffff; background-color: #059669; border-radius: 8px; text-decoration: none;">{{ cta_label|default:"Open Code Yaar" }}</a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin: 0; font-family: Helvetica, Arial, sans-serif; font-size: 12px; color: #9ca3af;">Can't click the button? Paste this link into your browser:<br /><a href="{{ cta_url }}" style="color: #059669; word-break: break-all;">{{ cta_url }}</a></p>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #ffffff; border-top: 1px solid #e5e7eb; padding: 20px 32px 24px;" class="cy-pad">
+              {% block footer_note %}{% if footer_note %}<p style="margin: 0 0 10px; font-family: Helvetica, Arial, sans-serif; font-size: 12px; line-height: 1.6; color: #6b7280;">{{ footer_note }}</p>{% endif %}{% endblock %}
+              <p style="margin: 0 0 6px; font-family: Helvetica, Arial, sans-serif; font-size: 12px; color: #6b7280;">Choose which emails you receive in your <a href="{{ preferences_url }}" style="color: #059669; text-decoration: underline;">notification settings</a>.</p>
+              <p style="margin: 0; font-family: Helvetica, Arial, sans-serif; font-size: 11px; color: #9ca3af;">© {{ current_year }} Code Yaar · Think. Build. Evolve.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
