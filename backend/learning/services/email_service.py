@@ -55,13 +55,46 @@ def transport_is_render_only() -> bool:
     return module in RENDER_ONLY_BACKENDS
 
 
+# The header brand mark is embedded in every message as an inline CID
+# attachment rather than linked from FRONTEND_URL: mail clients block remote
+# images by default, and in development the site host is a localhost port no
+# provider can reach — either way a linked logo collapsed to a broken-image
+# icon. Reading the packaged PNG lets the mark travel inside the email itself.
+EMAIL_LOGO_CID = 'codeyaar-logo'
+EMAIL_LOGO_PATH = settings.BASE_DIR / 'branding' / 'logo-dark.png'
+
+
+def _email_logo():
+    """Return ``(src, attachment)`` for the header brand mark.
+
+    ``src`` is what the template places in the ``<img>`` and ``attachment`` is
+    the MIME part to embed (``None`` when the asset cannot be read). If the PNG
+    is missing the remote ``FRONTEND_URL`` URL is used instead, so a
+    misconfigured deployment still renders the alt-text brand rather than
+    raising in the middle of delivery.
+    """
+    try:
+        data = EMAIL_LOGO_PATH.read_bytes()
+    except OSError:
+        return settings.FRONTEND_URL + '/logo-dark.png', None
+    from email.mime.image import MIMEImage
+
+    image = MIMEImage(data, _subtype='png')
+    image.add_header('Content-ID', f'<{EMAIL_LOGO_CID}>')
+    image.add_header(
+        'Content-Disposition', 'inline', filename=EMAIL_LOGO_PATH.name,
+    )
+    return f'cid:{EMAIL_LOGO_CID}', image
+
+
 # Context every template receives beyond the per-event context. ``logo_url``
-# points at the frontend's published white mark so it stays visible on the
-# navy header band; the alt text carries the brand either way.
+# resolves to the inline brand mark (see ``_email_logo``) so it stays visible on
+# the navy header band even when the client blocks remote images; the alt text
+# carries the brand either way.
 BASE_EMAIL_CONTEXT = {
     'brand_name': 'Code Yaar',
     'brand_tagline': 'Think. Build. Evolve.',
-    'logo_url': settings.FRONTEND_URL + '/logo-dark.png',
+    'logo_url': f'cid:{EMAIL_LOGO_CID}',
     'preferences_url': settings.FRONTEND_URL + '/settings?tab=preferences',
     'dashboard_url': settings.FRONTEND_URL + '/dashboard',
     'current_year': timezone.now().year,
@@ -108,7 +141,7 @@ def email_context(user=None, **extra) -> dict:
     context = {
         'brand_name': 'Code Yaar',
         'brand_tagline': 'Think. Build. Evolve.',
-        'logo_url': settings.FRONTEND_URL + '/logo-dark.png',
+        'logo_url': _email_logo()[0],
         'preferences_url': settings.FRONTEND_URL + '/settings?tab=preferences',
         'dashboard_url': settings.FRONTEND_URL + '/dashboard',
         'current_year': timezone.now().year,
@@ -212,6 +245,12 @@ def _build_message(log, subject, text, html):
         to=[log.user.email],
     )
     message.attach_alternative(html, 'text/html')
+    # Embed the brand mark inline so the header logo renders without the client
+    # fetching anything (``_email_logo`` falls back to a remote URL, in which
+    # case there is nothing to attach).
+    _, logo_attachment = _email_logo()
+    if logo_attachment is not None:
+        message.attach(logo_attachment)
     return message
 
 

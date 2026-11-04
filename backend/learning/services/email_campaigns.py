@@ -30,7 +30,7 @@ from django.utils import timezone
 from ..models import (
     CompetitionRegistration, EmailCampaign, EmailCampaignRecipient, UserProfile,
 )
-from .email_service import _sanitize_error, transport_is_render_only
+from .email_service import _email_logo, _sanitize_error, transport_is_render_only
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +127,7 @@ def campaign_context(campaign, user, extra=None) -> dict:
     context = {
         'brand_name': 'Code Yaar',
         'brand_tagline': 'Think. Build. Evolve.',
-        'logo_url': settings.FRONTEND_URL + '/logo-dark.png',
+        'logo_url': _email_logo()[0],
         'preferences_url': settings.FRONTEND_URL + '/settings?tab=preferences',
         'dashboard_url': settings.FRONTEND_URL + '/dashboard',
         'current_year': timezone.now().year,
@@ -174,6 +174,9 @@ def send_single(recipient: EmailCampaignRecipient, campaign) -> EmailCampaignRec
             to=[recipient.email],
         )
         message.attach_alternative(html, 'text/html')
+        _, logo_attachment = _email_logo()
+        if logo_attachment is not None:
+            message.attach(logo_attachment)
         accepted = int(message.send(fail_silently=False))
     except Exception as exc:  # noqa: BLE001 - per-recipient failure must not abort fan-out
         recipient.status = EmailCampaignRecipient.Status.FAILED
@@ -308,6 +311,9 @@ def send_test_email(campaign_data: dict, to_user) -> dict:
             to=[to_user.email],
         )
         message.attach_alternative(html, 'text/html')
+        _, logo_attachment = _email_logo()
+        if logo_attachment is not None:
+            message.attach(logo_attachment)
         accepted = int(message.send(fail_silently=False))
     except Exception as exc:  # noqa: BLE001 - surface the reason to the admin
         return {'ok': False, 'status': 'failed', 'error': _sanitize_error(exc)}
