@@ -20,7 +20,7 @@ from django.core import mail
 from django.core.cache import cache
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
@@ -46,13 +46,29 @@ def extract_token(message, path):
     return match.group(1) if match else None
 
 
+def verification_messages():
+    """Outgoing mail that carries a verification link.
+
+    Registration also posts a welcome note whenever the verification gate is
+    off (which these tests pin), so assertions about the verification endpoint
+    count the mail that actually contains a verification token.
+    """
+    return [message for message in mail.outbox if extract_token(message, VERIFY_PATH)]
+
+
 # The verification gate follows the mail transport in `settings.py`, so a
 # developer's real `.env` (SMTP + App Password) would arm it inside the test run
 # and change what registration and login return. Tests therefore pin the policy
 # explicitly; `EnforcedVerificationTests` opts back in to exercise the gate.
 @override_settings(AUTH_REQUIRE_EMAIL_VERIFICATION=False)
-class AuthAPITestCase(TestCase):
-    """Shared client helpers for the authentication endpoints."""
+class AuthAPITestCase(TransactionTestCase):
+    """Shared client helpers for the authentication endpoints.
+
+    ``TransactionTestCase`` rather than ``TestCase``: notification mail is
+    deliberately deferred to ``transaction.on_commit()`` by the email service,
+    and only a real commit lets these tests see the message (and the honest
+    ``verification_email_sent`` flag the view reports from that delivery).
+    """
 
     maxDiff = None
 
@@ -209,8 +225,8 @@ class RegistrationTests(AuthAPITestCase):
     def test_registration_emails_a_hashed_single_use_token(self):
         self.signed_in()
 
-        self.assertEqual(len(mail.outbox), 1)
-        message = mail.outbox[0]
+        self.assertEqual(len(verification_messages()), 1)
+        message = verification_messages()[0]
         self.assertEqual(message.to, ['tlearner@example.com'])
         self.assertIn(VERIFY_PATH, message.body)
 
@@ -454,7 +470,7 @@ class EmailVerificationTests(AuthAPITestCase):
     def setUp(self):
         super().setUp()
         self.register_response = self.signed_in()
-        self.raw_token = extract_token(mail.outbox[0], VERIFY_PATH)
+        self.raw_token = extract_token(verification_messages()[0], VERIFY_PATH)
 
     def verify(self, token):
         return self.client.post(
@@ -512,14 +528,14 @@ class EmailVerificationTests(AuthAPITestCase):
             '/api/auth/resend-verification/', {}, format='json'
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(mail.outbox), 2)
+        self.assertEqual(len(verification_messages()), 2)
 
         # The first token is invalidated when a new one is issued.
         stale = self.verify(self.raw_token)
         self.assertEqual(stale.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(stale.data['code'], 'token_used')
 
-        fresh = extract_token(mail.outbox[1], VERIFY_PATH)
+        fresh = extract_token(verification_messages()[1], VERIFY_PATH)
         self.assertNotEqual(fresh, self.raw_token)
         self.assertEqual(self.verify(fresh).status_code, status.HTTP_200_OK)
 
@@ -531,7 +547,7 @@ class EmailVerificationTests(AuthAPITestCase):
             format='json',
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(len(verification_messages()), 1)
 
 
 # ─── Password reset + change ────────────────────────────────────────────────
@@ -891,7 +907,7 @@ class EnforcedVerificationTests(AuthAPITestCase):
     def setUp(self):
         super().setUp()
         self.registration = self.register()
-        self.raw_token = extract_token(mail.outbox[0], VERIFY_PATH)
+        self.raw_token = extract_token(verification_messages()[0], VERIFY_PATH)
 
     def test_registration_withholds_the_session(self):
         self.assertEqual(
@@ -1059,7 +1075,7 @@ class ResendDeliveryReportingTests(AuthAPITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
         self.assertIs(response.data['verification_email_sent'], True)
         self.assertIs(response.data['email_delivery_enabled'], True)
-        self.assertEqual(len(mail.outbox), 2)
+        self.assertEqual(len(verification_messages()), 2)
 
     def test_anonymous_callers_never_receive_the_delivery_flag(self):
         self.signed_in()

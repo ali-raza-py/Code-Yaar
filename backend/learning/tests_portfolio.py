@@ -16,7 +16,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from .models import (
-    UserProfile, Portfolio, StudentProject, ProjectImage, Skill, UserSkill,
+    UserProfile, Portfolio, StudentProject, ProjectImage, Skill, UserSkill, Follow,
     Achievement, UserAchievement,
 )
 from .serializers import _validate_project_image
@@ -201,12 +201,13 @@ class PortfolioPublishTest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data['projects']), 1)
 
-    def test_private_account_hides_portfolio(self):
+    def test_private_account_can_publish_portfolio_independently(self):
         self.profile.is_profile_public = False
         self.profile.save()
         self.client.post('/api/portfolio/publish/', {}, format='json')
         self.client.force_authenticate(user=None)
-        self.assertEqual(self.client.get('/api/portfolio/pub/').status_code, status.HTTP_404_NOT_FOUND)
+        response = self.client.get('/api/portfolio/pub/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
 
 class PortfolioVisibilityLeakTest(TestCase):
@@ -311,7 +312,6 @@ class PortfolioMediaAndUrlValidationTest(TestCase):
         }, format='multipart')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertTrue(response.data['cover_image_url'])
-
     def test_add_and_remove_project_image(self):
         project = StudentProject.objects.create(user=self.user, title='P', slug='p',
                                                 short_description='x', category='other')
@@ -340,3 +340,40 @@ class PortfolioMediaAndUrlValidationTest(TestCase):
     def test_accepts_valid_png(self):
         ok = _Namespace(size=1024, content_type='image/png')
         self.assertIs(_validate_project_image(ok, 'cover_image'), ok)
+
+
+class PortfolioFollowTest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.owner = User.objects.create_user(username='follow-owner', password='pw')
+        UserProfile.objects.create(user=self.owner, is_profile_public=True)
+        Portfolio.objects.create(user=self.owner, is_published=True)
+        self.follower = User.objects.create_user(username='follower', password='pw')
+        UserProfile.objects.create(user=self.follower, is_profile_public=True)
+        self.client.force_authenticate(user=self.follower)
+
+    def test_follow_and_unfollow_are_idempotent(self):
+        first = self.client.post('/api/users/follow-owner/follow/')
+        second = self.client.post('/api/users/follow-owner/follow/')
+        self.assertEqual(first.status_code, status.HTTP_200_OK)
+        self.assertEqual(second.data['followers_count'], 1)
+        self.assertEqual(Follow.objects.count(), 1)
+
+        removed = self.client.delete('/api/users/follow-owner/follow/')
+        self.assertEqual(removed.data['following'], False)
+        self.assertEqual(Follow.objects.count(), 0)
+
+    def test_self_follow_is_rejected(self):
+        self.client.force_authenticate(user=self.owner)
+        response = self.client.post('/api/users/follow-owner/follow/')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_public_portfolio_exposes_relationship_state(self):
+        response = self.client.get('/api/portfolio/follow-owner/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['followers_count'], 0)
+        self.assertFalse(response.data['is_following'])
+        self.client.post('/api/users/follow-owner/follow/')
+        response = self.client.get('/api/portfolio/follow-owner/')
+        self.assertEqual(response.data['followers_count'], 1)
+        self.assertTrue(response.data['is_following'])
