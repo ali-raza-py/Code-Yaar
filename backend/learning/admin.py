@@ -13,10 +13,37 @@ from .models import (
     Portfolio, StudentProject, ProjectImage,
     Competition, CompetitionRegistration, CompetitionTeam,
     CompetitionTeamMember, CompetitionSubmission, CompetitionResult,
-    UserNotification, NotificationEmailLog,
+    UserNotification, NotificationEmailLog, MaintenanceSettings,
 )
 
 User = get_user_model()
+
+
+@admin.register(MaintenanceSettings)
+class MaintenanceSettingsAdmin(admin.ModelAdmin):
+    list_display = ['status', 'maintenance_message', 'estimated_return_time', 'updated_at']
+    fields = ['is_enabled', 'maintenance_message', 'estimated_return_time', 'updated_at']
+    readonly_fields = ['updated_at']
+    list_display_links = ['status']
+
+    @admin.display(description='Status', boolean=True)
+    def status(self, obj):
+        return obj.is_enabled
+
+    def has_module_permission(self, request):
+        return request.user.is_superuser
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Competition)

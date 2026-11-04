@@ -32,6 +32,16 @@ class IsAdministrator(BasePermission):
         return user_role(request.user) == 'administrator'
 
 
+class IsSuperAdmin(BasePermission):
+    message = 'Super Admin access required.'
+
+    def has_permission(self, request, view):
+        return bool(
+            getattr(request.user, 'is_authenticated', False)
+            and request.user.is_superuser
+        )
+
+
 class IsEmailVerified(BasePermission):
     """Gate for features that require a verified email address.
 

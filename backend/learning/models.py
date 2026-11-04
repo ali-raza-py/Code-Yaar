@@ -1,4 +1,5 @@
 import hashlib
+import uuid
 
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -6,6 +7,7 @@ from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
+from django.utils.text import slugify
 
 
 def hash_auth_token(raw_token: str) -> str:
@@ -108,9 +110,12 @@ class UserProfile(models.Model):
         if not value:
             return ''
         text = getattr(value, 'name', '') or str(value)
-        if text.startswith(('http://', 'https://', '/')):
+        if text.startswith(('http://', 'https://')):
             return text
-        return value.url
+        # Frontend and API commonly run on different origins. Keep legacy
+        # root-relative values usable by pointing them at the configured API.
+        path = text if text.startswith('/') else f'/{text}'
+        return f"{settings.BACKEND_URL.rstrip('/')}{path}"
 
     def get_notification_preference(self, key: str) -> bool:
         """Preferences default to on until the learner opts out explicitly."""
@@ -959,6 +964,7 @@ class UserNotification(models.Model):
         COMPETITION_REGISTERED = 'competition_registered', 'Competition registration confirmed'
         COMPETITION_APPROVED = 'competition_approved', 'Competition registration approved'
         COMPETITION_REJECTED = 'competition_rejected', 'Competition registration rejected'
+        COMPETITION_WAITLISTED = 'competition_waitlisted', 'Competition application waitlisted'
         COMPETITION_REMINDER = 'competition_reminder', 'Competition reminder'
         TEAM_INVITATION = 'team_invitation', 'Competition team invitation'
         COMP_SUBMISSION_RECEIVED = 'submission_received', 'Competition submission received'
@@ -1027,6 +1033,335 @@ class UserNotification(models.Model):
             ),
             models.Index(fields=['user', '-created_at'], name='notif_user_created'),
         ]
+
+
+class Announcement(models.Model):
+    """Platform announcement authored and managed by administrators.
+
+    ``status`` is the authoritative publishing state (draft → published ⇄
+    unpublished → archived); ``is_published`` is kept in sync on save so the
+    many existing ``is_published`` filters across the codebase stay honest.
+    """
+
+    class Status(models.TextChoices):
+        DRAFT = 'draft', 'Draft'
+        PUBLISHED = 'published', 'Published'
+        UNPUBLISHED = 'unpublished', 'Unpublished'
+        ARCHIVED = 'archived', 'Archived'
+
+    class Category(models.TextChoices):
+        GENERAL = 'general', 'General'
+        PLATFORM_UPDATES = 'platform_updates', 'Platform Updates'
+        HACKATHONS = 'hackathons', 'Hackathons'
+        COURSES = 'courses', 'Courses'
+        COMPETITIONS = 'competitions', 'Competitions'
+        MAINTENANCE = 'maintenance', 'Maintenance'
+        IMPORTANT = 'important', 'Important Notices'
+
+    class Priority(models.TextChoices):
+        NORMAL = 'normal', 'Normal'
+        IMPORTANT = 'important', 'Important'
+        URGENT = 'urgent', 'Urgent'
+
+    AUDIENCE_CHOICES = [
+        ('all', 'Everyone'),
+        ('students', 'Students'),
+        ('instructors', 'Instructors'),
+        ('admins', 'Administrators'),
+    ]
+
+    title = models.CharField(max_length=200)
+    slug = models.SlugField(max_length=220, unique=True, blank=True, null=True)
+    body = models.TextField()
+    short_description = models.CharField(max_length=400, blank=True, default='')
+    cover_image = models.ImageField(upload_to='announcement-covers/%Y/', blank=True, default='')
+    category = models.CharField(max_length=30, choices=Category.choices, default=Category.GENERAL)
+    priority = models.CharField(max_length=10, choices=Priority.choices, default=Priority.NORMAL)
+    target_audience = models.CharField(max_length=50, default='all')
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
+    is_published = models.BooleanField(default=False)
+    scheduled_at = models.DateTimeField(null=True, blank=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='created_announcements',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.title
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base = slugify(self.title) or 'announcement'
+            candidate, suffix = base, 1
+            while Announcement.objects.filter(slug=candidate).exclude(pk=self.pk).exists():
+                candidate = f'{base}-{suffix}'
+                suffix += 1
+            self.slug = candidate[:220]
+        # Keep the legacy boolean honest with the authoritative status field.
+        self.is_published = self.status == self.Status.PUBLISHED
+        update_fields = kwargs.get('update_fields')
+        if update_fields is not None:
+            # Partial saves must still persist the synced slug/boolean.
+            kwargs['update_fields'] = list(
+                set(update_fields) | {'slug', 'is_published'}
+            )
+        super().save(*args, **kwargs)
+
+    @property
+    def is_live(self):
+        """Publicly visible right now: published, due, and not expired."""
+        now = timezone.now()
+        if self.status != self.Status.PUBLISHED:
+            return False
+        if self.scheduled_at and self.scheduled_at > now:
+            return False
+        if self.expires_at and self.expires_at <= now:
+            return False
+        return True
+
+
+class PlatformUpdate(models.Model):
+    """A changelog entry describing product improvements and new features.
+
+    Distinct from :class:`Announcement` (time-sensitive communications):
+    updates are the permanent, chronological record of what changed on the
+    platform and are rendered on the public Updates/Changelog page.
+    """
+
+    class Status(models.TextChoices):
+        DRAFT = 'draft', 'Draft'
+        PUBLISHED = 'published', 'Published'
+        UNPUBLISHED = 'unpublished', 'Unpublished'
+        ARCHIVED = 'archived', 'Archived'
+
+    class Category(models.TextChoices):
+        NEW_FEATURE = 'feature', 'New Feature'
+        COURSE = 'course', 'Courses & Tracks'
+        IMPROVEMENT = 'improvement', 'Improvement'
+        BUG_FIX = 'bug_fix', 'Bug Fix'
+        PERFORMANCE = 'performance', 'Performance'
+        CERTIFICATE = 'certificate', 'Certificates'
+        OTHER = 'other', 'Other'
+
+    AUDIENCE_CHOICES = [
+        ('all', 'Everyone'),
+        ('students', 'Students'),
+        ('instructors', 'Instructors'),
+    ]
+
+    title = models.CharField(max_length=200)
+    slug = models.SlugField(max_length=220, unique=True, blank=True, null=True)
+    version = models.CharField(max_length=40, blank=True, default='')
+    category = models.CharField(max_length=20, choices=Category.choices, default=Category.NEW_FEATURE)
+    summary = models.CharField(max_length=500, blank=True, default='')
+    content = models.TextField()
+    change_list = models.JSONField(default=list, blank=True, help_text='Detailed change bullets')
+    cover_image = models.ImageField(upload_to='update-covers/%Y/', blank=True, default='')
+    target_audience = models.CharField(max_length=20, choices=AUDIENCE_CHOICES, default='all')
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
+    published_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='created_platform_updates',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-published_at', '-created_at']
+        verbose_name_plural = 'platform updates'
+
+    def __str__(self):
+        return self.title
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base = slugify(self.title) or 'update'
+            candidate, suffix = base, 1
+            while PlatformUpdate.objects.filter(slug=candidate).exclude(pk=self.pk).exists():
+                candidate = f'{base}-{suffix}'
+                suffix += 1
+            self.slug = candidate[:220]
+        update_fields = kwargs.get('update_fields')
+        if update_fields is not None and 'slug' not in update_fields:
+            kwargs['update_fields'] = list(set(update_fields) | {'slug'})
+        super().save(*args, **kwargs)
+
+
+class EmailCampaign(models.Model):
+    """One admin-composed bulk email run, tracked independently of publishing.
+
+    Publishing content and emailing it are deliberately separate actions:
+    a campaign is only created when an administrator explicitly chooses to
+    email an audience, and ``status`` reflects the real transport outcome —
+    ``sent`` means the SMTP backend accepted the messages, never merely that
+    the campaign was queued.
+    """
+
+    class Status(models.TextChoices):
+        DRAFT = 'draft', 'Draft'
+        QUEUED = 'queued', 'Queued'
+        SENDING = 'sending', 'Sending'
+        SENT = 'sent', 'Sent'
+        PARTIAL = 'partial', 'Partially sent'
+        FAILED = 'failed', 'Failed'
+
+    class Audience(models.TextChoices):
+        ALL = 'all', 'All registered users'
+        STUDENTS = 'students', 'Students'
+        INSTRUCTORS = 'instructors', 'Instructors'
+        ADMINS = 'admins', 'Administrators'
+        COMP_PARTICIPANTS = 'comp_participants', 'Hackathon participants'
+        COMP_APPROVED = 'comp_approved', 'Approved hackathon applicants'
+        COMP_PENDING = 'comp_pending', 'Pending hackathon applicants'
+        COMP_WAITLISTED = 'comp_waitlisted', 'Waitlisted hackathon applicants'
+
+    class Template(models.TextChoices):
+        GENERAL = 'general', 'General announcement'
+        NOTICE = 'notice', 'Important platform notice'
+        UPDATE = 'platform_update', 'Platform update'
+        COURSE = 'new_course', 'New course announcement'
+
+    name = models.CharField(max_length=200, help_text='Internal campaign name')
+    subject = models.CharField(max_length=200)
+    heading = models.CharField(max_length=200, blank=True, default='')
+    body = models.TextField(help_text='Message body (plain text; rendered into the branded template)')
+    template = models.CharField(max_length=30, choices=Template.choices, default=Template.GENERAL)
+    banner_image = models.ImageField(upload_to='campaign-banners/%Y/', blank=True, default='')
+    cta_label = models.CharField(max_length=80, blank=True, default='')
+    cta_url = models.URLField(blank=True, default='')
+    audience = models.CharField(max_length=30, choices=Audience.choices, default=Audience.ALL)
+    competition = models.ForeignKey(
+        'Competition', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='email_campaigns',
+        help_text='Required for hackathon-participant audiences',
+    )
+    related_announcement = models.ForeignKey(
+        Announcement, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='email_campaigns',
+    )
+    related_update = models.ForeignKey(
+        'PlatformUpdate', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='email_campaigns',
+    )
+    essential = models.BooleanField(
+        default=False,
+        help_text='Essential mail bypasses marketing preferences and the unsubscribe list',
+    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT)
+    recipient_count = models.PositiveIntegerField(default=0)
+    sent_count = models.PositiveIntegerField(default=0)
+    failed_count = models.PositiveIntegerField(default=0)
+    skipped_count = models.PositiveIntegerField(default=0)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='created_email_campaigns',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.name
+
+
+class EmailCampaignRecipient(models.Model):
+    """Per-recipient delivery record for one campaign.
+
+    The address is snapshotted at fan-out time so the history stays truthful
+    even if the user later changes it; API responses must never expose the
+    raw address to requests that are not super-admin.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        SENT = 'sent', 'Sent'
+        RENDER_ONLY = 'render_only', 'Rendered (no real transport)'
+        SKIPPED = 'skipped', 'Skipped (preference / unsubscribed)'
+        FAILED = 'failed', 'Failed'
+
+    campaign = models.ForeignKey(
+        EmailCampaign, on_delete=models.CASCADE, related_name='recipients',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='campaign_emails',
+    )
+    email = models.CharField(max_length=254)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    error = models.CharField(max_length=500, blank=True, default='')
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at']
+        constraints = [
+            models.UniqueConstraint(fields=['campaign', 'user'], name='unique_campaign_recipient'),
+        ]
+        indexes = [
+            models.Index(fields=['campaign', 'status']),
+        ]
+
+    def __str__(self):
+        return f'{self.campaign_id}:{self.status}'
+
+
+class PlatformSetting(models.Model):
+    key = models.CharField(max_length=100, unique=True)
+    value = models.JSONField(default=dict)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.key
+
+
+class MaintenanceSettings(models.Model):
+    """The singleton configuration for platform maintenance mode."""
+
+    is_enabled = models.BooleanField(default=False)
+    maintenance_message = models.TextField(
+        blank=True,
+        default='',
+        help_text='Message shown to visitors while maintenance mode is enabled.',
+    )
+    estimated_return_time = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    SINGLETON_PK = 1
+
+    class Meta:
+        verbose_name = 'Maintenance settings'
+        verbose_name_plural = 'Maintenance settings'
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(id=1),
+                name='maintenance_settings_singleton',
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        self.pk = self.SINGLETON_PK
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_solo(cls):
+        settings, _ = cls.objects.get_or_create(pk=cls.SINGLETON_PK)
+        return settings
+
+    def __str__(self):
+        return 'Maintenance mode'
 
 
 class NotificationEmailLog(models.Model):
@@ -1189,6 +1524,34 @@ class Portfolio(models.Model):
         ordering = ['-updated_at']
 
 
+class Follow(models.Model):
+    """A directed relationship between two learner accounts."""
+
+    follower = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='following_relationships',
+    )
+    following = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='follower_relationships',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f'{self.follower.username} follows {self.following.username}'
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['follower', 'following'],
+                name='unique_user_follow',
+            ),
+        ]
+        ordering = ['-created_at']
+
+
 class StudentProject(models.Model):
     """A project a learner has actually built, shown on their portfolio.
 
@@ -1329,6 +1692,11 @@ class Challenge(models.Model):
 
     # Rich, learner-facing problem content.
     problem_statement = models.TextField(blank=True, default='')
+    learning_objective = models.TextField(
+        blank=True,
+        default='',
+        help_text='What the learner practices by completing this challenge',
+    )
     requirements = models.JSONField(default=list, blank=True, help_text='Bullet list of what to do')
     input_description = models.TextField(blank=True, default='')
     output_description = models.TextField(blank=True, default='')
@@ -1672,6 +2040,17 @@ class Competition(models.Model):
     problem_statement = models.TextField(blank=True, default='')
     submission_configuration = models.JSONField(default=dict, blank=True)
     prize_information = models.TextField(blank=True, default='')
+    # ── Hackathon-management extensions (registration, guidance, contact) ──
+    tags = models.JSONField(default=list, blank=True)
+    host_name = models.CharField(max_length=200, blank=True, default='', help_text='Display name of the organizing body')
+    time_zone = models.CharField(max_length=60, default='UTC')
+    registration_fee = models.DecimalField(max_digits=8, decimal_places=2, default=0, help_text='0 means free participation')
+    participation_instructions = models.TextField(blank=True, default='')
+    evaluation_criteria = models.JSONField(default=list, blank=True)
+    submission_requirements = models.TextField(blank=True, default='')
+    contact_information = models.CharField(max_length=250, blank=True, default='')
+    external_resources = models.JSONField(default=list, blank=True, help_text='List of {title, url} links')
+    is_archived = models.BooleanField(default=False)
     is_published = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1685,6 +2064,8 @@ class Competition(models.Model):
 
     @property
     def status(self):
+        if self.is_archived:
+            return 'archived'
         if not self.is_published:
             return 'draft'
         now = timezone.now()
@@ -1707,6 +2088,7 @@ class CompetitionRegistration(models.Model):
     STATUS_CHOICES = [
         ('registered', 'Registered'), ('pending', 'Pending Approval'),
         ('approved', 'Approved'), ('rejected', 'Rejected'),
+        ('waitlisted', 'Waitlisted'),
         ('withdrawn', 'Withdrawn'), ('disqualified', 'Disqualified'),
     ]
     competition = models.ForeignKey(Competition, on_delete=models.CASCADE, related_name='registrations')
@@ -1714,6 +2096,7 @@ class CompetitionRegistration(models.Model):
     team = models.ForeignKey('CompetitionTeam', on_delete=models.SET_NULL, null=True, blank=True, related_name='registrations')
     registration_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='registered')
     registration_data = models.JSONField(default=dict, blank=True)
+    reference = models.CharField(max_length=40, unique=True, blank=True, editable=False)
     rules_accepted_at = models.DateTimeField()
     registered_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1723,6 +2106,114 @@ class CompetitionRegistration(models.Model):
             models.UniqueConstraint(fields=['competition', 'user'], name='unique_competition_registration'),
         ]
         ordering = ['-registered_at']
+
+    def save(self, *args, **kwargs):
+        if not self.reference:
+            self.reference = f'REG-{uuid.uuid4().hex[:10].upper()}'
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f'{self.reference} ({self.registration_status})'
+
+
+class RegistrationFormField(models.Model):
+    """One field of a per-hackathon registration form.
+
+    The default field set is seeded automatically for every competition so
+    administrators start from the standard questions and customize from
+    there; nothing about a registration form is hardcoded in the frontend.
+    """
+
+    class FieldType(models.TextChoices):
+        SHORT_TEXT = 'short_text', 'Short text'
+        LONG_TEXT = 'long_text', 'Long text'
+        EMAIL = 'email', 'Email'
+        PHONE = 'phone', 'Phone'
+        NUMBER = 'number', 'Number'
+        DROPDOWN = 'dropdown', 'Dropdown'
+        MULTIPLE_CHOICE = 'multiple_choice', 'Multiple choice'
+        CHECKBOXES = 'checkboxes', 'Checkboxes'
+        URL = 'url', 'URL'
+        DATE = 'date', 'Date'
+
+    competition = models.ForeignKey(
+        Competition, on_delete=models.CASCADE, related_name='form_fields',
+    )
+    label = models.CharField(max_length=200)
+    field_key = models.SlugField(max_length=80)
+    field_type = models.CharField(max_length=20, choices=FieldType.choices, default=FieldType.SHORT_TEXT)
+    description = models.CharField(max_length=400, blank=True, default='')
+    placeholder = models.CharField(max_length=200, blank=True, default='')
+    required = models.BooleanField(default=False)
+    options = models.JSONField(default=list, blank=True, help_text='Choices for dropdown/multiple_choice/checkboxes')
+    validation = models.JSONField(default=dict, blank=True, help_text='Optional min/max/min_length/max_length bounds')
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    is_default = models.BooleanField(default=False, help_text='Part of the auto-seeded default field set')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['competition', 'order', 'id']
+        constraints = [
+            models.UniqueConstraint(fields=['competition', 'field_key'], name='unique_competition_form_field'),
+        ]
+        indexes = [models.Index(fields=['competition', 'is_active', 'order'])]
+
+    def __str__(self):
+        return f'{self.competition_id}:{self.label}'
+
+
+#: The fifteen default questions seeded for every new hackathon form.
+FormFieldType = RegistrationFormField.FieldType
+DEFAULT_REGISTRATION_FIELDS = [
+    ('Full name', 'full_name', FormFieldType.SHORT_TEXT, True),
+    ('Email address', 'email_address', FormFieldType.EMAIL, True),
+    ('Username', 'username', FormFieldType.SHORT_TEXT, True),
+    ('Phone number', 'phone_number', FormFieldType.PHONE, False),
+    ('Educational institution', 'institution', FormFieldType.SHORT_TEXT, True),
+    ('Current education level', 'education_level', FormFieldType.DROPDOWN, True),
+    ('City', 'city', FormFieldType.SHORT_TEXT, True),
+    ('Country', 'country', FormFieldType.SHORT_TEXT, True),
+    ('Programming experience', 'programming_experience', FormFieldType.DROPDOWN, True),
+    ('Skills and technologies', 'skills', FormFieldType.LONG_TEXT, False),
+    ('GitHub profile URL', 'github_url', FormFieldType.URL, False),
+    ('LinkedIn profile URL', 'linkedin_url', FormFieldType.URL, False),
+    ('Portfolio URL', 'portfolio_url', FormFieldType.URL, False),
+    ('Project idea or motivation', 'project_idea', FormFieldType.LONG_TEXT, False),
+    ('Participation type', 'participation_type', FormFieldType.MULTIPLE_CHOICE, True),
+]
+
+
+def seed_default_registration_fields(competition):
+    """Create the default registration fields for one competition.
+
+    Idempotent: existing field keys are left untouched so re-running after a
+    manual customization never duplicates or overwrites admin edits.
+    """
+    existing = set(
+        RegistrationFormField.objects.filter(competition=competition).values_list('field_key', flat=True)
+    )
+    defaults = {
+        'education_level': ['Class 9-10', 'Class 11-12', 'Diploma / Associate', 'Bachelor', 'Master or higher', 'Self-taught'],
+        'programming_experience': ['Complete beginner', 'Some basics', 'Intermediate', 'Advanced'],
+        'participation_type': ['Individual', 'Team'],
+    }
+    created = []
+    for order, (label, key, ftype, required) in enumerate(DEFAULT_REGISTRATION_FIELDS, 1):
+        if key in existing:
+            continue
+        created.append(RegistrationFormField.objects.create(
+            competition=competition,
+            label=label,
+            field_key=key,
+            field_type=ftype,
+            required=required,
+            options=defaults.get(key, []),
+            order=order,
+            is_default=True,
+        ))
+    return created
 
 
 class CompetitionTeam(models.Model):
