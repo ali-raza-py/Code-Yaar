@@ -206,13 +206,16 @@ def issue_certificate(user, course: Course, *, issued_by=None,
         user.get_full_name().strip()
         or user.username
     )
+    # The issued record and the certificate email both name the course, so the
+    # title is bound once here instead of re-reading `course` in three places.
+    course_title = course.title
 
     certificate = Certificate.objects.create(
         user=user,
         course=course,
         enrollment=enrollment,
         student_name=student_name,
-        course_title=course.title,
+        course_title=course_title,
         completion_verified_at=timezone.now(),
         final_score=result.final_score,
         policy_version=course.policy_version if hasattr(course, 'policy_version') else 1,

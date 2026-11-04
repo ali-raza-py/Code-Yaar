@@ -39,6 +39,22 @@ RENDER_ONLY_BACKENDS = frozenset({
     'django.core.mail.backends.filebased',
 })
 
+
+def transport_is_render_only() -> bool:
+    """True when the configured mail transport only renders the message.
+
+    ``settings.MAILERS`` stores the *full* dotted path to the backend class
+    (``'django.core.mail.backends.console.EmailBackend'``) while
+    ``RENDER_ONLY_BACKENDS`` lists backend *modules*, so comparing the raw
+    setting against it never matched and a console-backend server recorded its
+    printed copies as ``sent`` — the very outage-hiding this module exists to
+    prevent. The class segment is dropped before the comparison.
+    """
+    backend = settings.MAILERS.get('default', {}).get('BACKEND', '')
+    module = backend.rsplit('.', 1)[0] if '.' in backend else backend
+    return module in RENDER_ONLY_BACKENDS
+
+
 # Context every template receives beyond the per-event context. ``logo_url``
 # points at the frontend's published white mark so it stays visible on the
 # navy header band; the alt text carries the brand either way.
@@ -62,6 +78,18 @@ EMAIL_PREFERENCE_BY_KIND = {
 }
 
 EMAIL_PREFERENCE_KEYS = tuple(EMAIL_PREFERENCE_BY_KIND.values())
+
+#: Category pill shown in the branded header band of every email. Keyed by the
+#: same ``kind`` values the preference map uses, so the label always matches
+#: the box the message actually came from.
+EYEBROW_BY_KIND = {
+    'security': 'Account security',
+    'learning': 'Learning',
+    'competition': 'Competitions',
+    'achievement': 'Achievements',
+    'certificate': 'Credentials',
+    'announcement': 'Announcements',
+}
 
 
 def _sanitize_error(exc: Exception) -> str:
@@ -87,6 +115,7 @@ def email_context(user=None, **extra) -> dict:
     }
     if user is not None:
         context['first_name'] = (user.get_full_name() or '').strip() or user.username
+        context['recipient_email'] = user.email
     context.update(extra)
     return context
 
@@ -123,29 +152,41 @@ def _claim(user, email_key: str, defaults: dict) -> NotificationEmailLog | None:
 
 
 def _deliver_email(log, subject, text, html, now) -> None:
-    """Transmit one claimed email and record the true outcome."""
-    backend_name = settings.MAILERS.get('default', {}).get('BACKEND', '')
+    """Transmit one claimed email and record the true outcome.
+
+    Both the ledger row and the in-memory ``log`` are updated: callers that
+    delivered synchronously (``send_verification_email`` and friends) answer
+    from ``log.status``, and a row that still read ``queued`` would turn a
+    message the transport accepted into a false "we could not send it".
+    """
     try:
         message = _build_message(log, subject, text, html)
         accepted = int(message.send())
     except Exception as exc:
+        reason = _sanitize_error(exc)
         NotificationEmailLog.objects.filter(pk=log.pk).update(
             status=NotificationEmailLog.Status.FAILED,
-            error=_sanitize_error(exc),
+            error=reason,
             attempted_at=now,
         )
+        log.status = NotificationEmailLog.Status.FAILED
+        log.error = reason
+        log.attempted_at = now
         logger.exception('Email "%s" (%s) could not be sent', subject, log.email_key)
         return
 
-    if backend_name in RENDER_ONLY_BACKENDS or accepted == 0:
+    if transport_is_render_only() or accepted == 0:
         NotificationEmailLog.objects.filter(pk=log.pk).update(
             status=NotificationEmailLog.Status.RENDER_ONLY,
             attempted_at=now,
         )
+        log.status = NotificationEmailLog.Status.RENDER_ONLY
+        log.attempted_at = now
         logger.warning(
             'Email "%s" (%s) was rendered by %s and never left the server; '
             'set EMAIL_BACKEND to an SMTP backend to send real mail.',
-            subject, log.email_key, backend_name,
+            subject, log.email_key,
+            settings.MAILERS.get('default', {}).get('BACKEND', ''),
         )
         return
 
@@ -155,6 +196,10 @@ def _deliver_email(log, subject, text, html, now) -> None:
         attempted_at=now,
         error='',
     )
+    log.status = NotificationEmailLog.Status.SENT
+    log.sent_at = now
+    log.attempted_at = now
+    log.error = ''
 
 
 def _build_message(log, subject, text, html):
@@ -237,7 +282,11 @@ def send_notification_email(
     if log is None:
         return None
 
-    html, text = render_email(template, email_context(user=user, **(context or {})))
+    # The layout always wants a subject line and a category pill; an event that
+    # names its own eyebrow (or subject) simply overrides the derived value.
+    render_context = {'subject': subject, 'eyebrow': EYEBROW_BY_KIND.get(kind, '')}
+    render_context.update(context or {})
+    html, text = render_email(template, email_context(user=user, **render_context))
     now = timezone.now()
     if transaction.get_connection().in_atomic_block:
         # Never email from inside a transaction whose source rows may roll
