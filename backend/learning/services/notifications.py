@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 
+from django.conf import settings
 from django.utils import timezone
 
 from ..models import UserProfile, UserNotification
@@ -100,6 +101,10 @@ _TYPE_GRAPH = {
     Type.COMPETITION_REJECTED: {
         'category': Category.COMPETITION, 'in_app_pref': 'competitions',
         'email_template': 'competition_registration_rejected', 'email_kind': 'competition',
+    },
+    Type.COMPETITION_WAITLISTED: {
+        'category': Category.COMPETITION, 'in_app_pref': 'competitions',
+        'email_template': 'competition_waitlisted', 'email_kind': 'competition',
     },
     Type.COMPETITION_REMINDER: {
         'category': Category.COMPETITION, 'in_app_pref': 'competitions',
@@ -268,11 +273,18 @@ def notify(
         return notification
 
     try:
+        # An event that carries an in-app link hands its email the same call to
+        # action: the branded button then always exists and always opens the
+        # screen the notification points at, even when the caller only supplied
+        # a heading and a body. Explicit email_context values win.
+        context = dict(email_context or {'message': body, 'heading': title})
+        if link and not context.get('cta_url'):
+            context['cta_url'] = settings.FRONTEND_URL + link
         email_service.send_notification_email(
             user,
             template=template,
             subject=(email_subject or title)[:200],
-            context=email_context or {'message': body, 'heading': title},
+            context=context,
             email_key=email_key,
             kind=graph['email_kind'],
             security=graph.get('security', False),
