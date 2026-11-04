@@ -6,8 +6,9 @@
     Runs Django on -BackendPort inside its own "Code Yaar API" window so
     tracebacks, mail warnings and — when the console email backend is configured
     — the verification and password-reset emails stay readable, waits until
-    /api/health/ answers, then runs `next dev` in this window. When the frontend
-    stops, the API process tree is stopped with it.
+    /api/health/ answers, then runs `next dev` in this window. A normal Ctrl+C
+    stops both services; a frontend failure leaves the API running so its
+    health and traceback remain available while the frontend issue is diagnosed.
 
     Backend CORS and FRONTEND_URL are derived from the actual ports being used,
     so `localhost` and `127.0.0.1` on either side always match and the browser
@@ -171,6 +172,48 @@ function Stop-ProcessTree([int]$ProcessId) {
     Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
 }
 
+function Get-NextDevProcesses {
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.CommandLine -and
+            $_.CommandLine -like '*next*dev*' -and
+            $_.CommandLine -like "*$frontendDir*"
+        }
+}
+
+function Clear-NextDevLock {
+    $lockPath = Join-Path $frontendDir '.next\dev\lock'
+    if (-not (Test-Path $lockPath)) { return }
+
+    $nextProcesses = @(Get-NextDevProcesses)
+    if ($nextProcesses.Count -eq 0) {
+        Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+        Write-Note 'removed stale Next.js development lock'
+        return
+    }
+
+    $owners = ($nextProcesses | ForEach-Object { "pid $($_.ProcessId)" }) -join ', '
+    if (-not $Force) {
+        Stop-WithError "the frontend is already running ($owners). Stop that Next.js process or rerun with -Force."
+    }
+
+    foreach ($process in $nextProcesses) {
+        if (Test-OwnedByLauncher ([int]$process.ProcessId)) {
+            Stop-WithError "the frontend is already running in this terminal (pid $($process.ProcessId)). Press Ctrl+C there first."
+        }
+        Write-Note "-Force: stopping existing Next.js process pid $($process.ProcessId)"
+        Stop-ProcessTree -ProcessId ([int]$process.ProcessId)
+    }
+
+    $deadline = (Get-Date).AddSeconds(5)
+    while ((Test-Path $lockPath) -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 250
+    }
+    if (Test-Path $lockPath) {
+        Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # Walks up from a process to the root of its call chain while each parent is
 # part of that same chain (the predicate holds). For Django this lands on the
 # outer `manage.py runserver` process: killing anything below it only makes
@@ -190,6 +233,7 @@ function Find-ChainRoot([int]$ProcessId, [scriptblock]$InChain) {
 # One dev.ps1 run is one API window; PIDs are recorded so the finally block
 # always reaches it, even if Start-Process's returned process went stale.
 $script:apiWindowPids = @()
+$script:preserveApiOnFrontendExit = $false
 
 # The API window records the PID of the dev.ps1 run that spawned it, so a later
 # run can tell its own orphaned windows (launcher gone: safe to stop, otherwise
@@ -293,6 +337,7 @@ if ($BackendPort -eq $FrontendPort) {
 # (for example a hand-started runserver) is stopped too; without it the
 # launcher refuses and names what holds the port.
 Stop-OrphanedApiWindows
+Clear-NextDevLock
 foreach ($port in @($BackendPort, $FrontendPort)) {
     $owner = Get-PortOwner $port
     if ($owner) {
@@ -454,23 +499,34 @@ try {
     Push-Location $frontendDir
     try {
         & $npm 'run' 'dev' '--' '-p' $FrontendPort
+    if ($LASTEXITCODE -ne 0) {
+        $script:preserveApiOnFrontendExit = $true
+        Write-Host "ERROR: the frontend stopped (exit code $LASTEXITCODE)." -ForegroundColor Red
+        Write-Host "The API is still running at http://127.0.0.1:$BackendPort." -ForegroundColor Yellow
+        Write-Host "Fix the frontend error above, then press Ctrl+C in the API window when finished." -ForegroundColor Yellow
+        exit $LASTEXITCODE
+    }
     } finally {
-        Pop-Location
+    Pop-Location
     }
 } finally {
-    Write-Step 'Stopping the API'
-    # The window runs with -NoExit and Django's autoreloader re-spawns its
-    # server child whenever it is killed alone, so the whole tree of every
-    # window this run launched is stopped, window included. Windows are looked
-    # up by this launcher's PID, not by title, so another live dev.ps1 session
-    # on a different port keeps its own API window. The sweep repeats until the
-    # sockets are free, so a worker re-spawned between checks is caught too.
-    Stop-TaggedApiWindows -LauncherPid $PID
-    foreach ($windowPid in $script:apiWindowPids) {
-        Stop-ProcessTree -ProcessId ([int]$windowPid)
+    if ($script:preserveApiOnFrontendExit) {
+        Write-Warn "leaving the API running at http://127.0.0.1:$BackendPort because the frontend exited with an error"
+    } else {
+        Write-Step 'Stopping the API'
+        # The window runs with -NoExit and Django's autoreloader re-spawns its
+        # server child whenever it is killed alone, so the whole tree of every
+        # window this run launched is stopped, window included. Windows are looked
+        # up by this launcher's PID, not by title, so another live dev.ps1 session
+        # on a different port keeps its own API window. The sweep repeats until the
+        # sockets are free, so a worker re-spawned between checks is caught too.
+        Stop-TaggedApiWindows -LauncherPid $PID
+        foreach ($windowPid in $script:apiWindowPids) {
+            Stop-ProcessTree -ProcessId ([int]$windowPid)
+        }
+        # Ctrl+C does not always unwind a pipeline cleanly in Windows PowerShell,
+        # so a tagged window that had already dropped out of the list above is
+        # reclaimed here as well. Windows of other live launchers are not touched.
+        Stop-OrphanedApiWindows
     }
-    # Ctrl+C does not always unwind a pipeline cleanly in Windows PowerShell,
-    # so a tagged window that had already dropped out of the list above is
-    # reclaimed here as well. Windows of other live launchers are not touched.
-    Stop-OrphanedApiWindows
 }
