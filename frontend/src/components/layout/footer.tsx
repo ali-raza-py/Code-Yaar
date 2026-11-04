@@ -10,6 +10,9 @@ const footerLinks = [
       { label: "Courses", href: "/courses" },
       { label: "Learning Tracks", href: "/tracks" },
       { label: "Challenges", href: "/challenges" },
+      { label: "Hackathons", href: "/competitions" },
+      { label: "Announcements", href: "/announcements" },
+      { label: "Updates", href: "/updates" },
       { label: "Leaderboard", href: "/leaderboard" },
       { label: "Dashboard", href: "/dashboard" },
     ],
@@ -37,7 +40,7 @@ const footerLinks = [
 
 export function Footer() {
   return (
-    <footer className="border-t border-[var(--color-section-border)] bg-white">
+    <footer className="border-t border-[var(--color-section-border)] bg-background">
       <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
         <div className="grid grid-cols-2 gap-8 md:grid-cols-5">
           {/* Brand */}

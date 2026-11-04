@@ -72,7 +72,7 @@ export default function CertificatePanel({ courseSlug, enrolled }: Props) {
 
   if (!user) {
     return (
-      <div className="rounded-xl border border-border bg-white p-5">
+      <div className="rounded-xl border border-border bg-card p-5">
         <h3 className="mb-2 text-sm font-semibold text-foreground">Certificate</h3>
         <p className="text-sm text-muted-foreground">
           Sign in and complete this course to earn a verifiable certificate.
@@ -83,7 +83,7 @@ export default function CertificatePanel({ courseSlug, enrolled }: Props) {
 
   if (!enrolled) {
     return (
-      <div className="rounded-xl border border-border bg-white p-5">
+      <div className="rounded-xl border border-border bg-card p-5">
         <h3 className="mb-2 text-sm font-semibold text-foreground">Certificate</h3>
         <p className="text-sm text-muted-foreground">
           Enroll in this course to track eligibility for its certificate.
@@ -93,7 +93,7 @@ export default function CertificatePanel({ courseSlug, enrolled }: Props) {
   }
 
   return (
-    <div className="rounded-xl border border-border bg-white p-5">
+    <div className="rounded-xl border border-border bg-card p-5">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground">Certificate</h3>
         {eligibility?.final_score != null && (

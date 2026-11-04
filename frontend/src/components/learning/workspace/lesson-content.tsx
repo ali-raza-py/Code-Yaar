@@ -20,17 +20,19 @@ interface LessonContentProps {
  * syllabus, and the badge makes the distinction visible on every lesson.
  */
 const SOURCE_BADGES: Record<TextbookReference['source_type'], { label: string; className: string }> = {
+  // State tints are token-driven (success/warning/info), so they stay legible
+  // on both the light card and the dark navy surface.
   official: {
     label: 'Sindh Board textbook',
-    className: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+    className: 'bg-success/10 text-success ring-success/25',
   },
   supplementary: {
     label: 'Supplementary practice',
-    className: 'bg-amber-50 text-amber-700 ring-amber-200',
+    className: 'bg-warning/10 text-warning ring-warning/25',
   },
   additional: {
     label: 'Beyond the textbook',
-    className: 'bg-sky-50 text-sky-700 ring-sky-200',
+    className: 'bg-info/10 text-info ring-info/25',
   },
 };
 
@@ -41,7 +43,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
       return [
         <code
           key={`${keyPrefix}-c${i}`}
-          className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[0.85em] text-pink-600"
+          className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-primary"
         >
           {segment.slice(1, -1)}
         </code>,
@@ -51,7 +53,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
     return segment.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g).map((part, j) => {
       const k = `${keyPrefix}-t${i}-${j}`;
       if (part.startsWith('**') && part.endsWith('**')) {
-        return <strong key={k} className="font-semibold text-gray-900">{part.slice(2, -2)}</strong>;
+        return <strong key={k} className="font-semibold text-foreground">{part.slice(2, -2)}</strong>;
       }
       if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
         return <em key={k} className="italic">{part.slice(1, -1)}</em>;
@@ -122,13 +124,13 @@ function renderContent(body: string, onRunSandbox?: (code: string, language: str
       const level = heading[1].length;
       const content = renderInline(heading[2], `h${key}`);
       if (level === 1) {
-        elements.push(<h1 key={key++} className="mb-3 mt-6 text-2xl font-bold text-gray-900">{content}</h1>);
+        elements.push(<h1 key={key++} className="mb-3 mt-6 text-2xl font-bold text-foreground">{content}</h1>);
       } else if (level === 2) {
-        elements.push(<h2 key={key++} className="mb-2 mt-5 text-lg font-semibold text-gray-900">{content}</h2>);
+        elements.push(<h2 key={key++} className="mb-2 mt-5 text-lg font-semibold text-foreground">{content}</h2>);
       } else if (level === 3) {
-        elements.push(<h3 key={key++} className="mb-2 mt-4 text-base font-semibold text-gray-900">{content}</h3>);
+        elements.push(<h3 key={key++} className="mb-2 mt-4 text-base font-semibold text-foreground">{content}</h3>);
       } else {
-        elements.push(<h4 key={key++} className="mb-1.5 mt-3 text-sm font-semibold text-gray-900">{content}</h4>);
+        elements.push(<h4 key={key++} className="mb-1.5 mt-3 text-sm font-semibold text-foreground">{content}</h4>);
       }
       continue;
     }
@@ -137,7 +139,7 @@ function renderContent(body: string, onRunSandbox?: (code: string, language: str
 
     // ── Horizontal rule ────────────────────────────────────────────────────
     if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) {
-      elements.push(<hr key={key++} className="my-5 border-gray-200" />);
+      elements.push(<hr key={key++} className="my-5 border-border" />);
       continue;
     }
 
@@ -154,12 +156,12 @@ function renderContent(body: string, onRunSandbox?: (code: string, language: str
       }
       const { header, body } = parseTable(block);
       elements.push(
-        <div key={key++} className="my-4 overflow-x-auto rounded-lg border border-gray-200">
+        <div key={key++} className="my-4 overflow-x-auto rounded-lg border border-border bg-card text-card-foreground">
           <table className="w-full border-collapse text-sm">
             <thead>
-              <tr className="bg-gray-50 text-left">
+              <tr className="bg-muted text-left">
                 {header.map((cell, h) => (
-                  <th key={h} className="border-b border-gray-200 px-3 py-2 font-semibold text-gray-900">
+                  <th key={h} className="border-b border-border px-3 py-2 font-semibold text-card-foreground">
                     {renderInline(cell, `th${h}`)}
                   </th>
                 ))}
@@ -169,7 +171,7 @@ function renderContent(body: string, onRunSandbox?: (code: string, language: str
               {body.map((row, r) => (
                 <tr key={r} className="align-top">
                   {row.map((cell, c) => (
-                    <td key={c} className="border-b border-gray-100 px-3 py-2 text-gray-700">
+                    <td key={c} className="border-b border-border/70 px-3 py-2 text-card-foreground">
                       {renderInline(cell, `td${r}-${c}`)}
                     </td>
                   ))}
@@ -190,7 +192,7 @@ function renderContent(body: string, onRunSandbox?: (code: string, language: str
         i += 1;
       }
       elements.push(
-        <blockquote key={key++} className="my-3 border-l-4 border-gray-200 bg-gray-50 px-4 py-2 text-sm text-gray-700">
+        <blockquote key={key++} className="my-3 border-l-4 border-border bg-muted px-4 py-2 text-sm text-foreground/90">
           {renderInline(quote.join(' '), `bq${key}`)}
         </blockquote>,
       );
@@ -207,7 +209,7 @@ function renderContent(body: string, onRunSandbox?: (code: string, language: str
       }
       const ListTag = ordered ? 'ol' : 'ul';
       elements.push(
-        <ListTag key={key++} className={`my-3 space-y-1.5 pl-5 text-sm text-gray-700 ${ordered ? 'list-decimal' : 'list-disc'}`}>
+        <ListTag key={key++} className={`my-3 space-y-1.5 pl-5 text-sm text-foreground/90 ${ordered ? 'list-decimal' : 'list-disc'}`}>
           {items.map((item, n) => (
             <li key={n}>{renderInline(item, `li${n}`)}</li>
           ))}
@@ -218,7 +220,7 @@ function renderContent(body: string, onRunSandbox?: (code: string, language: str
 
     // ── Paragraph ──────────────────────────────────────────────────────────
     elements.push(
-      <p key={key++} className="mb-3 text-sm leading-relaxed text-gray-700">
+      <p key={key++} className="mb-3 text-sm leading-relaxed text-foreground/90">
         {renderInline(line, `p${key}`)}
       </p>,
     );
@@ -235,12 +237,12 @@ export default function LessonContent({ lesson, onRunSandbox }: LessonContentPro
     <div className="px-6 py-6 max-w-2xl mx-auto">
       {/* Lesson Header */}
       <div className="mb-6">
-        <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
           <span>{lesson.chapter_title}</span>
           <span>·</span>
           <span>Lesson {lesson.order}</span>
         </div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">{lesson.title}</h1>
+        <h1 className="text-2xl font-bold text-foreground mb-2">{lesson.title}</h1>
 
         {/* Curriculum provenance — what part of the printed book this is from */}
         {reference && badge && (
@@ -249,7 +251,7 @@ export default function LessonContent({ lesson, onRunSandbox }: LessonContentPro
               {badge.label}
             </span>
             {reference.pages && (
-              <span className="text-gray-500">
+              <span className="text-muted-foreground">
                 {reference.board} · {reference.class} · {reference.label}
               </span>
             )}
@@ -257,12 +259,12 @@ export default function LessonContent({ lesson, onRunSandbox }: LessonContentPro
         )}
 
         {lesson.learning_objective && (
-          <p className="text-sm italic text-gray-600">
+          <p className="text-sm italic text-muted-foreground">
             By the end of this lesson you will be able to: {lesson.learning_objective}
           </p>
         )}
-        <div className="mt-3 flex items-center gap-3 text-xs text-gray-500">
-          <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2 py-0.5 font-medium text-green-700">
+        <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 font-medium text-success">
             +{lesson.xp_reward} XP
           </span>
           <span>{lesson.duration_minutes} min</span>

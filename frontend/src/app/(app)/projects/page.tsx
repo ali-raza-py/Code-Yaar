@@ -67,7 +67,7 @@ export default function ProjectsPage() {
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
       {/* Dark Banner */}
-      <div className="mb-6 overflow-hidden rounded-xl bg-[#0f1d32] p-8 text-white sm:p-10">
+      <div className="mb-6 overflow-hidden rounded-xl border border-border bg-hero-navy p-8 text-white sm:p-10">
         <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-3xl font-bold sm:text-4xl">Real World Projects</h1>
@@ -104,8 +104,8 @@ export default function ProjectsPage() {
             onClick={() => setDifficulty(tab)}
             className={`rounded-lg px-4 py-2 text-sm font-medium capitalize transition-colors ${
               difficulty === tab
-                ? "bg-[#0f1d32] text-white"
-                : "bg-white text-foreground border border-[var(--color-section-border)] hover:bg-[var(--color-section-light)]"
+                ? "bg-foreground text-background"
+                : "bg-card text-foreground border border-border hover:bg-muted"
             }`}
           >
             {tab === "all" ? "All" : tab}
@@ -122,7 +122,7 @@ export default function ProjectsPage() {
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search projects..."
             aria-label="Search projects"
-            className="w-64 rounded-lg border border-[var(--color-section-border)] bg-white px-4 py-2 pl-9 text-sm outline-none focus:border-[var(--primary)]"
+            className="w-64 rounded-lg border border-border bg-card px-4 py-2 pl-9 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-[var(--primary)]"
           />
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         </div>
@@ -145,7 +145,7 @@ export default function ProjectsPage() {
         </div>
       )}
       {error === "auth" && (
-        <div role="alert" className="mb-6 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-amber-700">
+        <div role="alert" className="mb-6 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
           Sign in to view projects. <Link href="/sign-in" className="rounded font-bold underline underline-offset-2">Sign in</Link>
         </div>
       )}
@@ -154,11 +154,11 @@ export default function ProjectsPage() {
       {loading ? (
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-52 animate-pulse rounded-xl border border-[var(--color-section-border)] bg-white/60" />
+            <div key={i} className="h-52 animate-pulse rounded-xl border border-border bg-card/60" />
           ))}
         </div>
       ) : !error && filtered.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-[var(--color-section-border)] bg-white/50 px-6 py-16 text-center">
+        <div className="rounded-xl border border-dashed border-border bg-card/50 px-6 py-16 text-center">
           <h2 className="text-lg font-semibold text-foreground">No projects found</h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
             {hasFilters
@@ -166,7 +166,7 @@ export default function ProjectsPage() {
               : "The project library is being prepared. Check back soon for hands-on builds."}
           </p>
           {hasFilters && (
-            <button onClick={clearFilters} className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-[#0f1d32] px-4 py-2 text-sm font-semibold text-white">
+            <button onClick={clearFilters} className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-foreground px-4 py-2 text-sm font-semibold text-background">
               <RotateCcw className="h-4 w-4" /> Clear filters
             </button>
           )}
@@ -178,7 +178,7 @@ export default function ProjectsPage() {
               <Link
                 key={project.id}
                 href={`/projects/${project.slug}`}
-                className="group overflow-hidden rounded-xl border border-[var(--color-section-border)] bg-white transition-all hover:border-[var(--primary)] hover:shadow-md"
+                className="group overflow-hidden rounded-xl border border-border bg-card text-card-foreground transition-all hover:border-[var(--primary)] hover:shadow-md"
               >
                 <div className="h-2 bg-[var(--primary)]" />
                 <div className="p-5">
@@ -195,7 +195,7 @@ export default function ProjectsPage() {
                   </div>
                   <div className="mt-3 flex flex-wrap gap-1.5">
                     {project.technologies.slice(0, 3).map((tech) => (
-                      <span key={tech} className="rounded-md bg-[var(--color-section-light)] px-2 py-0.5 text-xs font-medium text-foreground">{tech}</span>
+                      <span key={tech} className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-foreground">{tech}</span>
                     ))}
                   </div>
                 </div>

@@ -10,6 +10,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { CATEGORY_TONES, EXTERNAL_LINK_PROPS, formatMonthYear } from "./shared";
 import { ProjectCard } from "./project-card";
+import { FollowButton } from "./follow-button";
 
 type Portfolio = PublicPortfolioData;
 
@@ -72,6 +73,10 @@ export function PortfolioHeader({ data }: { data: Portfolio }) {
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <FollowButton
+            username={data.username}
+            initialFollowing={data.is_following}
+          />
           {links.github_url && (
             <HeaderLink href={links.github_url} icon={Code2} label="GitHub" />
           )}
@@ -85,6 +90,10 @@ export function PortfolioHeader({ data }: { data: Portfolio }) {
             <HeaderLink href={`/profile/${data.username}`} icon={Mail} label="Contact" internal />
           )}
         </div>
+      </div>
+      <div className="mt-5 flex gap-4 text-sm text-muted-foreground">
+        <span><strong className="text-foreground">{data.followers_count}</strong> followers</span>
+        <span><strong className="text-foreground">{data.following_count}</strong> following</span>
       </div>
     </header>
   );

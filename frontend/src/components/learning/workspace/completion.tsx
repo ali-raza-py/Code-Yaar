@@ -42,7 +42,7 @@ export function ChapterCompletionCard({
           {skillsLearned.map((skill, i) => (
             <span
               key={i}
-              className="inline-flex items-center rounded-full bg-white px-2.5 py-0.5 text-xs font-medium text-green-800 border border-green-200"
+              className="inline-flex items-center rounded-full border border-success/30 bg-success/10 px-2.5 py-0.5 text-xs font-medium text-success"
             >
               {skill}
             </span>
@@ -93,7 +93,7 @@ export function CourseCompletionModal({
 }: CourseCompletionProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="mx-4 w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-2xl">
+      <div className="mx-4 w-full max-w-md rounded-2xl border border-border bg-card p-8 text-center text-card-foreground shadow-2xl">
         {/* Trophy */}
         <div className="flex justify-center mb-4">
           <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-yellow-400 to-amber-500 text-white shadow-lg">
@@ -103,23 +103,23 @@ export function CourseCompletionModal({
           </div>
         </div>
 
-        <h1 className="text-xl font-bold text-gray-900 mb-1">COURSE COMPLETE</h1>
-        <p className="text-2xl font-bold text-gray-900 mb-2">{courseTitle}</p>
+        <h1 className="mb-1 text-xl font-bold text-foreground">COURSE COMPLETE</h1>
+        <p className="mb-2 text-2xl font-bold text-foreground">{courseTitle}</p>
 
         <div className="mb-4">
-          <p className="text-sm text-gray-600">100% Complete</p>
-          <p className="text-lg font-bold text-green-700">{xpEarned.toLocaleString()} XP earned</p>
+          <p className="text-sm text-muted-foreground">100% Complete</p>
+          <p className="text-lg font-bold text-success">{xpEarned.toLocaleString()} XP earned</p>
         </div>
 
         <div className="mb-6">
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
+          <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
             Skills demonstrated
           </p>
           <div className="flex flex-wrap justify-center gap-2">
             {skillsDemonstrated.map((skill, i) => (
               <span
                 key={i}
-                className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700"
+                className="inline-flex items-center rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground"
               >
                 {skill}
               </span>
@@ -139,7 +139,7 @@ export function CourseCompletionModal({
           {profileUrl && (
             <Link
               href={profileUrl}
-              className="inline-flex items-center justify-center rounded-lg border border-gray-300 px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+              className="inline-flex items-center justify-center rounded-lg border border-border px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
             >
               View Profile
             </Link>

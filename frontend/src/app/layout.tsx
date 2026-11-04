@@ -4,6 +4,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { AuthProvider } from "@/hooks/use-auth";
 import { MotionProvider } from "@/components/motion/reduced-motion";
+import { MaintenanceGate } from "@/components/maintenance-gate";
 
 // Display serif — a characterful variable face (SOFT/WONK axes unlocked) used
 // for headings, hero type and the brand wordmark. Its academic warmth deliberately
@@ -71,7 +72,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <ThemeProvider>
           <AuthProvider>
             <MotionProvider>
-              {children}
+              <MaintenanceGate>{children}</MaintenanceGate>
             </MotionProvider>
           </AuthProvider>
         </ThemeProvider>

@@ -62,9 +62,10 @@ interface AvatarProps {
 }
 
 export function Avatar({ src, name, username, size = 40, className = "", alt }: AvatarProps) {
-  const [failed, setFailed] = useState(false);
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const initials = initialsFor(name ?? "", username ?? "");
   const round = "rounded-full";
+  const failed = Boolean(src && failedSrc === src);
 
   if (src && !failed) {
     return (
@@ -74,7 +75,7 @@ export function Avatar({ src, name, username, size = 40, className = "", alt }: 
         alt={alt ?? name ?? username ?? "avatar"}
         width={size}
         height={size}
-        onError={() => setFailed(true)}
+        onError={() => setFailedSrc(src)}
         className={`shrink-0 object-cover ${round} ${className}`.trim()}
         style={{ width: size, height: size }}
         loading="lazy"

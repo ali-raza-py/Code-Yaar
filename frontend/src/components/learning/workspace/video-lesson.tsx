@@ -95,7 +95,7 @@ export default function VideoLesson({
   };
 
   return (
-    <div className="rounded-lg overflow-hidden border border-gray-200 bg-black">
+    <div className="overflow-hidden rounded-lg border border-border bg-black">
       {/* Video Player */}
       <div
         className="relative aspect-video cursor-pointer group"
@@ -116,7 +116,7 @@ export default function VideoLesson({
         {!isPlaying && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/30">
             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white/90 shadow-lg">
-              <svg className="h-6 w-6 text-gray-900 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+              <svg className="ml-0.5 h-6 w-6 text-gray-900" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M8 5v14l11-7z" />
               </svg>
             </div>
@@ -188,8 +188,8 @@ export default function VideoLesson({
       </div>
 
       {/* Title */}
-      <div className="bg-gray-900 px-4 py-2">
-        <p className="text-sm text-gray-300">{title}</p>
+      <div className="bg-editor-chrome px-4 py-2">
+        <p className="text-sm text-editor-text">{title}</p>
       </div>
     </div>
   );

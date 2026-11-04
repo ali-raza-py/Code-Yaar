@@ -12,6 +12,7 @@ import {
   type NotificationPreferences,
 } from "@/lib/api";
 import { AvatarUploader } from "@/components/profile/avatar-uploader";
+import { useTheme, type Theme } from "@/hooks/use-theme";
 
 type Tab = "account" | "profile" | "privacy" | "password" | "preferences";
 
@@ -126,6 +127,7 @@ function Toggle({
 
 export default function SettingsPage() {
   const { user, profile, emailVerified, updateProfile, refresh } = useAuth();
+  const { setTheme } = useTheme();
 
   const [tab, setTab] = useState<Tab>("account");
 
@@ -189,7 +191,7 @@ export default function SettingsPage() {
 
   // Local-only UI preferences (device scoped, not account data).
   const [prefs, setPrefs] = useState({
-    theme: "light",
+    theme: "light" as Theme,
     language: "en",
     code_font_size: "14",
     auto_save: true,
@@ -441,14 +443,14 @@ export default function SettingsPage() {
     setPrefsSaving(true);
     try {
       window.localStorage.setItem("user_preferences", JSON.stringify(prefs));
-      document.documentElement.classList.toggle("dark", prefs.theme === "dark");
+      setTheme(prefs.theme);
       setPrefsMsg({ type: "success", text: "Preferences saved." });
     } catch {
       setPrefsMsg({ type: "error", text: "Failed to save preferences." });
     } finally {
       setPrefsSaving(false);
     }
-  }, [prefs]);
+  }, [prefs, setTheme]);
 
   const tabs: { id: Tab; label: string; icon: string }[] = [
     { id: "account", label: "Account", icon: "M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" },

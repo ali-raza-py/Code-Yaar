@@ -29,7 +29,7 @@ export function VerifyForm() {
         type="text"
         required
         placeholder="Paste the credential code"
-        className="h-11 min-w-0 flex-1 rounded-lg border border-border bg-white px-4 text-sm outline-none transition-colors focus:border-primary"
+        className="h-11 min-w-0 flex-1 rounded-lg border border-border bg-card px-4 text-sm text-foreground outline-none transition-colors focus:border-primary"
       />
       <button
         type="submit"

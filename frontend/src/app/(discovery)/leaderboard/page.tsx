@@ -117,14 +117,17 @@ export default function LeaderboardPage() {
                 </div>
 
                 {/* Avatar — shared initials primitive (no invented photos) */}
-                <Avatar username={entry.username} name={entry.username} size={36} />
+                <Link href={`/profile/${entry.username}/portfolio`} aria-label={`View ${entry.full_name}'s portfolio`}>
+                  <Avatar src={entry.avatar} username={entry.username} name={entry.full_name} size={36} />
+                </Link>
 
                 {/* Username */}
                 <div className="flex-1 min-w-0">
                   <p className={`text-sm font-semibold truncate ${isCurrentUser ? 'text-primary' : 'text-foreground'}`}>
-                    <Link href={`/profile/${entry.username}`} className="hover:underline">
-                      {entry.username}
+                    <Link href={`/profile/${entry.username}/portfolio`} className="hover:underline">
+                      {entry.full_name || entry.username}
                     </Link>
+                    <span className="ml-1 text-xs font-normal text-muted-foreground">@{entry.username}</span>
                     {isCurrentUser && <span className="ml-2 text-xs font-normal text-primary">(You)</span>}
                   </p>
                   <p className="text-xs text-muted-foreground">

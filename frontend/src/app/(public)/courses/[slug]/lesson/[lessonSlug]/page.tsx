@@ -67,7 +67,7 @@ export default function LessonPreviewPage() {
 
   return (
     <div className="min-h-full bg-background">
-      <div className="border-b border-border bg-section-light">
+      <div className="border-b border-border bg-card">
         <div className="mx-auto flex max-w-2xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
           <nav className="flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             <Link href="/courses" className="rounded hover:text-foreground">Courses</Link>

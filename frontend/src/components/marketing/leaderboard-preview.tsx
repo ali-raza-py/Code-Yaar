@@ -26,7 +26,7 @@ export function LeaderboardPreview() {
     return (
       <div className="space-y-2">
         {[1, 2, 3].map((i) => (
-          <div key={i} className="h-12 animate-pulse rounded-md border border-forest-border bg-white/60" />
+          <div key={i} className="h-12 animate-pulse rounded-md border border-forest-border bg-card/60" />
         ))}
       </div>
     );
@@ -34,7 +34,7 @@ export function LeaderboardPreview() {
 
   if (entries.length === 0) {
     return (
-      <div className="rounded-[var(--radius-card)] border border-forest-border bg-white p-5 text-sm text-forest-muted">
+      <div className="rounded-[var(--radius-card)] border border-forest-border bg-card p-5 text-sm text-muted-foreground">
         <span className="inline-flex items-center gap-1.5 font-semibold text-forest-accent"><Medal className="h-4 w-4" /> The rankings open with the first XP earned.</span>
         <p className="mt-2">Complete a lesson and you could hold the top spot.</p>
       </div>
@@ -42,7 +42,7 @@ export function LeaderboardPreview() {
   }
 
   return (
-    <div className="overflow-hidden rounded-[var(--radius-card)] border border-forest-border bg-white">
+    <div className="overflow-hidden rounded-[var(--radius-card)] border border-forest-border bg-card text-card-foreground">
       <ul className="divide-y divide-forest-border">
         {entries.map((entry) => (
           <li key={entry.user_id} className="flex items-center gap-3 px-4 py-3">

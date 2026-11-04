@@ -186,7 +186,7 @@ export function AvatarUploader({
       setBusy(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onChanged]);
+  }, [offset, onChanged, zoom]);
 
   const handleRemove = useCallback(async () => {
     setBusy(true);

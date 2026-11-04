@@ -196,7 +196,7 @@ function PreviewPanel({
   if (!preview) {
     return (
       <Card className="p-8 text-center text-sm text-muted-foreground">
-        Your account profile is private, so the public page isn&apos;t reachable yet. Make your profile public in Settings to share your portfolio.
+        The public preview could not be loaded. Please try again.
       </Card>
     );
   }

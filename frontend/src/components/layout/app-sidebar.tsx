@@ -29,6 +29,16 @@ import { useAuth } from "@/hooks/use-auth";
 import { Avatar } from "@/components/ui/avatar";
 import { tracks as tracksApi, type TrackSummary } from "@/lib/api";
 import { canonicalClassSlug } from "@/components/learning/tracks/shared";
+import {
+  restoreSidebarExpansion,
+  sidebarNode,
+  useSidebarNodeExpansion,
+} from "@/lib/sidebar-expansion";
+
+// Shared, height-driven ease for every expand/collapse so branches open and
+// shut with the same feel. Framer-motion honours `prefers-reduced-motion`
+// through the app-wide MotionConfig, so this stays a polish, not a requirement.
+const EXPAND_TRANSITION = { duration: 0.2, ease: [0.22, 0.61, 0.36, 1] } as const;
 
 type QueryKey = "mode" | "view" | "track";
 
@@ -61,10 +71,9 @@ const applyItems: NavItem[] = [
   { href: "/challenges", label: "Practice", icon: Dumbbell },
   { href: "/projects", label: "Real World Projects", icon: FolderGit2 },
   {
-    href: "/challenges?mode=competitions",
+    href: "/competitions",
     label: "Competitions",
     icon: Swords,
-    query: { mode: "competitions" },
   },
 ];
 
@@ -146,17 +155,19 @@ function SidebarLink({
   );
 }
 
+/**
+ * A collapsible section group. Expansion lives in the shared sidebar store,
+ * keyed by the label, so a click is the only thing that ever changes it —
+ * navigation and remounts restore the learner's last arrangement instead.
+ */
 function NavSection({
   label,
-  expanded,
-  onToggle,
   children,
 }: {
   label: string;
-  expanded: boolean;
-  onToggle: () => void;
   children: React.ReactNode;
 }) {
+  const [expanded, onToggle] = useSidebarNodeExpansion(sidebarNode.section(label));
   const contentId = `sidebar-${label.toLowerCase()}-links`;
 
   return (
@@ -185,7 +196,7 @@ function NavSection({
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.18, ease: "easeOut" }}
+            transition={EXPAND_TRANSITION}
             className="mt-1 overflow-hidden"
           >
             <ul className="space-y-0.5">{children}</ul>
@@ -198,7 +209,9 @@ function NavSection({
 
 // A single tree row: the whole label is a Link, and when it has children a
 // trailing chevron button toggles them. `depth` drives the left inset so the
-// Learning Tracks > track > class nesting stays visually legible.
+// Learning Tracks > track > class nesting stays visually legible. Expansion is
+// owned by the caller (and through the shared store), never by this row, so a
+// remount can't quietly reopen — or close — something the learner set.
 function TreeRow({
   item,
   active,
@@ -206,6 +219,7 @@ function TreeRow({
   hasChildren,
   expanded,
   onToggle,
+  activeDescendant = false,
   onNavigate,
   children,
 }: {
@@ -215,6 +229,12 @@ function TreeRow({
   hasChildren?: boolean;
   expanded?: boolean;
   onToggle?: () => void;
+  /**
+   * The route lives among this row's children while the row is shut. The
+   * chevron keeps the accent colour so the branch still reads as the current
+   * one without being forced open.
+   */
+  activeDescendant?: boolean;
   onNavigate: () => void;
   children?: React.ReactNode;
 }) {
@@ -256,11 +276,19 @@ function TreeRow({
             onClick={onToggle}
             aria-label={`${expanded ? "Collapse" : "Expand"} ${item.label}`}
             aria-expanded={expanded}
-            className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-white/60 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]"
+            className={cn(
+              "absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]",
+              activeDescendant
+                ? "text-[var(--sidebar-accent)] hover:text-white"
+                : "text-white/60 hover:text-white"
+            )}
           >
             <ChevronDown
               aria-hidden="true"
-              className={cn("h-4 w-4 transition-transform duration-200", !expanded && "-rotate-90")}
+              className={cn(
+                "h-4 w-4 transition-transform duration-200 ease-out",
+                !expanded && "-rotate-90"
+              )}
             />
           </button>
         )}
@@ -272,7 +300,7 @@ function TreeRow({
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.16, ease: "easeOut" }}
+            transition={EXPAND_TRANSITION}
             className="mt-0.5 space-y-0.5 overflow-hidden"
           >
             {children}
@@ -315,6 +343,13 @@ function ClassNode({
 
 // A track inside Learning Tracks. Board tracks are expandable and lazily load
 // their class levels (from the courses' academic_class labels) on first open.
+//
+// Loaded lists are kept at module scope: the shell is mounted by two route
+// groups, so crossing from Learn to Leaderboard remounts this row. Reading the
+// cache back into state makes that return instant and silent instead of a
+// "Loading classes..." flash plus a duplicate request.
+const classesByTrack = new Map<string, { slug: string; label: string }[]>();
+
 function TrackNode({
   track,
   depth,
@@ -329,11 +364,14 @@ function TrackNode({
   onNavigate: () => void;
 }) {
   const isBoard = track.category === "school_board";
-  const [open, setOpen] = useState(false);
-  const [classes, setClasses] = useState<{ slug: string; label: string }[] | null>(null);
+  const [open, toggleOpen] = useSidebarNodeExpansion(sidebarNode.track(track.slug));
+  const [classes, setClasses] = useState(
+    () => classesByTrack.get(track.slug) ?? null,
+  );
   const [error, setError] = useState(false);
 
   const href = `/tracks/${track.slug}`;
+  const active = routeIsActive(href, pathname, searchParams);
   const loading = isBoard && open && classes === null && !error;
 
   useEffect(() => {
@@ -353,7 +391,9 @@ function TrackNode({
           const slug = canonicalClassSlug(label);
           if (slug && !seen.has(slug)) seen.set(slug, label);
         }
-        setClasses(Array.from(seen, ([slug, label]) => ({ slug, label })));
+        const entries = Array.from(seen, ([slug, label]) => ({ slug, label }));
+        classesByTrack.set(track.slug, entries);
+        setClasses(entries);
       } catch {
         if (alive) setError(true);
       }
@@ -366,11 +406,12 @@ function TrackNode({
   return (
     <TreeRow
       item={{ href, label: track.title, icon: Layers }}
-      active={routeIsActive(href, pathname, searchParams)}
+      active={active}
       depth={depth}
       hasChildren={isBoard}
       expanded={open}
-      onToggle={() => setOpen((value) => !value)}
+      onToggle={toggleOpen}
+      activeDescendant={isBoard && active && !open}
       onNavigate={onNavigate}
     >
       {loading && (
@@ -402,6 +443,8 @@ function TrackNode({
 // The nested "Learning Tracks" subtree. Children come from the tracks API so
 // an admin publishing a new track needs no frontend change; board tracks
 // expand to their classes.
+let cachedTracks: TrackSummary[] | null = null;
+
 function LearningTracksNav({
   pathname,
   searchParams,
@@ -411,10 +454,13 @@ function LearningTracksNav({
   searchParams: URLSearchParams;
   onNavigate: () => void;
 }) {
-  const [open, setOpen] = useState(true);
-  const [tracks, setTracks] = useState<TrackSummary[] | null>(null);
+  const [open, toggleOpen] = useSidebarNodeExpansion(sidebarNode.tracksRoot);
+  const [tracks, setTracks] = useState<TrackSummary[] | null>(cachedTracks);
   const [error, setError] = useState(false);
   const loading = open && tracks === null && !error;
+  // A specific track page is open while the branch is shut — keep the chevron
+  // accented so the current location is still visible, without forcing it open.
+  const hiddenActiveTrack = pathname.startsWith("/tracks/") && !open;
 
   useEffect(() => {
     // Same StrictMode-safe guard as TrackNode: rely on state, not a ref, so a
@@ -424,7 +470,9 @@ function LearningTracksNav({
     (async () => {
       try {
         const data = await tracksApi.list();
-        if (alive) setTracks(data);
+        if (!alive) return;
+        cachedTracks = data;
+        setTracks(data);
       } catch {
         if (alive) setError(true);
       }
@@ -441,7 +489,8 @@ function LearningTracksNav({
       depth={0}
       hasChildren
       expanded={open}
-      onToggle={() => setOpen((value) => !value)}
+      onToggle={toggleOpen}
+      activeDescendant={hiddenActiveTrack}
       onNavigate={onNavigate}
     >
       {loading && (
@@ -471,16 +520,12 @@ function LearningTracksNav({
 function SidebarPanel({
   pathname,
   searchParams,
-  expandedGroups,
-  onToggleGroup,
   onNavigate,
   onSignOut,
   onCollapse,
 }: {
   pathname: string;
   searchParams: URLSearchParams;
-  expandedGroups: Record<string, boolean>;
-  onToggleGroup: (label: string) => void;
   onNavigate: () => void;
   onSignOut: () => void;
   /** Present on desktop only; the mobile drawer closes with its own button. */
@@ -533,11 +578,7 @@ function SidebarPanel({
         {/* Learn: the nested Learning Tracks subtree plus the flat Explore
             Courses leaf. Sindh Board classes live here, alongside their
             practicals — never in Apply. */}
-        <NavSection
-          label="Learn"
-          expanded={expandedGroups.Learn}
-          onToggle={() => onToggleGroup("Learn")}
-        >
+        <NavSection label="Learn">
           <LearningTracksNav
             pathname={pathname}
             searchParams={searchParams}
@@ -551,11 +592,7 @@ function SidebarPanel({
         </NavSection>
 
         {/* Apply: general skill work only. No Sandbox, no Assessments. */}
-        <NavSection
-          label="Apply"
-          expanded={expandedGroups.Apply}
-          onToggle={() => onToggleGroup("Apply")}
-        >
+        <NavSection label="Apply">
           {applyItems.map((item) => (
             <SidebarLink
               key={item.href}
@@ -575,6 +612,13 @@ function SidebarPanel({
               onNavigate={onNavigate}
             />
           ))}
+          {user?.role === "administrator" && (
+            <SidebarLink
+              item={{ href: "/admin/dashboard", label: "Admin Panel", icon: Settings }}
+              active={pathname.startsWith("/admin")}
+              onNavigate={onNavigate}
+            />
+          )}
         </ul>
       </nav>
 
@@ -622,15 +666,15 @@ export function AppSidebar({
   const router = useRouter();
   const { signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
-    Learn: true,
-    Apply: true,
-  });
 
   const closeMobile = () => setMobileOpen(false);
-  const toggleGroup = (label: string) => {
-    setExpandedGroups((current) => ({ ...current, [label]: !current[label] }));
-  };
+
+  // Branch expansion is click-driven and lives in the shared store, so it
+  // outlives this component. The stored arrangement is lifted in after mount
+  // (never during render) to keep the first paint identical to the server HTML.
+  useEffect(() => {
+    restoreSidebarExpansion();
+  }, []);
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -669,8 +713,6 @@ export function AppSidebar({
           <SidebarPanel
             pathname={pathname}
             searchParams={searchParams}
-            expandedGroups={expandedGroups}
-            onToggleGroup={toggleGroup}
             onNavigate={closeMobile}
             onSignOut={handleSignOut}
             onCollapse={onToggle}
@@ -678,7 +720,7 @@ export function AppSidebar({
         </aside>
       )}
 
-      <header className="fixed inset-x-0 top-0 z-30 flex h-14 items-center border-b border-[var(--color-section-border)] bg-white px-4 md:hidden">
+      <header className="fixed inset-x-0 top-0 z-30 flex h-14 items-center border-b border-[var(--color-section-border)] bg-background px-4 md:hidden">
         <button
           type="button"
           aria-label="Open navigation"
@@ -722,8 +764,6 @@ export function AppSidebar({
               <SidebarPanel
                 pathname={pathname}
                 searchParams={searchParams}
-                expandedGroups={expandedGroups}
-                onToggleGroup={toggleGroup}
                 onNavigate={closeMobile}
                 onSignOut={handleSignOut}
               />

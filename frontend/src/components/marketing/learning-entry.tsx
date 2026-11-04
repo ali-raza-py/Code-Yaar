@@ -27,6 +27,8 @@ export function LearningEntry() {
       {/* 1 — Hero */}
       <section className="relative border-b border-forest-border bg-forest-deep text-white">
         <div className="absolute inset-0 opacity-20 [background-image:linear-gradient(var(--forest-grid)_1px,transparent_1px),linear-gradient(90deg,var(--forest-grid)_1px,transparent_1px)] [background-size:4rem_4rem]" />
+        <div aria-hidden="true" className="pointer-events-none absolute -left-32 top-12 h-80 w-80 rounded-full bg-mint/10 blur-3xl" />
+        <div aria-hidden="true" className="pointer-events-none absolute right-[8%] top-1/4 h-72 w-72 rounded-full bg-sky-400/10 blur-3xl" />
         <div className="relative mx-auto grid max-w-7xl gap-12 px-5 py-20 sm:px-8 lg:grid-cols-[1.1fr_0.9fr] lg:items-center lg:gap-20 lg:px-10 lg:py-28">
           <div>
             <p className="font-mono text-xs font-semibold uppercase tracking-[0.2em] text-mint-soft">
@@ -41,16 +43,29 @@ export function LearningEntry() {
               earned as visible progress.
             </p>
             <div className="mt-9 flex flex-col gap-3 sm:flex-row">
-              <Link href="/sign-up" className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-mint px-5 py-3 text-sm font-bold text-forest-deep transition-transform hover:-translate-y-0.5">
+              <Link href="/sign-up" className="focus-ring inline-flex items-center justify-center gap-2 rounded-md bg-mint px-5 py-3 text-sm font-bold text-forest-deep shadow-[0_12px_30px_rgba(142,229,159,0.18)] transition duration-300 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_16px_34px_rgba(142,229,159,0.28)]">
                 Get started free <ArrowRight className="h-4 w-4" />
               </Link>
-              <Link href="/courses" className="focus-ring inline-flex items-center justify-center gap-2 rounded-md border border-forest-line px-5 py-3 text-sm font-semibold text-white hover:bg-white/10">
+              <Link href="/courses" className="focus-ring inline-flex items-center justify-center gap-2 rounded-md border border-forest-line bg-white/[0.03] px-5 py-3 text-sm font-semibold text-white transition duration-300 hover:-translate-y-0.5 hover:border-mint/60 hover:bg-white/10">
                 Browse courses <Compass className="h-4 w-4" />
               </Link>
             </div>
+            <div className="mt-8 flex flex-wrap gap-x-5 gap-y-2 text-xs font-medium text-forest-on-deep-soft">
+              {["Structured tracks", "Hands-on practice", "Real projects"].map((item) => (
+                <span key={item} className="inline-flex items-center gap-2">
+                  <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-mint" />
+                  {item}
+                </span>
+              ))}
+            </div>
           </div>
 
-          <CourseResumeCard />
+          <div className="relative">
+            <div aria-hidden="true" className="absolute -inset-3 rounded-[22px] border border-mint/15 bg-mint/[0.03] blur-sm" />
+            <div className="relative">
+              <CourseResumeCard />
+            </div>
+          </div>
         </div>
       </section>
 
@@ -71,7 +86,7 @@ export function LearningEntry() {
       </section>
 
       {/* 4 — Featured courses */}
-      <section className="border-y border-forest-border bg-white">
+      <section className="border-y border-forest-border bg-forest-panel">
         <div className="mx-auto max-w-7xl px-5 py-16 sm:px-8 lg:px-10 lg:py-20">
           <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
             <div>
@@ -105,7 +120,7 @@ export function LearningEntry() {
       </section>
 
       {/* 6 — Proof: live rankings and verifiable credentials */}
-      <section className="border-y border-forest-border bg-white">
+      <section className="border-y border-forest-border bg-forest-panel">
         <div className="mx-auto grid max-w-7xl gap-10 px-5 py-16 sm:px-8 lg:grid-cols-2 lg:px-10 lg:py-20">
           <div>
             <p className="font-mono text-xs font-semibold uppercase tracking-[0.18em] text-forest-accent"><Medal className="mr-1.5 inline h-4 w-4" />Live community</p>

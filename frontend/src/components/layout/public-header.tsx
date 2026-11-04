@@ -15,7 +15,9 @@ const MotionLink = motion.create(Link);
 const navItems = [
   { href: "/tracks", label: "Learning Tracks" },
   { href: "/courses", label: "Explore Courses" },
+  { href: "/competitions", label: "Hackathons" },
   { href: "/leaderboard", label: "Leaderboard" },
+  { href: "/updates", label: "Updates" },
   { href: "/about", label: "About" },
 ];
 
@@ -35,8 +37,8 @@ export function PublicHeader() {
       className={cn(
         "sticky top-0 z-50 w-full transition-all duration-300",
         scrolled
-          ? "border-b border-[var(--color-section-border)] bg-white/95 backdrop-blur-sm shadow-sm"
-          : "bg-white"
+          ? "border-b border-[var(--color-section-border)] bg-background/95 backdrop-blur-sm shadow-sm"
+          : "bg-background"
       )}
     >
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6 lg:px-8">

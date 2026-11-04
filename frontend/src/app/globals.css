@@ -20,6 +20,9 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-editor-bg: var(--editor-bg);
+  --color-editor-chrome: var(--editor-chrome);
+  --color-editor-text: var(--editor-text);
   --color-surface-base: var(--surface-base);
   --color-surface-elevated: var(--surface-elevated);
   --color-surface-interactive: var(--surface-interactive);
@@ -183,8 +186,8 @@
   --color-dark-bg: #1b2631;
   --color-dark-bg-alt: #232f3e;
   --color-dark-surface: #2a3a4a;
-  --color-cta-green: #2dbe52;
-  --color-cta-green-hover: #25a848;
+  --color-cta-green: #16833a;
+  --color-cta-green-hover: #126b2f;
   --color-cta-green-fg: #ffffff;
   --color-section-light: #f7f8fa;
   --color-section-border: #e8eaed;
@@ -312,6 +315,8 @@
 .dark {
   /* Core surfaces flip to the DataCamp-navy family (themeable dark) */
   --background: #0f1d32;
+  /* Lift the hero navy a step above the dark page so banners stay distinct */
+  --color-hero-navy: #16283f;
   --foreground: #e6ecf5;
   --card: #172235;
   --card-foreground: #e6ecf5;
@@ -330,6 +335,29 @@
   --border: #2d3b52;
   --input: #2d3b52;
   --ring: #a78bfa;
+  --color-section-light: #1f2c44;
+  --color-section-border: #2d3b52;
+  --color-card-hover: #243552;
+
+  /* Homepage forest palette — keep marketing sections readable in dark mode. */
+  --forest-bg: #0e1b18;
+  --forest-deep: #0b2119;
+  --forest-surface: #153326;
+  --forest-border: #2e4d3e;
+  --forest-line: #6f9a84;
+  --forest-ink: #e7f3eb;
+  --forest-muted: #b4cabc;
+  --forest-mint: #a7f3c3;
+  --forest-mint-soft: #a7e8ba;
+  --forest-accent: #65d89c;
+  --forest-panel: #172d24;
+  --forest-line-soft: #9abbaa;
+  --forest-on-deep: #c9ded1;
+  --forest-on-deep-soft: #a7c2b2;
+  --forest-cta-band: #163a29;
+  --forest-deep-hover: #123b27;
+  --forest-chip-bg: #203d2e;
+  --forest-chip-fg: #c2dccc;
 
   --contribution-0: #161b22;
   --contribution-1: #0e4429;
@@ -352,9 +380,21 @@
   --state-danger: #f8715c;
   --state-info: #60a5fa;
 
+  /* Difficulty pill fills re-mixed onto the dark card (light mode mixes white) */
+  --difficulty-easy-bg: color-mix(in oklab, var(--difficulty-easy) 16%, var(--card));
+  --difficulty-medium-bg: color-mix(in oklab, var(--difficulty-medium) 16%, var(--card));
+  --difficulty-hard-bg: color-mix(in oklab, var(--difficulty-hard) 16%, var(--card));
+
   --shadow-1: 0 1px 2px rgb(0 0 0 / 0.24);
   --shadow-2: 0 2px 8px rgb(0 0 0 / 0.32), 0 1px 3px rgb(0 0 0 / 0.24);
   --shadow-3: 0 8px 24px rgb(0 0 0 / 0.40), 0 2px 8px rgb(0 0 0 / 0.24);
+}
+
+/* Tailwind's generated theme variables are rooted on :root; keep the
+   dark-mode marketing surface overrides more specific than those defaults. */
+html.dark {
+  --color-section-light: #1f2c44;
+  --color-section-border: #2d3b52;
 }
 
 .progress-cell[data-level="0"] { background-color: var(--contribution-0, #ebedf0) !important; }
@@ -377,6 +417,24 @@
     font-feature-settings: "rlig" 1, "calt" 1;
     line-height: 1.5;
     text-rendering: optimizeLegibility;
+  }
+  :root {
+    color-scheme: light;
+  }
+  .dark {
+    color-scheme: dark;
+  }
+  input, textarea, select {
+    color: var(--foreground);
+    background-color: var(--card);
+  }
+  input::placeholder, textarea::placeholder {
+    color: var(--muted-foreground);
+    opacity: 1;
+  }
+  option {
+    color: var(--popover-foreground);
+    background-color: var(--popover);
   }
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-display);
@@ -609,10 +667,11 @@
 
 .dc-light-section {
   background-color: var(--color-section-light);
+  color: var(--foreground);
 }
 
 .dc-card {
-  background: white;
+  background: var(--card);
   border: 1px solid var(--color-section-border);
   border-radius: var(--radius-card);
   transition: border-color var(--duration-fast) var(--ease-smooth),
@@ -666,6 +725,8 @@
 }
 
 .dc-input {
+  background: var(--card);
+  color: var(--foreground);
   border: 1px solid var(--color-section-border);
   border-radius: 8px;
   padding: 0.625rem 1rem;
@@ -691,17 +752,17 @@
 }
 
 .dc-badge-beginner {
-  background: color-mix(in oklch, var(--difficulty-easy) 12%, white);
+  background: var(--difficulty-easy-bg);
   color: var(--difficulty-easy);
 }
 
 .dc-badge-intermediate {
-  background: color-mix(in oklch, var(--difficulty-medium) 12%, white);
+  background: var(--difficulty-medium-bg);
   color: var(--difficulty-medium);
 }
 
 .dc-badge-advanced {
-  background: color-mix(in oklch, var(--difficulty-hard) 12%, white);
+  background: var(--difficulty-hard-bg);
   color: var(--difficulty-hard);
 }
 
@@ -731,12 +792,12 @@
 
 .dc-tab-active {
   background: var(--foreground);
-  color: white;
+  color: var(--background);
 }
 
 .dc-tab-active:hover {
   background: var(--foreground);
-  color: white;
+  color: var(--background);
 }
 
 /* ─── Learning Workspace (dark IDE surface) ─── */

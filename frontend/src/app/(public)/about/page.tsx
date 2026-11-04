@@ -10,6 +10,8 @@ import {
   Users,
 } from "lucide-react";
 
+import { FoundingTeam } from "@/components/marketing/founding-team";
+
 export const metadata: Metadata = {
   title: "About Code-Yaar",
   description: "Learn how Code-Yaar helps developers move from concepts to confident building.",
@@ -76,6 +78,8 @@ export default function AboutPage() {
           ))}
         </div>
       </section>
+
+      <FoundingTeam />
 
       <section className="border-y border-[var(--color-section-border)] bg-card">
         <div className="mx-auto grid max-w-6xl gap-10 px-4 py-16 sm:px-6 lg:grid-cols-[0.8fr_1.2fr] lg:px-8">
