@@ -8,6 +8,8 @@ django-cors-headers>=4.6
 django-debug-toolbar>=6.1
 python-dotenv>=1.0
 # Certificate PDF + QR verification generation
-reportlab>=4.0
-qrcode>=7.4
-pillow>=10.0
+reportlab>=5.1
+qrcode>=8.2
+pillow>=13.0
+# Optional: PDF textbook extraction used by tools/ content pipelines
+pymupdf>=2.0
