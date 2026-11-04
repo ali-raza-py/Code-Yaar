@@ -1,6 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from . import api_views
+from . import admin_views
 
 router = DefaultRouter()
 router.register(r'tracks', api_views.CareerTrackViewSet, basename='track')
@@ -27,7 +28,26 @@ router.register(r'portfolio/projects', api_views.StudentProjectViewSet, basename
 router.register(r'admin/practical-classes', api_views.PracticalClassAdminViewSet, basename='admin-practical-class')
 router.register(r'admin/practical-subjects', api_views.PracticalSubjectAdminViewSet, basename='admin-practical-subject')
 router.register(r'admin/practicals', api_views.PracticalAdminViewSet, basename='admin-practical')
+router.register(r'admin/tracks', admin_views.CareerTrackAdminViewSet, basename='admin-track')
+router.register(r'admin/courses', admin_views.CourseAdminViewSet, basename='admin-course')
+router.register(r'admin/chapters', admin_views.ChapterAdminViewSet, basename='admin-chapter')
+router.register(r'admin/lessons', admin_views.LessonAdminViewSet, basename='admin-lesson')
+router.register(r'admin/exercises', admin_views.ExerciseAdminViewSet, basename='admin-exercise')
+router.register(r'admin/students', admin_views.StudentAdminViewSet, basename='admin-student')
+router.register(r'admin/instructors', admin_views.InstructorAdminViewSet, basename='admin-instructor')
+router.register(r'admin/enrollments', admin_views.EnrollmentAdminViewSet, basename='admin-enrollment')
+router.register(r'admin/competitions', admin_views.CompetitionAdminViewSet, basename='admin-competition')
+router.register(r'admin/announcements', admin_views.AnnouncementAdminViewSet, basename='admin-announcement')
+router.register(r'admin/platform-updates', admin_views.PlatformUpdateAdminViewSet, basename='admin-platform-update')
+router.register(r'admin/registration-form-fields', admin_views.RegistrationFormFieldAdminViewSet, basename='admin-registration-form-field')
+router.register(r'admin/hackathon-registrations', admin_views.CompetitionRegistrationAdminViewSet, basename='admin-hackathon-registration')
+router.register(r'admin/email-campaigns', admin_views.EmailCampaignAdminViewSet, basename='admin-email-campaign')
+router.register(r'admin/achievements', admin_views.AchievementAdminViewSet, basename='admin-achievement')
+router.register(r'admin/certificates', admin_views.CertificateAdminViewSet, basename='admin-certificate')
+router.register(r'admin/audit-logs', admin_views.AuditLogAdminViewSet, basename='admin-audit-log')
 router.register(r'competitions', api_views.CompetitionViewSet, basename='competition')
+router.register(r'announcements', api_views.AnnouncementViewSet, basename='announcement')
+router.register(r'platform-updates', api_views.PlatformUpdateViewSet, basename='platform-update')
 
 urlpatterns = [
     # Authentication lives in `learning.auth_urls` (mounted at /api/auth/).
@@ -59,6 +79,9 @@ urlpatterns = [
 
     # Public, shareable profile
     path('users/<str:username>/', api_views.public_profile_view, name='api-public-profile'),
+    path('users/<str:username>/follow/', api_views.follow_user_view, name='api-user-follow'),
+    path('users/<str:username>/followers/', api_views.user_followers_view, name='api-user-followers'),
+    path('users/<str:username>/following/', api_views.user_following_view, name='api-user-following'),
 
     # Account deletion request (recorded for admin follow-up)
     path('account/deletion-request/', api_views.account_deletion_request_view,
@@ -156,6 +179,17 @@ urlpatterns = [
     # in config/urls.py under the same api/ prefix; including them again here
     # produced a urls.W005 duplicate-pattern warning.
 
+    # Admin dashboard
+    path('admin/dashboard/stats/', admin_views.admin_dashboard_stats, name='admin-dashboard-stats'),
+    path('admin/dashboard/recent-activity/', admin_views.admin_recent_activity, name='admin-dashboard-recent-activity'),
+    path('admin/dashboard/top-courses/', admin_views.admin_top_courses, name='admin-dashboard-top-courses'),
+    path('admin/settings/', admin_views.admin_settings, name='admin-settings'),
+    path('admin/email/settings/', admin_views.email_settings, name='admin-email-settings'),
+    # One-click opt-out for non-essential campaign mail (signed token, public)
+    path('email/unsubscribe/<str:token>/', api_views.email_unsubscribe_view,
+         name='api-email-unsubscribe'),
+    path('platform/status/', admin_views.public_platform_status, name='platform-status'),
+    path('admin/roles/', admin_views.admin_roles, name='admin-roles'),
     # Router URLs
     path('', include(router.urls)),
 

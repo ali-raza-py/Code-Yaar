@@ -1,4 +1,5 @@
-from datetime import timedelta
+import re
+from datetime import datetime, timedelta
 
 from rest_framework import serializers, viewsets, permissions, status, filters
 from rest_framework.decorators import api_view, permission_classes, action, throttle_classes
@@ -7,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
+from django.core.validators import EmailValidator, URLValidator
 from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import F, Sum, Count, Q, Avg, Case, When, Value, IntegerField
@@ -24,9 +26,11 @@ from .models import (
     PracticalBookmark, LearningActivity, UserNotification,
     Portfolio, StudentProject, ProjectImage,
     Competition, CompetitionRegistration, CompetitionTeam,
-    CompetitionTeamMember, CompetitionSubmission, CompetitionResult,
+    CompetitionTeamMember, CompetitionSubmission, CompetitionResult, Follow,
+    Announcement, PlatformUpdate, RegistrationFormField,
 )
 from .services.sandbox import get_sandbox, DevelopmentSandbox
+from .services import email_campaigns
 from .services.xp import award_xp, deduct_xp
 from .services.achievements import award_eligible_achievements
 from .services.completion import evaluate_course_completion
@@ -75,6 +79,112 @@ def _is_competition_manager(user):
     return bool(user.is_staff or (profile and profile.role in {'admin', 'mentor'}))
 
 
+class RegistrationFormFieldPublicSerializer(serializers.ModelSerializer):
+    """One configured registration question, as the public form renders it."""
+
+    class Meta:
+        model = RegistrationFormField
+        fields = [
+            'id', 'label', 'field_key', 'field_type', 'description',
+            'placeholder', 'required', 'options', 'validation', 'order',
+        ]
+
+
+# Accepted phone shape: optional +, digits, spaces, dashes, parentheses.
+_PHONE_PATTERN = re.compile(r'^\+?[0-9 ()\-]{7,20}$')
+
+
+def _field_value_present(value) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list):
+        return bool(value)
+    return True
+
+
+def validate_registration_form(competition, data: dict) -> dict:
+    """Check submitted answers against the active form fields an admin configured.
+
+    Returns a ``{field_key: message}`` error dict; empty means valid. Unknown
+    keys are ignored here — ``clean_registration_data`` whitelists storage.
+    """
+    errors = {}
+    fields = competition.form_fields.filter(is_active=True).order_by('order', 'id')
+    for field in fields:
+        value = data.get(field.field_key)
+        if not _field_value_present(value):
+            if field.required:
+                errors[field.field_key] = f'{field.label} is required.'
+            continue
+        bounds = field.validation or {}
+        kind = field.field_type
+        if kind in {RegistrationFormField.FieldType.SHORT_TEXT, RegistrationFormField.FieldType.LONG_TEXT}:
+            text = str(value).strip()
+            max_len = bounds.get('max_length') or (500 if kind == 'short_text' else 5000)
+            min_len = bounds.get('min_length') or 0
+            if len(text) < int(min_len):
+                errors[field.field_key] = f'{field.label} must be at least {min_len} characters.'
+            elif len(text) > int(max_len):
+                errors[field.field_key] = f'{field.label} must be at most {max_len} characters.'
+        elif kind == RegistrationFormField.FieldType.EMAIL:
+            try:
+                EmailValidator(message='Enter a valid email address.')(str(value).strip())
+            except ValidationError as exc:
+                errors[field.field_key] = exc.messages[0]
+        elif kind == RegistrationFormField.FieldType.URL:
+            try:
+                URLValidator(message='Enter a valid URL.')(str(value).strip())
+            except ValidationError as exc:
+                errors[field.field_key] = exc.messages[0]
+        elif kind == RegistrationFormField.FieldType.PHONE:
+            if not _PHONE_PATTERN.match(str(value).strip()):
+                errors[field.field_key] = 'Enter a valid phone number.'
+        elif kind == RegistrationFormField.FieldType.NUMBER:
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                errors[field.field_key] = 'Enter a number.'
+            else:
+                if bounds.get('min') is not None and number < float(bounds['min']):
+                    errors[field.field_key] = f'{field.label} must be at least {bounds["min"]}.'
+                elif bounds.get('max') is not None and number > float(bounds['max']):
+                    errors[field.field_key] = f'{field.label} must be at most {bounds["max"]}.'
+        elif kind == RegistrationFormField.FieldType.DATE:
+            try:
+                datetime.fromisoformat(str(value).strip())
+            except ValueError:
+                errors[field.field_key] = 'Choose a valid date.'
+        elif kind in {RegistrationFormField.FieldType.DROPDOWN, RegistrationFormField.FieldType.MULTIPLE_CHOICE}:
+            options = [str(option) for option in (field.options or [])]
+            if str(value).strip() not in options:
+                errors[field.field_key] = f'Choose one of the listed options for {field.label}.'
+        elif kind == RegistrationFormField.FieldType.CHECKBOXES:
+            options = {str(option) for option in (field.options or [])}
+            chosen = [str(item).strip() for item in (value if isinstance(value, list) else [value])]
+            if any(item not in options for item in chosen):
+                errors[field.field_key] = f'{field.label} includes unavailable options.'
+    return errors
+
+
+def clean_registration_data(competition, data: dict) -> dict:
+    """Store only answers to currently-active configured fields, as strings/lists."""
+    keys = list(
+        competition.form_fields.filter(is_active=True).values_list('field_key', flat=True)
+    )
+    cleaned = {}
+    for key in keys:
+        value = data.get(key)
+        if not _field_value_present(value):
+            continue
+        if isinstance(value, list):
+            cleaned[key] = [str(item).strip() for item in value]
+        else:
+            cleaned[key] = str(value).strip()
+    return cleaned
+
+
 class CompetitionViewSet(viewsets.ReadOnlyModelViewSet):
     """Public competition discovery with authenticated participation actions."""
 
@@ -86,7 +196,9 @@ class CompetitionViewSet(viewsets.ReadOnlyModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
-        queryset = Competition.objects.filter(is_published=True).select_related('organizer').annotate(
+        queryset = Competition.objects.filter(
+            is_published=True, is_archived=False,
+        ).select_related('organizer').annotate(
             participant_count=Count(
                 'registrations',
                 filter=Q(registrations__registration_status__in=['registered', 'approved']),
@@ -122,6 +234,14 @@ class CompetitionViewSet(viewsets.ReadOnlyModelViewSet):
             competitions, many=True, context={'request': request}
         ).data)
 
+    @action(detail=True, methods=['get'], permission_classes=[permissions.AllowAny],
+            url_path='registration-form')
+    def registration_form(self, request, slug=None):
+        """The live registration form an administrator configured."""
+        competition = self.get_object()
+        fields = competition.form_fields.filter(is_active=True).order_by('order', 'id')
+        return Response(RegistrationFormFieldPublicSerializer(fields, many=True).data)
+
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated, IsEmailVerified])
     def register(self, request, slug=None):
         competition = self.get_object()
@@ -135,8 +255,15 @@ class CompetitionViewSet(viewsets.ReadOnlyModelViewSet):
         rules_accepted = request.data.get('rules_accepted')
         if competition.competition_rules and rules_accepted is not True:
             return Response({'detail': 'You must accept the competition rules before registering.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Validate answers server-side against the configured form fields.
+        submitted = request.data.get('registration_data') or {}
+        if not isinstance(submitted, dict):
+            return Response({'detail': 'registration_data must be an object.'}, status=status.HTTP_400_BAD_REQUEST)
+        errors = validate_registration_form(competition, submitted)
+        if errors:
+            return Response(errors, status=status.HTTP_400_BAD_REQUEST)
         team_id = request.data.get('team')
-        if competition.format == 'team' and not team_id:
+        if competition.format == 'team' and not team_id and not request.data.get('team_name'):
             return Response({'detail': 'This competition requires team participation.'}, status=status.HTTP_400_BAD_REQUEST)
         team = None
         if team_id:
@@ -145,13 +272,33 @@ class CompetitionViewSet(viewsets.ReadOnlyModelViewSet):
                 user=request.user, invitation_status='accepted'
             ).exists():
                 return Response({'detail': 'You are not a member of this competition team.'}, status=status.HTTP_403_FORBIDDEN)
+        elif request.data.get('team_name'):
+            # Team registrations may name a fresh team; the registrant leads it.
+            team_name = str(request.data['team_name']).strip()[:120]
+            if not team_name:
+                return Response({'team_name': 'A team name is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                with transaction.atomic():
+                    team = CompetitionTeam.objects.create(
+                        competition=competition, name=team_name, leader=request.user,
+                    )
+                    CompetitionTeamMember.objects.create(
+                        team=team, user=request.user, invitation_status='accepted',
+                        joined_at=now,
+                    )
+            except IntegrityError:
+                return Response(
+                    {'team_name': 'That team name is already taken for this event.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+        cleaned = clean_registration_data(competition, submitted)
         try:
             with transaction.atomic():
                 registration = CompetitionRegistration.objects.create(
                     competition=competition,
                     user=request.user,
                     team=team,
-                    registration_data=request.data.get('registration_data') or {},
+                    registration_data=cleaned,
                     rules_accepted_at=now,
                 )
         except IntegrityError:
@@ -271,6 +418,156 @@ class CompetitionViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(CompetitionSubmissionSerializer(submission).data)
 
 
+# ─── Public announcements & platform updates ──────────────────────────────
+
+class AnnouncementSerializer(serializers.ModelSerializer):
+    category_label = serializers.CharField(source='get_category_display', read_only=True)
+    priority_label = serializers.CharField(source='get_priority_display', read_only=True)
+
+    class Meta:
+        model = Announcement
+        fields = [
+            'id', 'slug', 'title', 'short_description', 'body', 'category',
+            'category_label', 'priority', 'priority_label', 'target_audience',
+            'cover_image', 'scheduled_at', 'published_at', 'expires_at', 'created_at',
+        ]
+
+
+class AnnouncementViewSet(viewsets.ReadOnlyModelViewSet):
+    """Live announcements only, filtered to the audience the visitor belongs to.
+
+    Anonymous visitors see ``all``-audience announcements; students, mentors
+    and administrators additionally see audience-targeted entries.
+    """
+
+    lookup_field = 'slug'
+    permission_classes = [permissions.AllowAny]
+    serializer_class = AnnouncementSerializer
+
+    def get_queryset(self):
+        now = timezone.now()
+        queryset = Announcement.objects.filter(
+            status=Announcement.Status.PUBLISHED,
+        ).filter(
+            Q(scheduled_at__isnull=True) | Q(scheduled_at__lte=now)
+        ).filter(
+            Q(expires_at__isnull=True) | Q(expires_at__gt=now)
+        )
+        audiences = ['all']
+        user = self.request.user
+        if user.is_authenticated:
+            role = getattr(getattr(user, 'profile', None), 'role', '')
+            if role in {'', 'student'}:
+                audiences.append('students')
+            if role in {'instructor', 'mentor'}:
+                audiences.append('instructors')
+            if role == 'admin' or user.is_staff:
+                audiences.append('admins')
+        return queryset.filter(
+            target_audience__in=audiences,
+        ).order_by('-published_at', '-created_at')
+
+    def get_filtered_queryset(self):
+        # Optional ?category= narrowing for the public notice board page.
+        category = self.request.query_params.get('category')
+        if category:
+            return self.get_queryset().filter(category=category)
+        return self.get_queryset()
+
+    def list(self, request, *args, **kwargs):
+        self.queryset = self.get_filtered_queryset()
+        return super().list(request, *args, **kwargs)
+
+
+class PlatformUpdateSerializer(serializers.ModelSerializer):
+    category_label = serializers.CharField(source='get_category_display', read_only=True)
+
+    class Meta:
+        model = PlatformUpdate
+        fields = [
+            'id', 'slug', 'title', 'version', 'category', 'category_label',
+            'summary', 'content', 'change_list', 'cover_image',
+            'target_audience', 'published_at', 'created_at',
+        ]
+
+
+class PlatformUpdateViewSet(viewsets.ReadOnlyModelViewSet):
+    """Public changelog feed: published platform updates, newest first."""
+
+    lookup_field = 'slug'
+    permission_classes = [permissions.AllowAny]
+    serializer_class = PlatformUpdateSerializer
+
+    def get_queryset(self):
+        queryset = PlatformUpdate.objects.filter(
+            status=PlatformUpdate.Status.PUBLISHED,
+        ).exclude(published_at__isnull=True)
+        category = self.request.query_params.get('category')
+        if category:
+            queryset = queryset.filter(category=category)
+        return queryset.order_by('-published_at')
+
+
+UNSUBSCRIBE_PAGE_TEMPLATE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title} - Code Yaar</title>
+<style>
+  body {{ margin: 0; font-family: -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+         background: #0f172a; color: #e2e8f0; display: flex; min-height: 100vh;
+         align-items: center; justify-content: center; }}
+  .card {{ max-width: 480px; margin: 24px; padding: 32px; border-radius: 16px;
+          background: #1e293b; border: 1px solid #334155; text-align: center; }}
+  h1 {{ font-size: 22px; margin: 0 0 12px; }}
+  p {{ font-size: 15px; line-height: 1.6; color: #94a3b8; margin: 0; }}
+  a.brand {{ color: #38bdf8; text-decoration: none; }}
+</style>
+</head>
+<body><div class="card"><h1>{title}</h1><p>{message}</p>
+<p style="margin-top:16px"><a class="brand" href="{home}">Back to Code Yaar</a></p>
+</div></body></html>
+"""
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def email_unsubscribe_view(request, token):
+    """One-click opt-out for non-essential campaign email via a signed link.
+
+    Only marketing mail is disabled; essential account and competition mail
+    is never governed by this preference.
+    """
+    user = email_campaigns.unpack_unsubscribe_token(token)
+    if user is None:
+        return HttpResponse(
+            UNSUBSCRIBE_PAGE_TEMPLATE.format(
+                title='Link no longer valid',
+                message='This unsubscribe link is not valid. You can manage '
+                        'your email preferences from your account settings '
+                        'inside Code Yaar.',
+                home=settings.FRONTEND_URL,
+            ),
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    profile = getattr(user, 'profile', None)
+    if profile is not None:
+        preferences = dict(profile.notification_preferences or {})
+        preferences[email_campaigns.MARKETING_PREFERENCE] = False
+        profile.notification_preferences = preferences
+        profile.save(update_fields=['notification_preferences'])
+    return HttpResponse(
+        UNSUBSCRIBE_PAGE_TEMPLATE.format(
+            title='Unsubscribed',
+            message='You have been unsubscribed from non-essential Code Yaar '
+                    'emails. Account security and competition notifications '
+                    'will still reach you.',
+            home=settings.FRONTEND_URL,
+        )
+    )
+
+
 # ─── Leaderboard Serializer ────────────────────────────────────────────────
 
 class LeaderboardEntrySerializer(serializers.Serializer):
@@ -282,6 +579,9 @@ class LeaderboardEntrySerializer(serializers.Serializer):
     streak_days = serializers.IntegerField()
     courses_completed = serializers.IntegerField()
     challenges_solved = serializers.IntegerField()
+    full_name = serializers.CharField()
+    avatar = serializers.CharField()
+    followers_count = serializers.IntegerField()
 
 
 # ─── Lesson XP helper ──────────────────────────────────────────────────
@@ -1011,7 +1311,9 @@ class ChallengeViewSet(viewsets.ReadOnlyModelViewSet):
     lookup_field = 'slug'
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['title', 'description', 'topic']
-    ordering_fields = ['title', 'estimated_minutes']
+    ordering_fields = [
+        'title', 'estimated_minutes', 'xp_reward', 'created_at', 'difficulty',
+    ]
 
     action_permissions = {
         'run': [permissions.IsAuthenticated],
@@ -1058,6 +1360,16 @@ class ChallengeViewSet(viewsets.ReadOnlyModelViewSet):
 
         if difficulty:
             qs = qs.filter(difficulty=difficulty)
+        progress = self.request.query_params.get('progress')
+        if user.is_authenticated and progress in {'solved', 'unsolved', 'attempted', 'unattempted'}:
+            if progress == 'solved':
+                qs = qs.filter(solved_count__gt=0)
+            elif progress == 'unsolved':
+                qs = qs.filter(solved_count=0)
+            elif progress == 'attempted':
+                qs = qs.filter(attempt_count__gt=0)
+            else:
+                qs = qs.filter(attempt_count=0)
 
         # Annotating over the submissions join drops the model's implicit
         # ordering, so pin a deterministic default to keep pagination stable
@@ -1821,6 +2133,9 @@ def leaderboard_view(request):
             'streak_days': profile.streak_days,
             'courses_completed': courses_completed,
             'challenges_solved': challenges_solved,
+            'full_name': profile.full_name,
+            'avatar': profile.avatar_url(),
+            'followers_count': profile.user.follower_relationships.count(),
         })
 
     return Response({
@@ -2337,6 +2652,7 @@ def _encode_avatar(image_bytes, content_type):
 def avatar_view(request):
     """Upload or remove the signed-in learner's profile picture."""
     from django.core.files.base import ContentFile
+    from uuid import uuid4
 
     profile, _ = UserProfile.objects.get_or_create(user=request.user)
 
@@ -2360,7 +2676,7 @@ def avatar_view(request):
         )
     if profile.avatar:
         profile.avatar.delete(save=False)
-    filename = f"avatar_{request.user.pk}.jpg"
+    filename = f"avatar_{request.user.pk}_{uuid4().hex}.jpg"
     profile.avatar.save(filename, ContentFile(data), save=True)
     return Response({'avatar': profile.avatar_url()})
 
@@ -2619,6 +2935,98 @@ def public_profile_view(request, username):
     })
 
 
+@api_view(['POST', 'DELETE'])
+@permission_classes([permissions.IsAuthenticated])
+def follow_user_view(request, username):
+    """Follow or unfollow a public learner without trusting client counts."""
+    from django.contrib.auth import get_user_model
+
+    target = get_object_or_404(
+        get_user_model().objects.select_related('profile'),
+        username__iexact=username,
+    )
+    if target == request.user:
+        return Response(
+            {'detail': 'You cannot follow yourself.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not getattr(target, 'profile', None) or not target.profile.is_profile_public:
+        return Response({'detail': 'Profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'POST':
+        Follow.objects.get_or_create(follower=request.user, following=target)
+    else:
+        Follow.objects.filter(follower=request.user, following=target).delete()
+
+    return Response({
+        'following': request.method == 'POST',
+        'followers_count': Follow.objects.filter(following=target).count(),
+        'following_count': Follow.objects.filter(follower=request.user).count(),
+    })
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def user_followers_view(request, username):
+    """Return a bounded page of a user's followers."""
+    from django.contrib.auth import get_user_model
+
+    target = get_object_or_404(
+        get_user_model().objects.select_related('profile'),
+        username__iexact=username,
+    )
+    if not getattr(target, 'profile', None) or not target.profile.is_profile_public:
+        return Response({'detail': 'Profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+    limit = min(max(int(request.query_params.get('limit', 25)), 1), 50)
+    followers = Follow.objects.filter(
+        following=target, follower__profile__is_profile_public=True,
+    ).select_related(
+        'follower', 'follower__profile',
+    )[:limit]
+    return Response({
+        'count': Follow.objects.filter(
+            following=target, follower__profile__is_profile_public=True,
+        ).count(),
+        'results': [_follow_summary(row.follower) for row in followers],
+    })
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def user_following_view(request, username):
+    """Return a bounded page of accounts followed by a user."""
+    from django.contrib.auth import get_user_model
+
+    target = get_object_or_404(
+        get_user_model().objects.select_related('profile'),
+        username__iexact=username,
+    )
+    if not getattr(target, 'profile', None) or not target.profile.is_profile_public:
+        return Response({'detail': 'Profile not found.'}, status=status.HTTP_404_NOT_FOUND)
+    limit = min(max(int(request.query_params.get('limit', 25)), 1), 50)
+    following = Follow.objects.filter(
+        follower=target, following__profile__is_profile_public=True,
+    ).select_related(
+        'following', 'following__profile',
+    )[:limit]
+    return Response({
+        'count': Follow.objects.filter(
+            follower=target, following__profile__is_profile_public=True,
+        ).count(),
+        'results': [_follow_summary(row.following) for row in following],
+    })
+
+
+def _follow_summary(user):
+    profile = getattr(user, 'profile', None)
+    return {
+        'username': user.username,
+        'display_name': profile.full_name if profile else user.username,
+        'avatar': profile.avatar_url() if profile else '',
+        'headline': getattr(getattr(user, 'portfolio', None), 'headline', ''),
+    }
+
+
 # ─── Developer Portfolio ────────────────────────────────────────────────────
 
 class PortfolioMediaThrottle(ScopedRateThrottle):
@@ -2690,10 +3098,7 @@ def public_portfolio_view(request, username):
     )
     profile = getattr(user, 'profile', None) if user else None
     portfolio = getattr(user, 'portfolio', None) if user else None
-    if (
-        user is None or profile is None or portfolio is None
-        or not profile.is_profile_public or not portfolio.is_published
-    ):
+    if user is None or profile is None or portfolio is None or not portfolio.is_published:
         return Response({'detail': 'Portfolio not found.'}, status=status.HTTP_404_NOT_FOUND)
 
     return Response(PublicPortfolioSerializer(portfolio, context={'request': request}).data)
@@ -2798,10 +3203,7 @@ def public_project_detail_view(request, username, slug):
     )
     profile = getattr(user, 'profile', None) if user else None
     portfolio = getattr(user, 'portfolio', None) if user else None
-    if (
-        user is None or profile is None or portfolio is None
-        or not profile.is_profile_public or not portfolio.is_published
-    ):
+    if user is None or profile is None or portfolio is None or not portfolio.is_published:
         return Response({'detail': 'Project not found.'}, status=status.HTTP_404_NOT_FOUND)
 
     project = get_object_or_404(

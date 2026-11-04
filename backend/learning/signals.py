@@ -75,6 +75,11 @@ def _registration_status_changed(instance, created, **_kwargs):
         return
     if previous == 'approved' and new == 'approved':
         return
+    if getattr(instance, '_notification_handled', False):
+        # The admin review endpoint owns this decision: it sends a richer
+        # notification (reference number, chosen status) right after saving,
+        # so reacting here too would mail the applicant twice for one verdict.
+        return
 
     competition = instance.competition
     user = instance.user

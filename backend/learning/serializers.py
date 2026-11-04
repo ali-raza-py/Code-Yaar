@@ -9,7 +9,7 @@ from .models import (
     PracticalProgress, PracticalBookmark, UserNotification,
     UserProfile, Portfolio, StudentProject, ProjectImage,
     Competition, CompetitionRegistration, CompetitionTeam,
-    CompetitionSubmission, CompetitionResult,
+    CompetitionSubmission, CompetitionResult, Follow,
 )
 
 
@@ -55,8 +55,8 @@ class CompetitionDetailSerializer(CompetitionListSerializer):
 class CompetitionRegistrationSerializer(serializers.ModelSerializer):
     class Meta:
         model = CompetitionRegistration
-        fields = ['id', 'team', 'registration_status', 'registration_data', 'rules_accepted_at', 'registered_at']
-        read_only_fields = ['id', 'registration_status', 'registered_at']
+        fields = ['id', 'reference', 'team', 'registration_status', 'registration_data', 'rules_accepted_at', 'registered_at']
+        read_only_fields = ['id', 'reference', 'registration_status', 'registered_at']
 
 
 class CompetitionSubmissionSerializer(serializers.ModelSerializer):
@@ -891,7 +891,7 @@ class ChallengeDetailSerializer(serializers.ModelSerializer):
             'id', 'slug', 'title', 'description', 'difficulty', 'topic',
             'estimated_minutes', 'xp_reward', 'languages',
             'starter_code', 'starter_code_cpp',
-            'problem_statement', 'requirements', 'input_description',
+            'problem_statement', 'learning_objective', 'requirements', 'input_description',
             'output_description', 'constraints', 'examples', 'hints',
             'time_complexity', 'space_complexity',
             'sample_tests', 'solved', 'attempts',
@@ -1396,6 +1396,7 @@ class PortfolioSerializer(serializers.ModelSerializer):
     github_url = serializers.SerializerMethodField()
     linkedin_url = serializers.SerializerMethodField()
     website_url = serializers.SerializerMethodField()
+    is_profile_public = serializers.SerializerMethodField()
 
     class Meta:
         model = Portfolio
@@ -1406,6 +1407,7 @@ class PortfolioSerializer(serializers.ModelSerializer):
             'show_contact', 'created_at', 'updated_at',
             'full_name', 'username', 'avatar_url', 'location',
             'github_url', 'linkedin_url', 'website_url',
+            'is_profile_public',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
@@ -1438,6 +1440,10 @@ class PortfolioSerializer(serializers.ModelSerializer):
         profile = self._profile(obj)
         return profile.website_url if profile else ''
 
+    def get_is_profile_public(self, obj):
+        profile = self._profile(obj)
+        return bool(profile and profile.is_profile_public)
+
 
 class PublicPortfolioSerializer(serializers.ModelSerializer):
     """Privacy-filtered public portfolio payload.
@@ -1459,13 +1465,17 @@ class PublicPortfolioSerializer(serializers.ModelSerializer):
     skills = serializers.SerializerMethodField()
     achievements = serializers.SerializerMethodField()
     learning_journey = serializers.SerializerMethodField()
+    followers_count = serializers.SerializerMethodField()
+    following_count = serializers.SerializerMethodField()
+    is_following = serializers.SerializerMethodField()
 
     class Meta:
         model = Portfolio
         fields = [
             'username', 'display_name', 'avatar', 'headline', 'location',
             'social_links', 'contact_enabled', 'about', 'projects', 'skills',
-            'achievements', 'learning_journey',
+            'achievements', 'learning_journey', 'followers_count',
+            'following_count', 'is_following',
         ]
 
     def _profile(self, obj):
@@ -1504,6 +1514,21 @@ class PublicPortfolioSerializer(serializers.ModelSerializer):
 
     def get_contact_enabled(self, obj):
         return bool(obj.show_contact)
+
+    def get_followers_count(self, obj):
+        return obj.user.follower_relationships.count()
+
+    def get_following_count(self, obj):
+        return obj.user.following_relationships.count()
+
+    def get_is_following(self, obj):
+        request = self.context.get('request')
+        return bool(
+            request and request.user.is_authenticated
+            and Follow.objects.filter(
+                follower=request.user, following=obj.user,
+            ).exists()
+        )
 
     def get_about(self, obj):
         return {

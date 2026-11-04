@@ -3,6 +3,7 @@ from django.urls import path, include, re_path
 from django.conf import settings
 from django.http import JsonResponse
 from django.views.static import serve
+from django.conf.urls.static import static
 
 if settings.DEBUG:
     import debug_toolbar
@@ -26,3 +27,4 @@ if settings.DEBUG:
         path('__debug__/', include(debug_toolbar.urls)),
         *urlpatterns,
     ]
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
