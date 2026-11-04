@@ -4,14 +4,17 @@ import { Search, SlidersHorizontal, X } from "lucide-react";
 import { DifficultyTabs, type Difficulty } from "./difficulty-tabs";
 
 export type SortOrder = "newest" | "difficulty" | "solved";
+export type ProgressFilter = "all" | "solved" | "unsolved" | "attempted" | "unattempted";
 
 interface FilterBarProps {
   search: string;
   difficulty: Difficulty;
   sort: SortOrder;
+  progress: ProgressFilter;
   onSearchChange: (value: string) => void;
   onDifficultyChange: (value: Difficulty) => void;
   onSortChange: (value: SortOrder) => void;
+  onProgressChange: (value: ProgressFilter) => void;
   onClearSearch: () => void;
   onOpenFilters: () => void;
 }
@@ -20,9 +23,11 @@ export function FilterBar({
   search,
   difficulty,
   sort,
+  progress,
   onSearchChange,
   onDifficultyChange,
   onSortChange,
+  onProgressChange,
   onClearSearch,
   onOpenFilters,
 }: FilterBarProps) {
@@ -58,6 +63,16 @@ export function FilterBar({
               <option value="newest">Newest</option>
               <option value="difficulty">Difficulty</option>
               <option value="solved">Most solved</option>
+            </select>
+          </label>
+          <label className="flex min-h-10 shrink-0 items-center gap-2 rounded-lg border border-[var(--challenge-border)] bg-[var(--challenge-surface)] px-3 text-xs font-semibold text-[var(--challenge-muted)]">
+            <span className="hidden sm:inline">Progress</span>
+            <select aria-label="Filter challenge progress" value={progress} onChange={(event) => onProgressChange(event.target.value as ProgressFilter)} className="bg-transparent text-[var(--challenge-text)] outline-none">
+              <option value="all">All</option>
+              <option value="solved">Solved</option>
+              <option value="unsolved">Unsolved</option>
+              <option value="attempted">Attempted</option>
+              <option value="unattempted">Not attempted</option>
             </select>
           </label>
         </div>

@@ -10,7 +10,7 @@ import type { Challenge } from "@/types";
 import { ChallengeCard } from "@/components/challenges/challenge-card";
 import { ChallengeSkeleton } from "@/components/challenges/challenge-skeleton";
 import { EmptyState } from "@/components/challenges/empty-state";
-import { FilterBar, type SortOrder } from "@/components/challenges/filter-bar";
+import { FilterBar, type ProgressFilter, type SortOrder } from "@/components/challenges/filter-bar";
 import { TopicChips } from "@/components/challenges/topic-chips";
 import { DifficultyTabs, type Difficulty } from "@/components/challenges/difficulty-tabs";
 
@@ -26,6 +26,7 @@ function ChallengesContent() {
   const mode = params.get("mode");
   const initialDifficulty = params.get("difficulty") as Difficulty;
   const initialSort = params.get("sort") as SortOrder;
+  const initialProgress = params.get("progress") as ProgressFilter;
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -33,6 +34,7 @@ function ChallengesContent() {
   const [difficulty, setDifficulty] = useState<Difficulty>(["all", "beginner", "intermediate", "advanced"].includes(initialDifficulty) ? initialDifficulty : "all");
   const [topic, setTopic] = useState(params.get("topic") || "All");
   const [sort, setSort] = useState<SortOrder>(["newest", "difficulty", "solved"].includes(initialSort) ? initialSort : "newest");
+  const [progress, setProgress] = useState<ProgressFilter>(["all", "solved", "unsolved", "attempted", "unattempted"].includes(initialProgress) ? initialProgress : "all");
   const [searchInput, setSearchInput] = useState(params.get("search") || "");
   const [search, setSearch] = useState(params.get("search") || "");
   const [showAllTopics, setShowAllTopics] = useState(false);
@@ -68,10 +70,11 @@ function ChallengesContent() {
     if (difficulty !== "all") query.set("difficulty", difficulty);
     if (topic !== "All") query.set("topic", topic);
     if (sort !== "newest") query.set("sort", sort);
+    if (progress !== "all") query.set("progress", progress);
     if (mode) query.set("mode", mode);
     const queryString = query.toString();
     router.replace(`${pathname}${queryString ? `?${queryString}` : ""}`, { scroll: false });
-  }, [difficulty, mode, pathname, router, search, sort, topic]);
+  }, [difficulty, mode, pathname, progress, router, search, sort, topic]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -92,18 +95,23 @@ function ChallengesContent() {
       if (difficulty !== "all" && challenge.difficulty !== difficulty) return false;
       if (topic !== "All" && challenge.topic !== topic) return false;
       if (search && !`${challenge.title} ${challenge.description} ${challenge.topic}`.toLowerCase().includes(search.toLowerCase())) return false;
+      if (progress === "solved" && !challenge.solved) return false;
+      if (progress === "unsolved" && challenge.solved) return false;
+      if (progress === "attempted" && !(challenge.attempts ?? 0)) return false;
+      if (progress === "unattempted" && (challenge.attempts ?? 0)) return false;
       return true;
     });
-    return result.sort((left, right) => sort === "difficulty" ? left.difficulty.localeCompare(right.difficulty) : sort === "solved" ? right.xp_reward - left.xp_reward : right.id - left.id);
-  }, [challenges, difficulty, search, sort, topic]);
+    return result.sort((left, right) => sort === "difficulty" ? left.difficulty.localeCompare(right.difficulty) : sort === "solved" ? Number(right.solved) - Number(left.solved) : right.id - left.id);
+  }, [challenges, difficulty, progress, search, sort, topic]);
 
-  const hasFilters = Boolean(search || difficulty !== "all" || topic !== "All");
+  const hasFilters = Boolean(search || difficulty !== "all" || topic !== "All" || progress !== "all");
   const clearFilters = () => {
     setSearchInput("");
     setSearch("");
     setDifficulty("all");
     setTopic("All");
     setSort("newest");
+    setProgress("all");
   };
 
   return (
@@ -122,7 +130,7 @@ function ChallengesContent() {
         </header>
 
         <section aria-label="Challenge filters" className="mt-6 space-y-5">
-          <FilterBar search={searchInput} difficulty={difficulty} sort={sort} onSearchChange={setSearchInput} onDifficultyChange={setDifficulty} onSortChange={setSort} onClearSearch={() => setSearchInput("")} onOpenFilters={() => setFiltersOpen(true)} />
+          <FilterBar search={searchInput} difficulty={difficulty} sort={sort} progress={progress} onSearchChange={setSearchInput} onDifficultyChange={setDifficulty} onSortChange={setSort} onProgressChange={setProgress} onClearSearch={() => setSearchInput("")} onOpenFilters={() => setFiltersOpen(true)} />
           <TopicChips topics={topics} value={topic} showAll={showAllTopics} onChange={setTopic} onToggleShowAll={() => setShowAllTopics((value) => !value)} />
         </section>
 
@@ -140,6 +148,7 @@ function ChallengesContent() {
             {search && <button type="button" onClick={() => setSearchInput("")} className="rounded-full bg-[var(--challenge-accent-soft)] px-2.5 py-1 text-xs font-semibold text-[var(--challenge-accent-strong)]">Search: {search} ×</button>}
             {difficulty !== "all" && <button type="button" onClick={() => setDifficulty("all")} className="rounded-full bg-[var(--challenge-accent-soft)] px-2.5 py-1 text-xs font-semibold capitalize text-[var(--challenge-accent-strong)]">{difficulty} ×</button>}
             {topic !== "All" && <button type="button" onClick={() => setTopic("All")} className="rounded-full bg-[var(--challenge-accent-soft)] px-2.5 py-1 text-xs font-semibold text-[var(--challenge-accent-strong)]">{topic} ×</button>}
+            {progress !== "all" && <button type="button" onClick={() => setProgress("all")} className="rounded-full bg-[var(--challenge-accent-soft)] px-2.5 py-1 text-xs font-semibold capitalize text-[var(--challenge-accent-strong)]">{progress} ×</button>}
             {hasFilters && <button type="button" onClick={clearFilters} className="inline-flex items-center gap-1 px-1 text-xs font-semibold text-[var(--challenge-muted)] hover:text-[var(--challenge-text)]"><RotateCcw aria-hidden="true" className="h-3.5 w-3.5" />Clear all</button>}
           </div>
           <p className="text-sm font-semibold text-[var(--challenge-muted)]">{loading ? "Loading challenges..." : `${filtered.length} challenge${filtered.length === 1 ? "" : "s"}`}</p>

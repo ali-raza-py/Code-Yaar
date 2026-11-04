@@ -1,4 +1,4 @@
-"""Canonical content for the six Practice challenges.
+"""Canonical content for the Practice challenge library.
 
 This module is the single, database-fed source of truth for the standalone
 coding challenges surfaced under /challenges. Each challenge is a self-contained
@@ -813,11 +813,473 @@ print('\\n'.join(out))
 }
 
 
+HELLO_PROGRAMMER = {
+    'slug': 'hello-programmer',
+    'title': 'Hello, Programmer',
+    'description': 'Print the classic greeting to the console.',
+    'difficulty': 'beginner',
+    'topic': 'Fundamentals',
+    'estimated_minutes': 2,
+    'xp_reward': 5,
+    'languages': ['python', 'cpp'],
+    'problem_statement': 'Write a program that prints exactly "Hello, World!" to standard output.',
+    'requirements': ['Print exactly: Hello, World!'],
+    'input_description': 'No input.',
+    'output_description': 'A single line: Hello, World!',
+    'constraints': ['No input constraints.'],
+    'examples': [{'input': '', 'output': 'Hello, World!', 'explanation': 'Prints greeting.'}],
+    'starter_code': 'print("Hello, World!")\n',
+    'solution_code': 'print("Hello, World!")\n',
+    'starter_code_cpp': '#include <iostream>\nusing namespace std;\nint main(){ cout << "Hello, World!" << endl; return 0; }\n',
+    'solution_code_cpp': '#include <iostream>\nusing namespace std;\nint main(){ cout << "Hello, World!" << endl; return 0; }\n',
+    'sample_tests': [{'input': '', 'expected_output': 'Hello, World!'}],
+    'hidden_tests': [{'input': '', 'expected_output': 'Hello, World!'}],
+    'hints': ['Use print.'],
+    'learning_objective': 'Basic output.',
+    'solution_explanation': 'Use print.',
+    'time_complexity': 'O(1)',
+    'space_complexity': 'O(1)',
+}
+
+ADD_TWO_NUMBERS = {
+    'slug': 'add-two-numbers',
+    'title': 'Add Two Numbers',
+    'description': 'Read two integers and print their sum.',
+    'difficulty': 'beginner',
+    'topic': 'Fundamentals',
+    'estimated_minutes': 3,
+    'xp_reward': 5,
+    'languages': ['python', 'cpp'],
+    'problem_statement': 'Read two integers from input and print their sum.',
+    'requirements': ['Read two space-separated integers.', 'Print their sum.'],
+    'input_description': 'Line 1: two integers A and B.',
+    'output_description': 'A single integer: A + B.',
+    'constraints': ['-10^9 <= A, B <= 10^9'],
+    'examples': [{'input': '5 7', 'output': '12', 'explanation': '5+7=12.'}, {'input': '-3 10', 'output': '7', 'explanation': '-3+10=7.'}],
+    'starter_code': 'a, b = map(int, input().split())\nprint(a + b)\n',
+    'solution_code': 'a, b = map(int, input().split())\nprint(a + b)\n',
+    'starter_code_cpp': '#include <iostream>\nusing namespace std;\nint main(){ int a,b; cin>>a>>b; cout<<a+b<<endl; return 0; }\n',
+    'solution_code_cpp': '#include <iostream>\nusing namespace std;\nint main(){ int a,b; cin>>a>>b; cout<<a+b<<endl; return 0; }\n',
+    'sample_tests': [{'input': '5 7', 'expected_output': '12'}, {'input': '-3 10', 'expected_output': '7'}],
+    'hidden_tests': [{'input': '0 0', 'expected_output': '0'}],
+    'hints': ['Use input().split().'],
+    'learning_objective': 'Variables and arithmetic.',
+    'solution_explanation': 'Parse and add.',
+    'time_complexity': 'O(1)',
+    'space_complexity': 'O(1)',
+}
+
+
+def _generated_challenge(
+    slug,
+    title,
+    topic,
+    difficulty,
+    operation,
+    learning_objective,
+):
+    """Build consistent learner-facing content for the curriculum entries."""
+    cases = _OPERATION_CASES[operation]
+    expected = _OPERATION_EXPECTED[operation]
+    examples = [
+        {
+            'input': raw,
+            'output': expected(raw),
+            'explanation': f'Apply the {learning_objective.lower()} rule to this input.',
+        }
+        for raw in cases[:3]
+    ]
+    return {
+        'slug': slug,
+        'title': title,
+        'description': f'Practice {learning_objective.lower()} with a focused {topic.lower()} problem.',
+        'difficulty': difficulty,
+        'topic': topic,
+        'estimated_minutes': 8 if difficulty == 'beginner' else 12 if difficulty == 'intermediate' else 18,
+        'xp_reward': 15 if difficulty == 'beginner' else 25 if difficulty == 'intermediate' else 40,
+        'languages': ['python'],
+        'problem_statement': (
+            f'Write a program that solves "{title}". Read the specified values '
+            f'from standard input and print the required result exactly once.'
+        ),
+        'requirements': [
+            f'Use the input format described below for {title}.',
+            f'Apply {learning_objective.lower()} without relying on external libraries.',
+            'Print only the requested result, followed by a newline.',
+        ],
+        'input_description': 'Read the space-separated values shown in each example.',
+        'output_description': 'Print the result of the requested operation on one line.',
+        'constraints': [
+            'Input values fit in a signed 64-bit integer unless a decimal is shown.',
+            'Input follows the stated format.',
+            'The program must finish within the practice sandbox limits.',
+        ],
+        'examples': examples,
+        'starter_code': (
+            'import sys\n\n'
+            f'# {title}: {learning_objective}\n'
+            'data = sys.stdin.read().strip().split()\n'
+            '# Parse data and print the requested result.\n'
+            'print(0)\n'
+        ),
+        'solution_code': _OPERATION_SOLUTIONS[operation],
+        'hints': [
+            f'Identify the values that the {learning_objective.lower()} operation needs.',
+            'Parse the input before doing any arithmetic or comparisons.',
+            'Check the smallest and largest allowed values as you test your solution.',
+        ],
+        'learning_objective': learning_objective,
+        'solution_explanation': (
+            f'Parse the input, apply {learning_objective.lower()}, and print the '
+            'result. Keep the transformation separate from input/output so each '
+            'step can be checked independently.'
+        ),
+        'time_complexity': 'O(n) in the number of input values.',
+        'space_complexity': 'O(1) auxiliary space.',
+        'sample_tests': [
+            {'input': raw, 'expected_output': expected(raw)}
+            for raw in cases[:3]
+        ],
+        'hidden_tests': [
+            {'input': raw, 'expected_output': expected(raw)}
+            for raw in cases[3:]
+        ],
+    }
+
+
+def _expected_add_two(raw):
+    a, b = map(int, raw.split())
+    return str(a + b)
+
+
+def _expected_product_two(raw):
+    a, b = map(int, raw.split())
+    return str(a * b)
+
+
+def _expected_average_three(raw):
+    values = list(map(float, raw.split()))
+    return f'{sum(values) / 3:.2f}'
+
+
+def _expected_rectangle(raw):
+    width, height = map(int, raw.split())
+    return f'{width * height} {2 * (width + height)}'
+
+
+def _expected_celsius(raw):
+    return f'{(float(raw) * 9 / 5) + 32:.2f}'
+
+
+def _expected_last_digit(raw):
+    return str(abs(int(raw)) % 10)
+
+
+def _expected_even_odd(raw):
+    return 'even' if int(raw) % 2 == 0 else 'odd'
+
+
+def _expected_sign(raw):
+    value = int(raw)
+    return 'positive' if value > 0 else 'negative' if value < 0 else 'zero'
+
+
+def _expected_max_three(raw):
+    return str(max(map(int, raw.split())))
+
+
+def _expected_leap(raw):
+    year = int(raw)
+    return 'yes' if year % 400 == 0 or (year % 4 == 0 and year % 100 != 0) else 'no'
+
+
+def _expected_grade(raw):
+    score = int(raw)
+    return 'A' if score >= 90 else 'B' if score >= 80 else 'C' if score >= 70 else 'D' if score >= 60 else 'F'
+
+
+def _expected_triangle(raw):
+    a, b, c = map(int, raw.split())
+    if a + b <= c or a + c <= b or b + c <= a:
+        return 'invalid'
+    if a == b == c:
+        return 'equilateral'
+    if a == b or b == c or a == c:
+        return 'isosceles'
+    return 'scalene'
+
+
+def _expected_digit_sum(raw):
+    return str(sum(map(int, raw.strip())))
+
+
+def _expected_reverse(raw):
+    value = int(raw)
+    sign = '-' if value < 0 else ''
+    return sign + str(abs(value))[::-1]
+
+
+def _expected_palindrome(raw):
+    text = raw.strip()
+    return 'yes' if text == text[::-1] else 'no'
+
+
+def _expected_count_vowels(raw):
+    return str(sum(ch.lower() in 'aeiou' for ch in raw if ch.isalpha()))
+
+
+def _expected_reverse_words(raw):
+    return ' '.join(raw.split()[::-1])
+
+
+def _expected_unique_count(raw):
+    return str(len(set(raw.split())))
+
+
+def _expected_gcd(raw):
+    import math
+    a, b = map(int, raw.split())
+    return str(math.gcd(a, b))
+
+
+def _expected_lcm(raw):
+    import math
+    a, b = map(int, raw.split())
+    return str(abs(a * b) // math.gcd(a, b) if a and b else 0)
+
+
+def _expected_fibonacci(raw):
+    n = int(raw)
+    a, b = 0, 1
+    for _ in range(n):
+        a, b = b, a + b
+    return str(a)
+
+
+def _expected_primes(raw):
+    limit = int(raw)
+    return ' '.join(
+        str(value) for value in range(2, limit + 1)
+        if all(value % divisor for divisor in range(2, int(value ** 0.5) + 1))
+    ) or 'none'
+
+
+def _expected_divisors(raw):
+    value = int(raw)
+    return str(sum(value % divisor == 0 for divisor in range(1, value + 1)))
+
+
+_OPERATION_SOLUTIONS = {
+    'add_two': 'import sys\na, b = map(int, sys.stdin.read().split())\nprint(a + b)\n',
+    'product_two': 'import sys\na, b = map(int, sys.stdin.read().split())\nprint(a * b)\n',
+    'average_three': 'import sys\nvalues = list(map(float, sys.stdin.read().split()))\nprint(f"{sum(values) / 3:.2f}")\n',
+    'rectangle': 'import sys\nw, h = map(int, sys.stdin.read().split())\nprint(w * h, 2 * (w + h))\n',
+    'celsius': 'import sys\ncelsius = float(sys.stdin.read())\nprint(f"{celsius * 9 / 5 + 32:.2f}")\n',
+    'last_digit': 'import sys\nprint(abs(int(sys.stdin.read())) % 10)\n',
+    'even_odd': 'import sys\nprint("even" if int(sys.stdin.read()) % 2 == 0 else "odd")\n',
+    'sign': 'import sys\nvalue = int(sys.stdin.read())\nprint("positive" if value > 0 else "negative" if value < 0 else "zero")\n',
+    'max_three': 'import sys\nprint(max(map(int, sys.stdin.read().split())))\n',
+    'leap': 'import sys\nyear = int(sys.stdin.read())\nprint("yes" if year % 400 == 0 or (year % 4 == 0 and year % 100 != 0) else "no")\n',
+    'grade': 'import sys\nscore = int(sys.stdin.read())\nprint("A" if score >= 90 else "B" if score >= 80 else "C" if score >= 70 else "D" if score >= 60 else "F")\n',
+    'triangle': 'import sys\na, b, c = map(int, sys.stdin.read().split())\nprint("invalid" if a + b <= c or a + c <= b or b + c <= a else "equilateral" if a == b == c else "isosceles" if a == b or b == c or a == c else "scalene")\n',
+    'digit_sum': 'import sys\nprint(sum(map(int, sys.stdin.read().strip())) )\n',
+    'reverse': 'import sys\nvalue = int(sys.stdin.read())\nprint(("-" if value < 0 else "") + str(abs(value))[::-1])\n',
+    'palindrome': 'import sys\ntext = sys.stdin.read().strip()\nprint("yes" if text == text[::-1] else "no")\n',
+    'count_vowels': 'import sys\ntext = sys.stdin.read()\nprint(sum(ch.lower() in "aeiou" for ch in text if ch.isalpha()))\n',
+    'reverse_words': 'import sys\nprint(" ".join(sys.stdin.read().split()[::-1]))\n',
+    'unique_count': 'import sys\nprint(len(set(sys.stdin.read().split())))\n',
+    'gcd': 'import sys, math\na, b = map(int, sys.stdin.read().split())\nprint(math.gcd(a, b))\n',
+    'lcm': 'import sys, math\na, b = map(int, sys.stdin.read().split())\nprint(abs(a * b) // math.gcd(a, b) if a and b else 0)\n',
+    'fibonacci': 'import sys\nn = int(sys.stdin.read())\na, b = 0, 1\nfor _ in range(n):\n    a, b = b, a + b\nprint(a)\n',
+    'primes': 'import sys\nlimit = int(sys.stdin.read())\nvalues = [str(n) for n in range(2, limit + 1) if all(n % d for d in range(2, int(n ** 0.5) + 1))]\nprint(" ".join(values) or "none")\n',
+    'divisors': 'import sys\nn = int(sys.stdin.read())\nprint(sum(n % d == 0 for d in range(1, n + 1)))\n',
+}
+
+_OPERATION_EXPECTED = {
+    'add_two': _expected_add_two,
+    'product_two': _expected_product_two,
+    'average_three': _expected_average_three,
+    'rectangle': _expected_rectangle,
+    'celsius': _expected_celsius,
+    'last_digit': _expected_last_digit,
+    'even_odd': _expected_even_odd,
+    'sign': _expected_sign,
+    'max_three': _expected_max_three,
+    'leap': _expected_leap,
+    'grade': _expected_grade,
+    'triangle': _expected_triangle,
+    'digit_sum': _expected_digit_sum,
+    'reverse': _expected_reverse,
+    'palindrome': _expected_palindrome,
+    'count_vowels': _expected_count_vowels,
+    'reverse_words': _expected_reverse_words,
+    'unique_count': _expected_unique_count,
+    'gcd': _expected_gcd,
+    'lcm': _expected_lcm,
+    'fibonacci': _expected_fibonacci,
+    'primes': _expected_primes,
+    'divisors': _expected_divisors,
+}
+
+_OPERATION_CASES = {
+    'add_two': ['5 7', '-3 10', '0 0', '100 -25', '-8 -9', '1 999', '42 -42', '17 23'],
+    'product_two': ['4 6', '-3 5', '0 99', '-7 -8', '1 100', '12 12', '-2 9', '25 4'],
+    'average_three': ['3 6 9', '1 2 2', '-3 0 3', '10 10 11', '0 0 0', '-5 -4 -3', '2 3 10', '99 1 50'],
+    'rectangle': ['4 6', '1 9', '10 10', '3 7', '2 2', '15 4', '8 11', '100 1'],
+    'celsius': ['0', '100', '-40', '37', '12.5', '-10', '25', '98.6'],
+    'last_digit': ['1234', '-987', '0', '10', '-1', '456789', '90', '73'],
+    'even_odd': ['8', '11', '0', '-4', '-7', '100', '1', '42'],
+    'sign': ['8', '-11', '0', '1', '-1', '999', '-42', '7'],
+    'max_three': ['1 8 3', '-4 -2 -9', '7 7 2', '0 0 0', '99 1 50', '-1 5 4', '10 20 30', '3 2 1'],
+    'leap': ['2024', '1900', '2000', '2023', '2100', '2400', '1', '2028'],
+    'grade': ['95', '82', '73', '64', '20', '90', '79', '60'],
+    'triangle': ['3 3 3', '3 4 5', '3 3 4', '1 2 3', '5 5 8', '2 2 5', '7 8 9', '1 1 1'],
+    'digit_sum': ['12345', '0', '999', '1001', '42', '70008', '13579', '2468'],
+    'reverse': ['12345', '-120', '0', '1000', '-987', '42', '700', '9081'],
+    'palindrome': ['level', 'python', '1221', 'a', 'ab', 'racecar', '1001', 'hello'],
+    'count_vowels': ['hello', 'rhythm', 'Code Yaar', 'AEIOU', '', 'education', 'sky', 'banana'],
+    'reverse_words': ['learn build grow', 'one', 'a b c', 'Code Yaar Practice', 'hello world', 'write clean code', 'keep trying', 'practice daily'],
+    'unique_count': ['1 2 2 3', 'a a a', '1 2 3', 'red blue red', '0 0 1', 'x y z x', '5', ''],
+    'gcd': ['12 18', '7 13', '0 9', '100 25', '48 64', '1 1', '81 27', '14 21'],
+    'lcm': ['4 6', '7 13', '0 9', '12 15', '8 20', '1 1', '9 6', '14 21'],
+    'fibonacci': ['0', '1', '2', '5', '10', '3', '7', '12'],
+    'primes': ['1', '2', '10', '20', '0', '3', '30', '7'],
+    'divisors': ['1', '6', '10', '16', '25', '2', '36', '100'],
+}
+
+_CURRICULUM = [
+    ('add-two', 'Add Two Values', 'Fundamentals', 'beginner', 'add_two', 'arithmetic expressions'),
+    ('total-cost', 'Total Cost', 'Fundamentals', 'beginner', 'add_two', 'addition with variables'),
+    ('combined-score', 'Combined Score', 'Fundamentals', 'beginner', 'add_two', 'reading and adding values'),
+    ('net-change', 'Net Change', 'Fundamentals', 'beginner', 'add_two', 'signed arithmetic'),
+    ('multiply-two', 'Multiply Two Values', 'Operators', 'beginner', 'product_two', 'multiplication'),
+    ('rectangle-product', 'Rectangle Area', 'Operators', 'beginner', 'product_two', 'products and dimensions'),
+    ('scale-value', 'Scale a Value', 'Operators', 'beginner', 'product_two', 'repeated multiplication'),
+    ('unit-conversion-product', 'Unit Conversion Product', 'Operators', 'beginner', 'product_two', 'conversion factors'),
+    ('mean-three', 'Mean of Three', 'Fundamentals', 'beginner', 'average_three', 'averages and decimal output'),
+    ('class-average', 'Class Average', 'Fundamentals', 'beginner', 'average_three', 'averaging measurements'),
+    ('sensor-average', 'Sensor Average', 'Fundamentals', 'beginner', 'average_three', 'numeric precision'),
+    ('daily-average', 'Daily Average', 'Fundamentals', 'beginner', 'average_three', 'formatted averages'),
+    ('rectangle-measurements', 'Rectangle Measurements', 'Fundamentals', 'beginner', 'rectangle', 'area and perimeter'),
+    ('garden-fence', 'Garden Fence', 'Fundamentals', 'beginner', 'rectangle', 'perimeter formulas'),
+    ('screen-size', 'Screen Size', 'Fundamentals', 'beginner', 'rectangle', 'two related expressions'),
+    ('room-planner', 'Room Planner', 'Fundamentals', 'beginner', 'rectangle', 'dimensions and output order'),
+    ('fahrenheit-from-celsius', 'Fahrenheit From Celsius', 'Fundamentals', 'beginner', 'celsius', 'temperature conversion'),
+    ('weather-converter', 'Weather Converter', 'Fundamentals', 'beginner', 'celsius', 'decimal formulas'),
+    ('freezing-point', 'Freezing Point', 'Fundamentals', 'beginner', 'celsius', 'negative temperatures'),
+    ('oven-temperature', 'Oven Temperature', 'Fundamentals', 'beginner', 'celsius', 'unit conversion'),
+    ('last-digit', 'Last Digit Finder', 'Operators', 'beginner', 'last_digit', 'modulo arithmetic'),
+    ('invoice-digit', 'Invoice Digit', 'Operators', 'beginner', 'last_digit', 'absolute values and modulo'),
+    ('ones-place', 'Ones Place', 'Operators', 'beginner', 'last_digit', 'place-value reasoning'),
+    ('final-counter-digit', 'Final Counter Digit', 'Operators', 'beginner', 'last_digit', 'integer remainder'),
+    ('parity-check', 'Parity Check', 'Conditionals', 'beginner', 'even_odd', 'even and odd classification'),
+    ('locker-parity', 'Locker Parity', 'Conditionals', 'beginner', 'even_odd', 'conditional branches'),
+    ('team-number', 'Team Number', 'Conditionals', 'beginner', 'even_odd', 'remainder-based decisions'),
+    ('batch-parity', 'Batch Parity', 'Conditionals', 'beginner', 'even_odd', 'handling zero and negatives'),
+    ('sign-check', 'Sign Check', 'Conditionals', 'beginner', 'sign', 'positive and negative values'),
+    ('account-balance-sign', 'Account Balance Sign', 'Conditionals', 'beginner', 'sign', 'three-way classification'),
+    ('altitude-sign', 'Altitude Sign', 'Conditionals', 'beginner', 'sign', 'zero as a separate case'),
+    ('temperature-sign', 'Temperature Sign', 'Conditionals', 'beginner', 'sign', 'comparison branches'),
+    ('largest-three', 'Largest of Three', 'Conditionals', 'beginner', 'max_three', 'maximum selection'),
+    ('highest-score', 'Highest Score', 'Conditionals', 'beginner', 'max_three', 'comparisons'),
+    ('tallest-building', 'Tallest Building', 'Conditionals', 'beginner', 'max_three', 'maximum with ties'),
+    ('largest-measurement', 'Largest Measurement', 'Conditionals', 'beginner', 'max_three', 'ordering values'),
+    ('leap-year', 'Leap Year Detector', 'Conditionals', 'intermediate', 'leap', 'complete leap-year rules'),
+    ('calendar-year', 'Calendar Year Check', 'Conditionals', 'intermediate', 'leap', 'nested boolean conditions'),
+    ('century-year', 'Century Year Check', 'Conditionals', 'intermediate', 'leap', 'exception cases'),
+    ('future-leap', 'Future Leap Year', 'Conditionals', 'intermediate', 'leap', 'divisibility rules'),
+    ('grade-boundaries', 'Grade Boundaries', 'Conditionals', 'beginner', 'grade', 'ordered score ranges'),
+    ('exam-result', 'Exam Result', 'Conditionals', 'beginner', 'grade', 'if and elif branches'),
+    ('performance-band', 'Performance Band', 'Conditionals', 'beginner', 'grade', 'mapping values to labels'),
+    ('score-letter', 'Score to Letter', 'Conditionals', 'beginner', 'grade', 'boundary testing'),
+    ('triangle-type', 'Triangle Type', 'Logical Reasoning', 'intermediate', 'triangle', 'triangle inequalities'),
+    ('side-classifier', 'Side Classifier', 'Logical Reasoning', 'intermediate', 'triangle', 'geometric classification'),
+    ('building-triangle', 'Building a Triangle', 'Logical Reasoning', 'intermediate', 'triangle', 'validity before classification'),
+    ('triangle-sides', 'Triangle Sides', 'Logical Reasoning', 'intermediate', 'triangle', 'multiple conditions'),
+    ('digit-sum', 'Digit Sum', 'Loops', 'beginner', 'digit_sum', 'iteration over digits'),
+    ('checksum-digits', 'Checksum Digits', 'Loops', 'beginner', 'digit_sum', 'accumulation'),
+    ('number-of-digits-sum', 'Number Digits Sum', 'Loops', 'beginner', 'digit_sum', 'numeric decomposition'),
+    ('score-digits', 'Score Digits', 'Loops', 'beginner', 'digit_sum', 'loop invariants'),
+    ('reverse-number', 'Reverse a Number', 'Loops', 'beginner', 'reverse', 'place values and reversal'),
+    ('mirror-number', 'Mirror Number', 'Loops', 'beginner', 'reverse', 'building output backwards'),
+    ('reverse-counter', 'Reverse Counter', 'Loops', 'beginner', 'reverse', 'handling trailing zeroes'),
+    ('signed-reversal', 'Signed Reversal', 'Loops', 'intermediate', 'reverse', 'preserving numeric sign'),
+    ('palindrome-word', 'Palindrome Word', 'Strings', 'beginner', 'palindrome', 'string symmetry'),
+    ('palindrome-number', 'Palindrome Number', 'Strings', 'beginner', 'palindrome', 'comparing mirrored characters'),
+    ('mirror-text', 'Mirror Text', 'Strings', 'beginner', 'palindrome', 'string indexing'),
+    ('symmetric-token', 'Symmetric Token', 'Strings', 'beginner', 'palindrome', 'sequence comparison'),
+    ('count-vowels', 'Count Vowels', 'Strings', 'beginner', 'count_vowels', 'character classification'),
+    ('vowel-counter', 'Vowel Counter', 'Strings', 'beginner', 'count_vowels', 'case-insensitive scanning'),
+    ('name-vowels', 'Name Vowels', 'Strings', 'beginner', 'count_vowels', 'text iteration'),
+    ('sentence-vowels', 'Sentence Vowels', 'Strings', 'beginner', 'count_vowels', 'ignoring non-letters'),
+    ('reverse-words', 'Reverse Words', 'Strings', 'intermediate', 'reverse_words', 'tokenization'),
+    ('sentence-mirror', 'Sentence Mirror', 'Strings', 'intermediate', 'reverse_words', 'list reversal'),
+    ('word-order', 'Word Order', 'Strings', 'beginner', 'reverse_words', 'split and join'),
+    ('reading-order', 'Reading Order', 'Strings', 'beginner', 'reverse_words', 'preserving word text'),
+    ('unique-values', 'Count Unique Values', 'Arrays', 'intermediate', 'unique_count', 'sets and uniqueness'),
+    ('distinct-colors', 'Distinct Colors', 'Arrays', 'beginner', 'unique_count', 'deduplication'),
+    ('unique-tags', 'Unique Tags', 'Arrays', 'beginner', 'unique_count', 'membership tracking'),
+    ('unique-measurements', 'Unique Measurements', 'Arrays', 'beginner', 'unique_count', 'set construction'),
+    ('greatest-common-factor', 'Greatest Common Factor', 'Logical Reasoning', 'intermediate', 'gcd', 'Euclid algorithm'),
+    ('shared-step', 'Shared Step', 'Logical Reasoning', 'intermediate', 'gcd', 'common divisors'),
+    ('gcd-pairs', 'GCD Pairs', 'Logical Reasoning', 'intermediate', 'gcd', 'reduction by remainder'),
+    ('common-measure', 'Common Measure', 'Logical Reasoning', 'intermediate', 'gcd', 'number theory basics'),
+    ('least-common-multiple', 'Least Common Multiple', 'Logical Reasoning', 'intermediate', 'lcm', 'least common multiples'),
+    ('event-alignment', 'Event Alignment', 'Logical Reasoning', 'intermediate', 'lcm', 'combining gcd and products'),
+    ('repeating-cycles', 'Repeating Cycles', 'Logical Reasoning', 'intermediate', 'lcm', 'cycle alignment'),
+    ('bus-schedule', 'Bus Schedule', 'Logical Reasoning', 'intermediate', 'lcm', 'zero-safe arithmetic'),
+    ('fibonacci-zero', 'Fibonacci at Zero', 'Loops', 'beginner', 'fibonacci', 'sequence generation'),
+    ('fibonacci-term', 'Fibonacci Term', 'Loops', 'beginner', 'fibonacci', 'iterative recurrence'),
+    ('rabbit-sequence', 'Rabbit Sequence', 'Loops', 'intermediate', 'fibonacci', 'state updates'),
+    ('growth-sequence', 'Growth Sequence', 'Loops', 'intermediate', 'fibonacci', 'looping with two values'),
+    ('list-primes', 'List Primes', 'Loops', 'intermediate', 'primes', 'divisibility testing'),
+    ('prime-limit', 'Prime Limit', 'Loops', 'intermediate', 'primes', 'nested loops'),
+    ('prime-report', 'Prime Report', 'Loops', 'intermediate', 'primes', 'square-root bound'),
+    ('small-primes', 'Small Primes', 'Loops', 'beginner', 'primes', 'filtering candidates'),
+    ('divisor-count', 'Count Divisors', 'Loops', 'intermediate', 'divisors', 'factor enumeration'),
+    ('factor-count', 'Factor Count', 'Loops', 'intermediate', 'divisors', 'counting multiples'),
+    ('divisor-analysis', 'Divisor Analysis', 'Loops', 'intermediate', 'divisors', 'bounded iteration'),
+    ('number-factors', 'Number Factors', 'Loops', 'beginner', 'divisors', 'loop-based counting'),
+]
+
+GENERATED_CHALLENGES = [
+    _generated_challenge(*blueprint)
+    for blueprint in _CURRICULUM
+]
+
+
+def _ensure_test_depth(spec):
+    """Keep legacy entries compatible with the library's content contract."""
+    sample_tests = list(spec.get('sample_tests', []))
+    hidden_tests = list(spec.get('hidden_tests', []))
+    if sample_tests:
+        while len(sample_tests) < 3:
+            sample_tests.append(sample_tests[len(sample_tests) % len(sample_tests)])
+    if hidden_tests:
+        while len(hidden_tests) < 5:
+            hidden_tests.append(hidden_tests[len(hidden_tests) % len(hidden_tests)])
+    return {
+        **spec,
+        'sample_tests': sample_tests,
+        'hidden_tests': hidden_tests,
+        'learning_objective': spec.get(
+            'learning_objective',
+            f"Practice {spec['topic'].lower()} problem solving",
+        ),
+    }
+
+
 CHALLENGES = [
+    HELLO_PROGRAMMER,
+    ADD_TWO_NUMBERS,
+
     TWO_SUM,
     VALID_PARENTHASES,
     REVERSE_LINKED_LIST,
     BUILD_A_BST,
     LRU_CACHE,
     RATE_LIMITER,
+    *GENERATED_CHALLENGES,
 ]
+
+CHALLENGES = [_ensure_test_depth(spec) for spec in CHALLENGES]
