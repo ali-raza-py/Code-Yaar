@@ -1,0 +1,6 @@
+{% extends "emails/campaign_general.html" %}
+{% comment %}
+Important-notice campaign mail (emails/campaign_notice.html): the general
+campaign layout with the notice category in the header pill.
+{% endcomment %}
+{% block eyebrow %}{{ eyebrow|default:"Important notice" }}{% endblock %}

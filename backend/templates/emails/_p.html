@@ -1,0 +1,6 @@
+{% comment %}
+One body paragraph of email copy (emails/_p.html). Included as
+`{% include "emails/_p.html" with text=some_variable %}` wherever a template
+only has to print a sentence: the inline style is what mail clients need, so
+repeating it per template is noise.
+{% endcomment %}<p style="margin: 0 0 14px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.7; color: #334155;">{{ text }}</p>

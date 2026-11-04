@@ -1,13 +1,12 @@
-Code Yaar — Think. Build. Evolve.
+{% extends "emails/base.txt" %}
+{% block heading %}Badge unlocked — {{ badge_title }}{% endblock %}
+{% block body %}{% if achievement_description %}{{ achievement_description }}
 
-{{ heading }}
+{% endif %}{% if xp_bonus %}This badge came with a +{{ xp_bonus }} XP bonus on top of what you already earned.
 
-{% if first_name %}Hi {{ first_name }},{% else %}Hello,{% endif %}
-{% if achievement_description %}{{ achievement_description }}{% endif %}
-{% if xp_bonus %}This badge came with a +{{ xp_bonus }} XP bonus on top of what you already earned.{% endif %}
-Your badge is verifiable and can be shared straight from your profile.
+{% endif %}Your badge is verifiable and can be shared straight from your profile.
 
-View your badges: {{ cta_url }}
-
-Manage your email preferences: {{ preferences_url }}
-© {{ current_year }} Code Yaar — Think. Build. Evolve.
+{% endblock %}
+{% block cta_label %}View your badges{% endblock %}
+{% block footer_note %}You receive achievement emails while they are enabled in your notification settings.
+{% endblock %}

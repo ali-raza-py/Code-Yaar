@@ -2,9 +2,8 @@
 {% block preheader %}You are enrolled in {{ course_title }}.{% endblock %}
 {% block heading %}Course enrollment confirmed{% endblock %}
 {% block body %}
-<p style="margin: 0 0 10px; font-family: Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.6; color: #374151;">You are enrolled in <strong>{{ course_title }}</strong>. Your progress is saved lesson by lesson, and you will see XP land as you finish work.</p>
-<p style="margin: 0 0 10px; font-family: Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.6; color: #374151;">Pick it up whenever suits you — short sessions count.</p>
+<p style="margin: 0 0 14px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.7; color: #334155;">You are enrolled in <strong>{{ course_title }}</strong>. Your progress is saved lesson by lesson, and you will see XP land as you finish work.</p>
+<p style="margin: 0 0 14px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.7; color: #334155;">Pick it up whenever suits you — short sessions count.</p>
 {% endblock %}
-{% block cta_url %}{{ cta_url }}{% endblock %}
 {% block cta_label %}Start learning{% endblock %}
-{% block footer_note %}You are receiving learning updates because they are enabled in your notification settings.{% endblock %}
+{% block footer_note %}{% include "emails/_small.html" with text="You are receiving learning updates because they are enabled in your notification settings." %}{% endblock %}

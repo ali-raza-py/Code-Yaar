@@ -1,14 +1,10 @@
-Code Yaar — Think. Build. Evolve.
-
-{{ heading }}
-
-{% if first_name %}Hi {{ first_name }},{% else %}Hello,{% endif %}
-
-The organizers approved your registration for {{ competition_title }}. You are in.
+{% extends "emails/base.txt" %}
+{% block heading %}Registration approved{% endblock %}
+{% block body %}The organizers approved your registration for {{ competition_title }}. You are in.
 
 Check the problem statement and dates below so you are ready when it starts.
 
-View competition: {{ cta_url }}
-
-Manage your email preferences: {{ preferences_url }}
-© {{ current_year }} Code Yaar — Think. Build. Evolve.
+{% endblock %}
+{% block cta_label %}View competition{% endblock %}
+{% block footer_note %}You receive competition emails while they are enabled in your notification settings.
+{% endblock %}

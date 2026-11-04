@@ -1,14 +1,10 @@
-Code Yaar — Think. Build. Evolve.
-
-{{ heading }}
-
-{% if first_name %}Hi {{ first_name }},{% else %}Hello,{% endif %}
-
-The results for {{ competition_title }} have been published. You finished rank {{ rank }}{% if award %} and received: {{ award }}{% endif %}.
+{% extends "emails/base.txt" %}
+{% block heading %}Results published{% endblock %}
+{% block body %}The results for {{ competition_title }} have been published. You finished rank {{ rank }}{% if award %} and received: {{ award }}{% endif %}.
 
 Thank you for competing — the full leaderboard is on the competition page.
 
-See full results: {{ cta_url }}
-
-Manage your email preferences: {{ preferences_url }}
-© {{ current_year }} Code Yaar — Think. Build. Evolve.
+{% endblock %}
+{% block cta_label %}See full results{% endblock %}
+{% block footer_note %}You receive competition emails while they are enabled in your notification settings.
+{% endblock %}

@@ -1,0 +1,7 @@
+{% comment %}
+Small-print line for the email footer (emails/_small.html). Included as
+`{% include "emails/_small.html" with text="one sentence" %}` from a template's
+`footer_note` block: the footer wrapper in base.html cannot style text that a
+child injects through its own block override, so every footer note has to carry
+its own inline style.
+{% endcomment %}<div style="margin: 0 0 14px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 12px; line-height: 1.7; color: #64748b;">{{ text }}</div>

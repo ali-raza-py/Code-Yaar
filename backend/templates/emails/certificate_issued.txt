@@ -1,13 +1,12 @@
-Code Yaar — Think. Build. Evolve.
+{% extends "emails/base.txt" %}
+{% block heading %}Your certificate is ready{% endblock %}
+{% block body %}Your Certificate of Completion for {{ course_title }} has been issued. It is publicly verifiable and carries the credential ID below.
 
-{{ heading }}
+{% if final_score is not None %}Final score: {{ final_score }}%
 
-{% if first_name %}Hi {{ first_name }},{% else %}Hello,{% endif %}
+{% endif %}
 
-Your Certificate of Completion for {{ course_title }} has been issued. It is publicly verifiable and carries the credential ID below.
-{% if final_score is not None %}Final score: {{ final_score }}%{% endif %}
-
-View your certificate: {{ cta_url }}
-
-Manage your email preferences: {{ preferences_url }}
-© {{ current_year }} Code Yaar — Think. Build. Evolve.
+{% endblock %}
+{% block cta_label %}View your certificate{% endblock %}
+{% block footer_note %}You receive certificate emails while they are enabled in your notification settings.
+{% endblock %}
