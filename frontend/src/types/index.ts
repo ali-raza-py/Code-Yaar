@@ -104,6 +104,78 @@ export interface ChallengeSubmitResult {
   awarded_badges?: BadgeUnlockPayload[];
 }
 
+export type CompetitionStatus =
+  | "draft" | "upcoming" | "registration_open" | "registration_closing_soon"
+  | "registration_closed" | "ongoing" | "submission_open" | "judging" | "completed";
+
+export interface Competition {
+  id: number;
+  slug: string;
+  title: string;
+  short_description: string;
+  banner: string;
+  category: string;
+  difficulty: Difficulty;
+  format: "individual" | "team" | "both";
+  delivery_mode: "online" | "offline" | "hybrid";
+  registration_deadline: string;
+  competition_start: string;
+  competition_end: string;
+  participant_limit: number | null;
+  participant_count: number;
+  prize_information: string;
+  status: CompetitionStatus;
+  organizer_name: string;
+  registration_status: string | null;
+}
+
+export interface CompetitionDetail extends Competition {
+  description: string;
+  location: string;
+  registration_start: string;
+  submission_deadline: string;
+  judging_end: string | null;
+  results_announcement: string | null;
+  minimum_team_size: number;
+  maximum_team_size: number;
+  eligibility_rules: string[];
+  competition_rules: string[];
+  problem_statement: string;
+  submission_configuration: Record<string, unknown>;
+}
+
+export interface CompetitionRegistration {
+  id: number;
+  reference: string;
+  team: number | null;
+  registration_status: string;
+  registration_data: Record<string, unknown>;
+  rules_accepted_at: string;
+  registered_at: string;
+}
+
+export interface CompetitionSubmission {
+  id: number;
+  competition_slug: string;
+  project_title: string;
+  description: string;
+  github_url: string;
+  demo_url: string;
+  additional_data: Record<string, unknown>;
+  status: string;
+  organizer_feedback: string;
+  submitted_at: string | null;
+  updated_at: string;
+}
+
+export interface CompetitionResult {
+  rank: number;
+  participant_name: string;
+  project_title: string;
+  final_score: string;
+  award: string;
+}
+
 export interface LearningPath {
   id: string;
   title: string;

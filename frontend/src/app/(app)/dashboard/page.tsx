@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowRight, Trophy, BookOpen, Award } from "lucide-react";
-import { leaderboard as leaderboardApi, profileStats } from "@/lib/api";
-import type { LeaderboardEntry, ProfileStatsData } from "@/lib/api";
+import { ArrowRight, Trophy, BookOpen, Award, Megaphone } from "lucide-react";
+import { announcements as announcementsApi, leaderboard as leaderboardApi, profileStats } from "@/lib/api";
+import type { LeaderboardEntry, ProfileStatsData, PublicAnnouncement } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
 import { NetworkError } from "@/components/learning/workspace/error-states";
 import { AchievementIcon } from "@/components/achievements/achievement-icon";
@@ -25,15 +25,21 @@ export default function DashboardPage() {
   const { user, loading: authLoading } = useAuth();
   const [stats, setStats] = useState<ProfileStatsData | null>(null);
   const [topLearners, setTopLearners] = useState<LeaderboardEntry[]>([]);
+  const [latestAnnouncements, setLatestAnnouncements] = useState<PublicAnnouncement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) return;
     try {
-      const [statsData, board] = await Promise.all([profileStats.get(), leaderboardApi.list({ limit: 10 })]);
+      const [statsData, board, announcementList] = await Promise.all([
+        profileStats.get(),
+        leaderboardApi.list({ limit: 10 }),
+        announcementsApi.list().catch(() => [] as PublicAnnouncement[]),
+      ]);
       setStats(statsData);
       setTopLearners(board.entries);
+      setLatestAnnouncements(announcementList.slice(0, 4));
       setError(false);
     } catch {
       setError(true);
@@ -51,13 +57,13 @@ export default function DashboardPage() {
   if (authLoading || (loading && user)) {
     return (
       <div className="mx-auto max-w-7xl animate-pulse px-4 py-6 sm:px-6 lg:px-8">
-        <div className="mb-6 h-8 w-48 rounded bg-white" />
+        <div className="mb-6 h-8 w-48 rounded bg-muted" />
         <div className="grid gap-6 lg:grid-cols-3">
           <div className="space-y-6 lg:col-span-2">
-            <div className="h-40 rounded-xl bg-white" />
-            <div className="h-32 rounded-xl bg-white" />
+            <div className="h-40 rounded-xl bg-muted" />
+            <div className="h-32 rounded-xl bg-muted" />
           </div>
-          <div className="h-64 rounded-xl bg-white" />
+          <div className="h-64 rounded-xl bg-muted" />
         </div>
       </div>
     );
@@ -282,6 +288,41 @@ export default function DashboardPage() {
 
         {/* RIGHT — Sidebar (1/3) */}
         <div className="space-y-6">
+          {/* Latest announcements — live from the publishing system */}
+          {latestAnnouncements.length > 0 && (
+            <div className="card-hairline p-6">
+              <h3 className="flex items-center gap-2 font-bold text-foreground">
+                <Megaphone className="h-5 w-5 text-primary" />
+                Announcements
+              </h3>
+              <ul className="mt-4 space-y-3">
+                {latestAnnouncements.map((item) => (
+                  <li key={item.id}>
+                    <Link
+                      href={item.slug ? `/announcements/${item.slug}` : "/announcements"}
+                      className="group block rounded-lg border border-border p-3 transition-colors hover:border-primary"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          {item.category_label}
+                        </span>
+                        {item.priority !== "normal" && (
+                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${item.priority === "urgent" ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300" : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300"}`}>
+                            {item.priority_label}
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-sm font-semibold text-foreground group-hover:text-[var(--primary)]">{item.title}</p>
+                      {item.short_description && (
+                        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.short_description}</p>
+                      )}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {/* Streak + XP from the server-side profile */}
           <div className="card-hairline p-6">
             <div className="flex items-center gap-4">

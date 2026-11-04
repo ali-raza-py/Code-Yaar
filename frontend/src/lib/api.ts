@@ -1,4 +1,4 @@
-import type { Challenge, ChallengeDetail, ChallengeRunResult, ChallengeSubmitResult, Chapter, Course, Enrollment, ExerciseDetail, ExerciseResult, LessonDetail, Project, PracticalAdmin, PracticalClass, PracticalClassAdmin, PracticalDetail, PracticalSubject, PracticalSubjectAdmin, PracticalSummary } from "@/types";
+import type { Challenge, ChallengeDetail, ChallengeRunResult, ChallengeSubmitResult, Chapter, Course, Enrollment, ExerciseDetail, ExerciseResult, LessonDetail, Project, PracticalAdmin, PracticalClass, PracticalClassAdmin, PracticalDetail, PracticalSubject, PracticalSubjectAdmin, PracticalSummary, Competition, CompetitionDetail, CompetitionRegistration, CompetitionSubmission, CompetitionResult } from "@/types";
 
 /**
  * API client for Code-Yaar learning platform.
@@ -209,7 +209,7 @@ export const MAIL_REFUSED_MESSAGE =
 // DRF paginates list endpoints globally (PageNumberPagination): they return
 // { count, next, previous, results } rather than a bare array. Normalize so
 // callers always get a plain array.
-type Paginated<T> = T[] | { results: T[]; count: number; next: string | null; previous: string | null };
+export type Paginated<T> = T[] | { results: T[]; count: number; next: string | null; previous: string | null };
 
 function unwrapList<T>(data: Paginated<T>): T[] {
   return Array.isArray(data) ? data : data.results;
@@ -340,7 +340,7 @@ async function send(
   });
 }
 
-async function request<T>(
+export async function request<T>(
   endpoint: string,
   options: ApiRequestOptions = {}
 ): Promise<T> {
@@ -386,6 +386,7 @@ export interface AuthUser {
   date_joined: string;
   role: UserRole;
   email_verified: boolean;
+  is_super_admin: boolean;
 }
 
 export interface ProfileFields {
@@ -907,6 +908,9 @@ export interface LeaderboardEntry {
   streak_days: number;
   courses_completed: number;
   challenges_solved: number;
+  full_name: string;
+  avatar: string;
+  followers_count: number;
 }
 
 // ─── Projects & Challenges ──────────────────────────────────────────────────
@@ -928,11 +932,15 @@ export const challenges = {
     const query = new URLSearchParams();
     if (params?.topic) query.set('topic', params.topic);
     if (params?.difficulty) query.set('difficulty', params.difficulty);
-    const qs = query.toString();
-    const data = await request<Paginated<Challenge>>(
-      `/challenges/${qs ? `?${qs}` : ''}`
-    );
-    return unwrapList(data);
+    const challenges: Challenge[] = [];
+    let page = 1;
+    while (true) {
+      query.set('page', String(page));
+      const data = await request<Paginated<Challenge>>(`/challenges/?${query.toString()}`);
+      challenges.push(...unwrapList(data));
+      if (Array.isArray(data) || !data.next) return challenges;
+      page += 1;
+    }
   },
   detail: (slug: string) => request<ChallengeDetail>(`/challenges/${slug}/`),
   run: (slug: string, data: { code: string; language: string }) =>
@@ -945,6 +953,124 @@ export const challenges = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+};
+
+export const competitions = {
+  list: async (params?: {
+    status?: string; category?: string; difficulty?: string; format?: string;
+    delivery_mode?: string; search?: string; ordering?: string;
+  }): Promise<Competition[]> => {
+    const query = new URLSearchParams();
+    Object.entries(params || {}).forEach(([key, value]) => {
+      if (value) query.set(key, value);
+    });
+    const qs = query.toString();
+    const data = await request<Paginated<Competition>>(`/competitions/${qs ? `?${qs}` : ''}`, { withAuth: false });
+    return unwrapList(data);
+  },
+  detail: (slug: string) => request<CompetitionDetail>(`/competitions/${slug}/`, { withAuth: false }),
+  mine: async () => {
+    const data = await request<Paginated<Competition>>('/competitions/mine/');
+    return unwrapList(data);
+  },
+  register: (slug: string, data: {
+    rules_accepted: boolean;
+    registration_data?: Record<string, unknown>;
+    team?: number;
+    team_name?: string;
+  }) =>
+    request<CompetitionRegistration>(`/competitions/${slug}/register/`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  registrationForm: (slug: string) =>
+    request<RegistrationFormFieldPublic[]>(`/competitions/${slug}/registration-form/`, { withAuth: false }),
+  submission: (slug: string) => request<CompetitionSubmission>(`/competitions/${slug}/submission/`),
+  saveSubmission: (slug: string, data: Partial<CompetitionSubmission> & { submit?: boolean }) =>
+    request<CompetitionSubmission>(`/competitions/${slug}/submission/`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  leaderboard: (slug: string) => request<CompetitionResult[]>(`/competitions/${slug}/leaderboard/`, { withAuth: false }),
+};
+
+// ─── Public announcements, updates & registration form types ─────────────
+
+export interface PublicAnnouncement {
+  id: number;
+  slug: string | null;
+  title: string;
+  short_description: string;
+  body: string;
+  category: string;
+  category_label: string;
+  priority: 'normal' | 'important' | 'urgent';
+  priority_label: string;
+  target_audience: string;
+  cover_image: string | null;
+  scheduled_at: string | null;
+  published_at: string | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export interface PublicPlatformUpdate {
+  id: number;
+  slug: string | null;
+  title: string;
+  version: string;
+  category: string;
+  category_label: string;
+  summary: string;
+  content: string;
+  change_list: string[];
+  cover_image: string | null;
+  target_audience: string;
+  published_at: string | null;
+  created_at: string;
+}
+
+export type RegistrationFieldType =
+  | 'short_text' | 'long_text' | 'email' | 'phone' | 'number'
+  | 'dropdown' | 'multiple_choice' | 'checkboxes' | 'url' | 'date';
+
+export interface RegistrationFormFieldPublic {
+  id: number;
+  label: string;
+  field_key: string;
+  field_type: RegistrationFieldType;
+  description: string;
+  placeholder: string;
+  required: boolean;
+  options: Array<string | number>;
+  validation: Record<string, number>;
+  order: number;
+}
+
+export const announcements = {
+  list: async (params?: { category?: string }): Promise<PublicAnnouncement[]> => {
+    const query = new URLSearchParams();
+    Object.entries(params || {}).forEach(([key, value]) => {
+      if (value) query.set(key, value);
+    });
+    const qs = query.toString();
+    const data = await request<Paginated<PublicAnnouncement>>(`/announcements/${qs ? `?${qs}` : ''}`, { withAuth: false });
+    return unwrapList(data);
+  },
+  detail: (slug: string) => request<PublicAnnouncement>(`/announcements/${slug}/`, { withAuth: false }),
+};
+
+export const platformUpdates = {
+  list: async (params?: { category?: string }): Promise<PublicPlatformUpdate[]> => {
+    const query = new URLSearchParams();
+    Object.entries(params || {}).forEach(([key, value]) => {
+      if (value) query.set(key, value);
+    });
+    const qs = query.toString();
+    const data = await request<Paginated<PublicPlatformUpdate>>(`/platform-updates/${qs ? `?${qs}` : ''}`, { withAuth: false });
+    return unwrapList(data);
+  },
+  detail: (slug: string) => request<PublicPlatformUpdate>(`/platform-updates/${slug}/`, { withAuth: false }),
 };
 
 // ─── Profile Stats ────────────────────────────────────────────────────────
@@ -1648,6 +1774,7 @@ export interface PortfolioData {
   github_url: string;
   linkedin_url: string;
   website_url: string;
+  is_profile_public: boolean;
 }
 
 export type PortfolioPatch = Partial<
@@ -1689,7 +1816,39 @@ export interface PublicPortfolioData {
     tracks_completed: Array<{ slug: string; title: string }>;
     courses_completed: Array<{ title: string; track: string; completed_at: string | null }>;
   };
+  followers_count: number;
+  following_count: number;
+  is_following: boolean;
 }
+
+export interface FollowSummary {
+  username: string;
+  display_name: string;
+  avatar: string;
+  headline: string;
+}
+
+export interface FollowList {
+  count: number;
+  results: FollowSummary[];
+}
+
+export const social = {
+  follow: (username: string) =>
+    request<{ following: boolean; followers_count: number; following_count: number }>(
+      `/users/${encodeURIComponent(username)}/follow/`,
+      { method: 'POST' },
+    ),
+  unfollow: (username: string) =>
+    request<{ following: boolean; followers_count: number; following_count: number }>(
+      `/users/${encodeURIComponent(username)}/follow/`,
+      { method: 'DELETE' },
+    ),
+  followers: (username: string) =>
+    request<FollowList>(`/users/${encodeURIComponent(username)}/followers/`, { withAuth: false }),
+  following: (username: string) =>
+    request<FollowList>(`/users/${encodeURIComponent(username)}/following/`, { withAuth: false }),
+};
 
 /**
  * Encode a project payload as multipart form data. `technologies` (a JSON
