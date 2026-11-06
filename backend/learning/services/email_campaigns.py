@@ -30,6 +30,7 @@ from django.utils import timezone
 from ..models import (
     CompetitionRegistration, EmailCampaign, EmailCampaignRecipient, UserProfile,
 )
+from . import email_composer as composer
 from .email_service import _email_logo, _sanitize_error, transport_is_render_only
 
 logger = logging.getLogger(__name__)
@@ -98,6 +99,9 @@ def resolve_audience(campaign) -> list:
         return list(
             base.filter(is_staff=True) | base.filter(profile__role='admin')
         )
+    if audience == EmailCampaign.Audience.SPECIFIC:
+        # Hand-picked recipients of the "Send Official Email" composer.
+        return list(base.filter(pk__in=campaign.selected_users.values_list('pk', flat=True)))
     if audience in COMPETITION_AUDIENCE_STATUSES:
         if not campaign.competition_id:
             return []
@@ -111,6 +115,19 @@ def resolve_audience(campaign) -> list:
 
 def audience_count(campaign) -> int:
     return len(resolve_audience(campaign))
+
+
+def planned_recipient_count(campaign) -> int:
+    """Everyone a send would reach, external custom addresses included."""
+    users = resolve_audience(campaign)
+    if campaign.audience != EmailCampaign.Audience.SPECIFIC:
+        return len(users)
+    covered = {user.email.lower() for user in users}
+    external = [
+        address for address in (campaign.custom_emails or [])
+        if address.lower() not in covered
+    ]
+    return len(users) + len(external)
 
 
 def accepts_marketing(user) -> bool:
@@ -162,17 +179,140 @@ def render_campaign_email(campaign, user) -> tuple[str, str]:
     return html, text
 
 
+def recipient_identity(recipient) -> tuple[str, str]:
+    """``(display name, student id)`` for one recipient row.
+
+    The student ID is the account username: it is what the platform already
+    calls a learner by, and external addresses simply have no ID to show.
+    """
+    if recipient.user_id and recipient.user is not None:
+        user = recipient.user
+        name = (user.get_full_name() or '').strip() or user.username
+        return name, user.username
+    local = recipient.email.partition('@')[0]
+    return local.replace('.', ' ').replace('_', ' ').title(), ''
+
+
+def is_composed(campaign) -> bool:
+    """True when the admin wrote a free-form rich-text email in the composer."""
+    return bool(campaign.body_html)
+
+
+def composed_variables(campaign, name: str, email: str, student_id: str) -> dict:
+    """Personalization dictionary for one recipient of a composed email."""
+    return composer.recipient_variables(name=name, email=email, student_id=student_id)
+
+
+def composed_subject(campaign, variables: dict) -> str:
+    return composer.personalize(campaign.subject, variables)
+
+
+def render_composed_email(campaign, *, name: str, email: str, student_id: str,
+                          has_account: bool = True, user=None) -> tuple[str, str]:
+    """Render one personalized copy of a composer email.
+
+    Every ``{{variable}}`` is substituted separately for this recipient, and
+    the values are HTML-escaped into the already-sanitized body, so recipient
+    data can neither collide nor inject markup. The shared branded layout
+    wraps the result; unsubscribe links only go to people who have a Code
+    Yaar account to unsubscribe with.
+    """
+    variables = composed_variables(campaign, name, email, student_id)
+    subject = composed_subject(campaign, variables)
+    heading = composer.personalize(campaign.heading or campaign.name, variables)
+    if campaign.body_html:
+        html_body = composer.personalize_html(campaign.body_html, variables)
+        derived_text = composer.personalize(
+            composer.plain_text_from_html(campaign.body_html), variables,
+        )
+    else:
+        # Specific-recipient mail drafted in the legacy plain-text box.
+        paragraphs = [line.strip() for line in (campaign.body or '').splitlines() if line.strip()]
+        from html import escape as _escape
+        html_body = ''.join(f'<p>{_escape(composer.personalize(paragraph, variables))}</p>' for paragraph in paragraphs)
+        derived_text = '\n\n'.join(composer.personalize(paragraph, variables) for paragraph in paragraphs)
+    text_body = composer.personalize(campaign.plain_text_alternative, variables) if campaign.plain_text_alternative else derived_text
+    context = {
+        'brand_name': 'Code Yaar',
+        'brand_tagline': 'Think. Build. Evolve.',
+        'logo_url': _email_logo()[0],
+        'preferences_url': settings.FRONTEND_URL + '/settings?tab=preferences',
+        'dashboard_url': settings.FRONTEND_URL + '/dashboard',
+        'current_year': timezone.now().year,
+        'subject': subject,
+        'eyebrow': 'Official email' if has_account else 'Announcement',
+        'recipient_email': email,
+        'preheader': (heading or subject)[:140],
+        'heading': heading,
+        'custom_html': html_body,
+        'custom_text': text_body,
+        'first_name': name,
+        'cta_url': composer.personalize(campaign.cta_url or '', variables),
+        'cta_label': composer.personalize(campaign.cta_label or '', variables),
+        'footer_note': (
+            'You are receiving this because the Code Yaar team is writing to '
+            'you directly. Unsubscribing stops campaign mail only — essential '
+            'account, competition and security notifications are never affected.'
+            if has_account else
+            'You are receiving this because the Code Yaar team is writing to you directly.'
+        ),
+    }
+    if has_account:
+        context['unsubscribe_url'] = (
+            unsubscribe_url(user) if user is not None
+            else settings.FRONTEND_URL + '/settings?tab=preferences'
+        )
+    html = render_to_string('emails/campaign_custom.html', context)
+    text = render_to_string('emails/campaign_custom.txt', context)
+    return html, text
+
+
+def render_email_for(campaign, recipient) -> tuple[str, str]:
+    """Render the exact copy one recipient row will receive."""
+    if is_composed(campaign) or recipient.user_id is None:
+        name, student_id = recipient_identity(recipient)
+        return render_composed_email(
+            campaign, name=name, email=recipient.email, student_id=student_id,
+            has_account=recipient.user_id is not None, user=recipient.user,
+        )
+    return render_campaign_email(campaign, recipient.user)
+
+
+def subject_for(campaign, recipient) -> str:
+    """Subject line for one recipient (personalized for composed mail)."""
+    if is_composed(campaign) or recipient.user_id is None:
+        name, student_id = recipient_identity(recipient)
+        return composed_subject(campaign, composed_variables(campaign, name, recipient.email, student_id))
+    return campaign.subject
+
+
 def send_single(recipient: EmailCampaignRecipient, campaign) -> EmailCampaignRecipient:
-    """Deliver one campaign email and record the honest outcome on the row."""
+    """Deliver one campaign email and record the honest outcome on the row.
+
+    Composed ("Send Official Email") mail is rendered and titled per
+    recipient, so personalization can never bleed between copies. Each
+    message goes to exactly one address — the shared recipient list is never
+    exposed — with the campaign CC attached; the BCC list rides on the first
+    message of the dispatch only, so blind recipients get one copy each.
+    """
     now = timezone.now()
     try:
-        html, text = render_campaign_email(campaign, recipient.user)
+        subject = subject_for(campaign, recipient)
+        html, text = render_email_for(campaign, recipient)
         message = EmailMultiAlternatives(
-            subject=campaign.subject,
+            subject=subject,
             body=text,
             from_email=settings.DEFAULT_FROM_EMAIL,
             to=[recipient.email],
         )
+        if getattr(settings, 'REPLY_TO_EMAIL', ''):
+            message.reply_to = [settings.REPLY_TO_EMAIL]
+        if campaign.cc_emails:
+            message.cc = list(campaign.cc_emails)
+        bcc = [] if getattr(campaign, '_bcc_sent', False) else list(campaign.bcc_emails or [])
+        if bcc:
+            message.bcc = bcc
+            campaign._bcc_sent = True
         message.attach_alternative(html, 'text/html')
         _, logo_attachment = _email_logo()
         if logo_attachment is not None:
@@ -202,11 +342,16 @@ def prepare_recipients(campaign) -> int:
     """Create per-recipient rows, skipping opted-out users up front.
 
     Returns the number of recipients eligible for delivery. Skips are recorded
-    so the history explains every member of the selected audience.
+    so the history explains every member of the selected audience. External
+    custom addresses (composer mail to people without accounts) get rows with
+    a null user and are never preference-gated — there is no profile to gate.
     """
     users = resolve_audience(campaign)
     eligible = 0
+    total = 0
+    covered: set[str] = set()
     for user in users:
+        covered.add(user.email.lower())
         skip = not campaign.essential and not accepts_marketing(user)
         recipient = EmailCampaignRecipient.objects.create(
             campaign=campaign,
@@ -222,8 +367,20 @@ def prepare_recipients(campaign) -> int:
             recipient.save(update_fields=['error'])
         else:
             eligible += 1
-    campaign.recipient_count = len(users)
-    campaign.skipped_count = len(users) - eligible
+        total += 1
+    if campaign.audience == EmailCampaign.Audience.SPECIFIC:
+        for address in campaign.custom_emails or []:
+            if address.lower() in covered:
+                continue
+            covered.add(address.lower())
+            EmailCampaignRecipient.objects.create(
+                campaign=campaign, user=None, email=address,
+                status=EmailCampaignRecipient.Status.PENDING,
+            )
+            eligible += 1
+            total += 1
+    campaign.recipient_count = total
+    campaign.skipped_count = total - eligible
     campaign.save(update_fields=['recipient_count', 'skipped_count'])
     return eligible
 
@@ -274,7 +431,11 @@ def dispatch_campaign(campaign, *, sync: bool = False) -> None:
                 status=EmailCampaign.Status.FAILED,
             )
         finally:
-            connections.close_all()
+            # Only the worker thread owns a thread-local connection to clean
+            # up; closing connections in a synchronous (inline) dispatch would
+            # destroy the caller's transaction — the admin request or test.
+            if not sync:
+                connections.close_all()
 
     if sync:
         _run()
@@ -283,11 +444,14 @@ def dispatch_campaign(campaign, *, sync: bool = False) -> None:
     thread.start()
 
 
-def send_test_email(campaign_data: dict, to_user) -> dict:
-    """Render a campaign-shaped draft and send it to exactly one address.
+def send_test_email(campaign_data: dict, to_user, to_email: str = '') -> dict:
+    """Render one campaign-shaped draft and send it to exactly one address.
 
-    Returns the honest transport outcome so the composer's "Send test" button
-    can tell delivered-from-SMTP apart from console-rendered.
+    Composed drafts go through the same personalized render path the real
+    fan-out uses, with the requesting admin's own identity substituted for
+    the variables — so the test copy shows exactly what a student would
+    receive. Returns the honest transport outcome so the composer's "Send
+    test" button can tell delivered-from-SMTP apart from console-rendered.
     """
 
     class _Preview:
@@ -296,20 +460,40 @@ def send_test_email(campaign_data: dict, to_user) -> dict:
             self.heading = data.get('heading', '')
             self.name = data.get('name', 'Test')
             self.body = data.get('body', '')
+            self.body_html = data.get('body_html', '')
+            self.plain_text_alternative = data.get('plain_text', '')
             self.template = data.get('template', 'general')
             self.cta_label = data.get('cta_label', '')
             self.cta_url = data.get('cta_url', '')
+            self.cc_emails = []
+            self.bcc_emails = []
             self.banner_image = None
 
     campaign = _Preview(campaign_data)
-    html, text = render_campaign_email(campaign, to_user)
+    address = composer.normalize_email(to_email) or (to_user.email if to_user else '')
+    if not composer.validate_email(address):
+        return {'ok': False, 'status': 'failed', 'error': 'Test address is not a valid email address'}
+    if campaign.body_html:
+        html, text = render_composed_email(
+            campaign, name=composer.display_name(to_user), email=address,
+            student_id=to_user.username if to_user else '', has_account=False,
+        )
+        subject = composed_subject(campaign, composed_variables(
+            campaign, composer.display_name(to_user), address,
+            to_user.username if to_user else '',
+        ))
+    else:
+        html, text = render_campaign_email(campaign, to_user)
+        subject = campaign.subject
     try:
         message = EmailMultiAlternatives(
-            subject=campaign.subject,
+            subject=subject,
             body=text,
             from_email=settings.DEFAULT_FROM_EMAIL,
-            to=[to_user.email],
+            to=[address],
         )
+        if getattr(settings, 'REPLY_TO_EMAIL', ''):
+            message.reply_to = [settings.REPLY_TO_EMAIL]
         message.attach_alternative(html, 'text/html')
         _, logo_attachment = _email_logo()
         if logo_attachment is not None:

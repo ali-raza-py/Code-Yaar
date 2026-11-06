@@ -22,7 +22,7 @@ from django.db import transaction
 from learning.models import CareerTrack, Chapter, Course, Exercise, Lesson
 
 from learning.management.commands.academy import (
-    cpp_course, dsa_course, git_course, python_course, web_course,
+    cpp_course, dsa_course, git_course, java_course, python_course, web_course,
 )
 
 COURSES = [
@@ -31,6 +31,7 @@ COURSES = [
     web_course.COURSE,
     git_course.COURSE,
     dsa_course.COURSE,
+    java_course.COURSE,
 ]
 
 # Course language -> Exercise.language (Exercise choices differ slightly).
@@ -181,6 +182,10 @@ class Command(BaseCommand):
             }, LESSON_FIELDS, 'lesson')
             for order, ex in enumerate(assessment, start=1):
                 self.seed_exercise(lesson, ex, order, final=True)
+            # Retire assessment questions that vanished from the spec.
+            Exercise.objects.filter(lesson=lesson, is_active=True).exclude(
+                slug__in={ex['slug'] for ex in assessment}
+            ).update(is_active=False)
 
         # Deactivate chapters that vanished from the spec (never delete).
         # Their lessons and exercises are retired with them so grading and
@@ -229,8 +234,16 @@ class Command(BaseCommand):
             exercises = lesson_spec.get('exercises', [])
             for ex_order, ex in enumerate(exercises, start=1):
                 self.seed_exercise(lesson, ex, ex_order, final=False)
+            # Retire exercises that vanished from this surviving lesson's spec
+            # (the chapter-level sweep only covers whole retired chapters).
+            Exercise.objects.filter(lesson=lesson, is_active=True).exclude(
+                slug__in={ex['slug'] for ex in exercises}
+            ).update(is_active=False)
         stale = chapter.lessons.exclude(slug__in=seen).filter(is_active=True)
         if stale.exists():
+            # Exercises under retired lessons go with them — the exercise
+            # sweep above only runs for lessons still in the spec.
+            Exercise.objects.filter(lesson__in=stale, is_active=True).update(is_active=False)
             stale.update(is_active=False)
 
     def seed_exercise(self, lesson, ex, order, *, final):

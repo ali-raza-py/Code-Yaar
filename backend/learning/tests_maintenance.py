@@ -19,10 +19,13 @@ class MaintenanceModeTests(TestCase):
         self.super_admin = User.objects.create_superuser(
             username='super-admin', password='password', email='super@example.com'
         )
-        MaintenanceSettings.objects.update(
-            is_enabled=True,
-            maintenance_message='Scheduled maintenance.',
-        )
+        # Written through save() rather than queryset.update(): the
+        # middleware reads a short-lived cached snapshot that the model's
+        # save() invalidates, and update() would bypass that.
+        settings = MaintenanceSettings.get_solo()
+        settings.is_enabled = True
+        settings.maintenance_message = 'Scheduled maintenance.'
+        settings.save()
 
     def test_anonymous_api_request_returns_structured_503(self):
         response = self.client.get('/api/courses/')
@@ -55,7 +58,9 @@ class MaintenanceModeTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_regular_staff_cannot_view_maintenance_settings_in_django_admin(self):
-        MaintenanceSettings.objects.update(is_enabled=False)
+        settings = MaintenanceSettings.get_solo()
+        settings.is_enabled = False
+        settings.save()
         self.client.login(username='administrator', password='password')
 
         response = self.client.get('/admin/learning/maintenancesettings/')
