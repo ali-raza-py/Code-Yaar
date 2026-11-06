@@ -279,3 +279,12 @@ export default function LessonContent({ lesson, onRunSandbox }: LessonContentPro
     </div>
   );
 }
+
+/**
+ * The learner-facing block renderer on its own, so the Course Creation Studio can
+ * preview a lesson with exactly the code that renders it in the classroom. One
+ * renderer, two hosts - a second preview implementation would drift.
+ */
+export function LessonBodyPreview({ body }: { body: string }) {
+  return <div className="prose-learning">{renderContent(body)}</div>;
+}

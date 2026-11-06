@@ -10,7 +10,7 @@ import type { ExerciseDetail, ExerciseResult, Hint, LessonDetail, Course } from 
 import CourseSidebar from '@/components/learning/workspace/course-sidebar';
 import LessonContent from '@/components/learning/workspace/lesson-content';
 import ExercisePanel from '@/components/learning/workspace/exercise-panel';
-import CodeEditor from '@/components/learning/workspace/code-editor';
+import CodeEditor from '@/components/learning/workspace/code-editor-lazy';
 import OutputPanel from '@/components/learning/workspace/output-panel';
 import XPBadge from '@/components/learning/workspace/xp-badge';
 import CertificatePanel from '@/components/learning/certificate-panel';

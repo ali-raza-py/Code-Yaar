@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -10,7 +10,7 @@ import {
 import { challenges as challengesApi, ApiError } from "@/lib/api";
 import type { ChallengeDetail, ChallengeRunResult, ChallengeSubmitResult } from "@/types";
 import { useAuth } from "@/hooks/use-auth";
-import CodeEditor from "@/components/learning/workspace/code-editor";
+import CodeEditor from "@/components/learning/workspace/code-editor-lazy";
 import { TestResults } from "@/components/challenges/test-results";
 import { useBadgeToasts } from "@/components/notifications/badge-toast";
 import { DifficultyPill } from "@/components/ui/difficulty-pill";
@@ -188,7 +188,7 @@ export default function ChallengeWorkspacePage() {
           </div>
           <div className="shrink-0">
             {loading ? (
-              <span className="text-xs text-[var(--challenge-muted)]">Loading…</span>
+              <span className="text-xs text-[var(--challenge-muted)]">Loadingâ€¦</span>
             ) : solved ? (
               <span className="inline-flex items-center gap-1.5 rounded-pill bg-success/12 px-3 py-1.5 text-sm font-bold text-success"><CheckCircle2 aria-hidden="true" className="h-4 w-4" /> Completed</span>
             ) : (
@@ -209,7 +209,7 @@ export default function ChallengeWorkspacePage() {
         {!loading && error === "notfound" && (
           <div className="mt-10 rounded-card border border-[var(--challenge-border)] bg-[var(--challenge-surface)] p-8 text-center shadow-[var(--challenge-shadow)]">
             <h2 className="text-xl font-bold">We couldn&apos;t find that challenge</h2>
-            <p className="mt-2 text-sm text-[var(--challenge-muted)]">The challenge “{slug}” doesn&apos;t exist or is no longer available.</p>
+            <p className="mt-2 text-sm text-[var(--challenge-muted)]">The challenge â€œ{slug}â€ doesn&apos;t exist or is no longer available.</p>
             <Link href="/challenges" className="focus-ring mt-5 inline-flex items-center gap-2 rounded-md bg-[var(--challenge-accent)] px-4 py-2 text-sm font-bold text-white hover:opacity-90">
               <ArrowLeft aria-hidden="true" className="h-4 w-4" /> Browse all challenges
             </Link>
@@ -271,7 +271,7 @@ export default function ChallengeWorkspacePage() {
               )}
 
               {detail.constraints.length > 0 && (
-                <div><h2 className="text-sm font-bold uppercase tracking-wide text-[var(--challenge-accent-strong)]">Constraints</h2><ul className="mt-2 space-y-1">{detail.constraints.map((c, i) => (<li key={i} className="font-mono text-xs text-[var(--challenge-text-soft)]">• {c}</li>))}</ul></div>
+                <div><h2 className="text-sm font-bold uppercase tracking-wide text-[var(--challenge-accent-strong)]">Constraints</h2><ul className="mt-2 space-y-1">{detail.constraints.map((c, i) => (<li key={i} className="font-mono text-xs text-[var(--challenge-text-soft)]">â€¢ {c}</li>))}</ul></div>
               )}
 
               {detail.hints.length > 0 && (
@@ -319,10 +319,10 @@ export default function ChallengeWorkspacePage() {
 
               <div className="flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => void handleRun()} disabled={running || submitting} className="focus-ring inline-flex items-center gap-2 rounded-md border border-[var(--challenge-border)] bg-[var(--challenge-surface)] px-4 py-2 text-sm font-bold text-[var(--challenge-text)] hover:bg-[var(--challenge-surface-muted)] disabled:opacity-60">
-                  <Play aria-hidden="true" className="h-4 w-4" /> {running ? "Running…" : "Run Code"}
+                  <Play aria-hidden="true" className="h-4 w-4" /> {running ? "Runningâ€¦" : "Run Code"}
                 </button>
                 <button type="button" onClick={() => void handleSubmit()} disabled={running || submitting} className="focus-ring inline-flex items-center gap-2 rounded-md bg-[var(--challenge-accent)] px-4 py-2 text-sm font-bold text-white hover:opacity-90 disabled:opacity-60">
-                  <Send aria-hidden="true" className="h-4 w-4" /> {submitting ? "Submitting…" : "Submit Solution"}
+                  <Send aria-hidden="true" className="h-4 w-4" /> {submitting ? "Submittingâ€¦" : "Submit Solution"}
                 </button>
                 <button type="button" onClick={resetCode} className="focus-ring inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold text-[var(--challenge-muted)] hover:text-[var(--challenge-text)]">
                   <RotateCcw aria-hidden="true" className="h-4 w-4" /> Reset

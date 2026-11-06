@@ -1,7 +1,7 @@
-'use client';
+﻿'use client';
 
 import { useState, useCallback } from 'react';
-import CodeEditor from './code-editor';
+import CodeEditor from './code-editor-lazy';
 import type { RunnableLanguage } from '@/lib/api';
 
 /** Fence languages the server sandbox actually executes, normalised. */
@@ -17,8 +17,8 @@ interface RunCodeBlockProps {
   code: string;
   language: string;
   /**
-   * Real executor (platform sandbox). When absent — or when the language
-   * cannot be executed server-side — the block renders as static code.
+   * Real executor (platform sandbox). When absent â€” or when the language
+   * cannot be executed server-side â€” the block renders as static code.
    * A Run button is never shown unless execution genuinely works.
    */
   onRunSandbox?: (code: string, language: string) => Promise<string>;
@@ -27,7 +27,7 @@ interface RunCodeBlockProps {
 /**
  * A C++ fence is only runnable if it is a complete program. Textbooks show
  * syntax fragments (`if (x) statement;`) that compile to confusing errors,
- * so fragments stay static — every real board program has `main()`.
+ * so fragments stay static â€” every real board program has `main()`.
  */
 function isRunnableCode(executable: RunnableLanguage | undefined, code: string): boolean {
   if (!executable) return false;
@@ -37,7 +37,7 @@ function isRunnableCode(executable: RunnableLanguage | undefined, code: string):
 
 /**
  * Runnable code block embedded directly in lesson prose.
- * Collapses "read → run" to a single click for languages the sandbox
+ * Collapses "read â†’ run" to a single click for languages the sandbox
  * actually executes (Python and C++). Everything else stays a plain
  * code fence. Runnable samples also offer "Try it yourself": the fence
  * becomes an editable working copy the learner can run and reset.
@@ -103,13 +103,13 @@ export default function RunCodeBlock({ code, language, onRunSandbox }: RunCodeBl
               disabled={running}
               className="editor-run-btn inline-flex items-center justify-center gap-1 rounded-[var(--radius-tool)] bg-cta px-3 py-1 text-xs font-semibold text-cta-fg transition-colors hover:bg-cta-hover disabled:opacity-50"
             >
-              {running ? 'Running…' : 'Run Code'}
+              {running ? 'Runningâ€¦' : 'Run Code'}
             </button>
           </div>
         )}
       </div>
 
-      {/* Shared CodeMirror fence — same governed syntax theme as the workspace.
+      {/* Shared CodeMirror fence â€” same governed syntax theme as the workspace.
           The gutter stays off because CodeMirror builds it once at mount. */}
       <CodeEditor
         code={displayCode}

@@ -37,11 +37,35 @@ const NO_REFRESH = new Set([
 
 let accessToken: string | null = null;
 
+type CachedResponse = { expiresAt: number; value: unknown };
+const responseCache = new Map<string, CachedResponse>();
+const inFlightRequests = new Map<string, Promise<unknown>>();
+
+const CACHE_TTLS: Array<[string, number]> = [
+  ['/profile/stats/', 2 * 60_000],
+  ['/progress/', 60_000],
+  ['/leaderboard/', 60_000],
+  ['/notifications/', 30_000],
+  ['/admin/dashboard/', 60_000],
+  ['/admin/audit-logs/', 60_000],
+  ['/tracks/', 5 * 60_000],
+  ['/courses/', 5 * 60_000],
+];
+
+function cacheTtl(endpoint: string): number {
+  return CACHE_TTLS.find(([prefix]) => endpoint.startsWith(prefix))?.[1] ?? 0;
+}
+
+function clearResponseCache() {
+  responseCache.clear();
+}
+
 export function getAccessToken(): string | null {
   return accessToken;
 }
 
 export function setAccessToken(token: string) {
+  if (accessToken !== token) clearResponseCache();
   accessToken = token;
 }
 
@@ -72,6 +96,7 @@ function clearSessionHint() {
 /** Forget the session locally. The refresh cookie is only cleared server-side. */
 export function clearToken() {
   clearAccessToken();
+  clearResponseCache();
   clearSessionHint();
 }
 
@@ -345,21 +370,47 @@ export async function request<T>(
   options: ApiRequestOptions = {}
 ): Promise<T> {
   const { withAuth = true, retryOnUnauthorized = true, ...init } = options;
+  const method = (init.method || 'GET').toUpperCase();
+  const cacheable = method === 'GET';
+  const cacheKey = `${withAuth ? accessToken || 'session' : 'public'}:${endpoint}`;
+  const ttl = cacheable ? cacheTtl(endpoint) : 0;
 
-  let res = await send(endpoint, init, withAuth);
-
-  if (res.status === 401 && withAuth && retryOnUnauthorized && !NO_REFRESH.has(endpoint)) {
-    const refreshed = await refreshAccessToken();
-    if (refreshed) res = await send(endpoint, init, withAuth);
+  if (cacheable) {
+    const cached = responseCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.value as T;
+    const pending = inFlightRequests.get(cacheKey);
+    if (pending) return pending as Promise<T>;
   }
 
-  if (!res.ok) throw await readError(res);
+  const execute = async (): Promise<T> => {
+    let res = await send(endpoint, init, withAuth);
 
-  // Handle 204 No Content
-  if (res.status === 204) return {} as T;
+    if (res.status === 401 && withAuth && retryOnUnauthorized && !NO_REFRESH.has(endpoint)) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) res = await send(endpoint, init, withAuth);
+    }
 
-  const text = await res.text();
-  return (text ? JSON.parse(text) : {}) as T;
+    if (!res.ok) throw await readError(res);
+
+    // Handle 204 No Content
+    if (res.status === 204) return {} as T;
+
+    const text = await res.text();
+    const value = (text ? JSON.parse(text) : {}) as T;
+    if (cacheable && ttl > 0) {
+      responseCache.set(cacheKey, { expiresAt: Date.now() + ttl, value });
+    }
+    return value;
+  };
+
+  if (!cacheable) {
+    clearResponseCache();
+    return execute();
+  }
+
+  const pending = execute().finally(() => inFlightRequests.delete(cacheKey));
+  inFlightRequests.set(cacheKey, pending);
+  return pending;
 }
 
 /** Raw fetch on a protected endpoint with the same refresh-and-retry policy. */

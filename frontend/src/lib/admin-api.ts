@@ -14,6 +14,10 @@ export interface AdminDashboardStats {
   totalChallenges: number;
   certificatesIssued: number;
   activeCompetitions: number;
+  totalLessons?: number;
+  pendingRegistrations?: number;
+  scheduledCourses?: number;
+  archivedCourses?: number;
 }
 
 export interface AdminRecentActivity {
@@ -410,6 +414,12 @@ export interface EmailCampaignAdmin {
   cta_url: string;
   audience: string;
   competition: number | null;
+  selected_users: number[];
+  custom_emails: string[];
+  cc_emails: string[];
+  bcc_emails: string[];
+  body_html: string;
+  plain_text_alternative: string;
   essential: boolean;
   related_announcement: number | null;
   related_update: number | null;
@@ -425,9 +435,30 @@ export interface EmailCampaignAdmin {
   updated_at: string;
 }
 
+export interface EmailTemplateAdmin {
+  id: number;
+  name: string;
+  category: string;
+  description: string;
+  subject: string;
+  heading: string;
+  preview_text: string;
+  body_html: string;
+  plain_text: string;
+  cta_label: string;
+  cta_url: string;
+  footer_content: string;
+  is_favorite: boolean;
+  created_by: number | null;
+  created_by_name: string;
+  variables_used: string[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface EmailCampaignRecipientAdmin {
   id: number;
-  user: number;
+  user: number | null;
   username: string;
   email: string;
   status: "pending" | "sent" | "render_only" | "skipped" | "failed";
@@ -477,6 +508,226 @@ export interface PlatformSettingsAdmin {
   maintenance_mode: boolean;
   maintenance_message: string;
   estimated_return_time: string;
+}
+
+export interface StudioLesson {
+  id: number;
+  slug: string;
+  title: string;
+  content_type: string;
+  learning_objective: string;
+  content_body: string;
+  video_url: string;
+  order: number;
+  duration_minutes: number;
+  xp_reward: number;
+  is_active: boolean;
+  is_required: boolean;
+  prerequisite: number | null;
+  estimated_reading_minutes: number;
+  instructor_notes: string;
+  exercise_count: number;
+  exercises: ExerciseAdmin[];
+  updated_at: string;
+}
+
+export interface StudioChapter {
+  id: number;
+  slug: string;
+  title: string;
+  description: string;
+  order: number;
+  xp_reward: number;
+  is_active: boolean;
+  published_lesson_count: number;
+  publication_state: 'empty' | 'draft' | 'published' | 'partial';
+  lessons: StudioLesson[];
+}
+
+export interface StudioCourse {
+  id: number;
+  slug: string;
+  title: string;
+  subtitle: string;
+  description: string;
+  thumbnail: string;
+  cover_image: string;
+  category: number | null;
+  category_title: string;
+  track: number | null;
+  track_title: string;
+  academic_class: string;
+  difficulty: string;
+  language: string;
+  instructor: string;
+  instructor_user: number | null;
+  instructor_user_name: string;
+  prerequisites: string;
+  prerequisite_courses: Array<{ id: number; title: string; slug: string }>;
+  learning_objectives: string[];
+  tags: string[];
+  is_free: boolean;
+  order: number;
+  is_published: boolean;
+  is_active: boolean;
+  publish_at: string | null;
+  published_at: string | null;
+  archived_at: string | null;
+  sequential_learning: boolean;
+  require_all_lessons: boolean;
+  require_final_assessment: boolean;
+  certification_enabled: boolean;
+  certification_passing_score: number;
+  xp_completion_reward: number;
+  estimated_hours: number;
+  total_xp: number;
+  updated_at: string;
+}
+
+export interface StudioBundle {
+  course: StudioCourse;
+  chapters: StudioChapter[];
+  resources: Array<{
+    id: number;
+    title: string;
+    resource_type: string;
+    url: string;
+    description: string;
+    order: number;
+    is_active: boolean;
+  }>;
+  stats: {
+    chapter_count: number;
+    lesson_count: number;
+    published_lesson_count: number;
+    enrollment_count: number;
+    completion_count: number;
+    total_xp: number;
+  };
+  permissions: { can_edit: boolean; can_publish: boolean; can_archive: boolean };
+}
+
+export interface StudioCourseRow {
+  id: number;
+  slug: string;
+  title: string;
+  subtitle: string;
+  difficulty: string;
+  is_published: boolean;
+  is_active: boolean;
+  publish_at: string | null;
+  published_at: string | null;
+  archived_at: string | null;
+  track: string | null;
+  category: string | null;
+  instructor: string;
+  instructor_user: number | null;
+  chapter_count: number;
+  lesson_count: number;
+  published_lesson_count: number;
+  enrollment_count: number;
+  updated_at: string;
+}
+
+export interface CourseCategoryAdmin {
+  id: number;
+  slug: string;
+  title: string;
+  description: string;
+  order: number;
+  is_active: boolean;
+  course_count: number;
+}
+
+export interface PublishIssue {
+  code: string;
+  message: string;
+  severity: 'blocking' | 'warning';
+  target?: Record<string, unknown>;
+}
+
+export interface PublishChecklist {
+  ok: boolean;
+  blocking: PublishIssue[];
+  warnings: PublishIssue[];
+  checked_at?: string;
+  counts?: Record<string, number>;
+}
+
+export interface AnalyticsSeriesPoint {
+  period: string;
+  value: number;
+}
+
+export interface AnalyticsOverview {
+  range: { from: string; to: string; bucket: string };
+  students: {
+    registrations: AnalyticsSeriesPoint[];
+    active: AnalyticsSeriesPoint[];
+    total_students: number;
+    engagement_rate: number;
+  };
+  education: {
+    enrollments: AnalyticsSeriesPoint[];
+    completions: AnalyticsSeriesPoint[];
+    lesson_completions: AnalyticsSeriesPoint[];
+    exercise_submissions: AnalyticsSeriesPoint[];
+    activity: AnalyticsSeriesPoint[];
+    enrollment_completion_rate: number;
+    exercise_pass_rate: number;
+    exercise_attempts: { total: number; correct: number };
+    top_courses: Array<{
+      id: number;
+      title: string;
+      slug: string;
+      learners: number;
+      finishers: number;
+      lesson_count: number;
+      completion_rate: number;
+    }>;
+    top_tracks: Array<{
+      id: number;
+      title: string;
+      slug: string;
+      course_count: number;
+      learners: number;
+    }>;
+    dropoff: {
+      lessons: Array<{
+        lesson_id: number;
+        lesson: string;
+        course: string;
+        chapter: string;
+        enrolled: number;
+        completions: number;
+        completion_rate: number;
+      }>;
+      worst: Array<{
+        lesson_id: number;
+        lesson: string;
+        course: string;
+        chapter: string;
+        enrolled: number;
+        completions: number;
+        completion_rate: number;
+      }>;
+    };
+    retention: Array<{ cohort: string; cohort_size: number; months: Record<string, number> }>;
+  };
+  competitions: {
+    registrations: AnalyticsSeriesPoint[];
+    total_registrations: number;
+    pending_approval: number;
+    by_status: Array<{ registration_status: string; count: number }>;
+    top_competitions: Array<{
+      id: number;
+      title: string;
+      slug: string;
+      total: number;
+      waiting: number;
+    }>;
+  };
+  unavailable: Array<{ id: string; label: string; reason: string; phase: string }>;
 }
 
 async function adminRequest<T>(
@@ -974,7 +1225,7 @@ export const adminApi = {
   },
 
   // Email campaigns (Super Admin)
-  listCampaigns: (params?: AdminListParams) => {
+  listCampaigns: (params?: AdminListParams & { status?: string; date_from?: string; date_to?: string }) => {
     const query = new URLSearchParams();
     Object.entries(params || {}).forEach(([key, value]) => {
       if (value !== undefined && value !== "") query.set(key, String(value));
@@ -1004,11 +1255,16 @@ export const adminApi = {
   campaignAudienceCount: (id: number) =>
     adminRequest<{ audience: string; count: number }>(`/email-campaigns/${id}/audience-count/`),
 
-  campaignPreview: (id: number) =>
-    adminRequest<{ html: string; text: string }>(`/email-campaigns/${id}/preview/`),
+  campaignPreview: (id: number, asUser?: number) =>
+    adminRequest<{ html: string; text: string; subject?: string }>(
+      `/email-campaigns/${id}/preview/${asUser ? `?as_user=${asUser}` : ""}`,
+    ),
 
-  campaignTest: (id: number) =>
-    adminRequest<{ status: string; detail?: string }>(`/email-campaigns/${id}/test/`, { method: "POST" }),
+  campaignTest: (id: number, to?: string) =>
+    adminRequest<{ ok: boolean; status: string; error?: string; detail?: string }>(`/email-campaigns/${id}/test/`, {
+      method: "POST",
+      body: JSON.stringify(to ? { to } : {}),
+    }),
 
   campaignSend: (id: number) =>
     adminRequest<{ status: string; estimated_recipients: number }>(`/email-campaigns/${id}/send/`, {
@@ -1016,7 +1272,73 @@ export const adminApi = {
       body: JSON.stringify({ confirm: true }),
     }),
 
-  campaignRecipients: (id: number, params?: AdminListParams & { status?: string }) => {
+  campaignResendFailed: (id: number) =>
+    adminRequest<{ status: string; resending: number }>(`/email-campaigns/${id}/resend-failed/`, {
+      method: "POST",
+      body: JSON.stringify({ confirm: true }),
+    }),
+
+  campaignDuplicate: (id: number) =>
+    adminRequest<EmailCampaignAdmin>(`/email-campaigns/${id}/duplicate/`, { method: "POST" }),
+
+  // Email Templates library (Super Admin). Content only — using a template
+  // never sends anything; it just seeds the composer with saved copy.
+  listTemplates: (params?: AdminListParams & { category?: string }) => {
+    const query = new URLSearchParams();
+    Object.entries(params || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    });
+    const qs = query.toString();
+    return adminRequest<AdminPaginatedResponse<EmailTemplateAdmin>>(`/email-templates/${qs ? `?${qs}` : ""}`);
+  },
+
+  getTemplate: (id: number) =>
+    adminRequest<EmailTemplateAdmin>(`/email-templates/${id}/`),
+
+  createTemplate: (data: Partial<EmailTemplateAdmin>) =>
+    adminRequest<EmailTemplateAdmin>("/email-templates/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateTemplate: (id: number, data: Partial<EmailTemplateAdmin>) =>
+    adminRequest<EmailTemplateAdmin>(`/email-templates/${id}/`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  deleteTemplate: (id: number) =>
+    adminRequest(`/email-templates/${id}/`, { method: "DELETE" }),
+
+  duplicateTemplate: (id: number) =>
+    adminRequest<EmailTemplateAdmin>(`/email-templates/${id}/duplicate/`, { method: "POST" }),
+
+  templateCategories: () =>
+    adminRequest<{ categories: string[] }>("/email-templates/categories/"),
+
+  templatePreview: (id: number) =>
+    adminRequest<{ html: string; text: string; subject?: string }>(`/email-templates/${id}/preview/`),
+
+  // "Send Official Email" composer helpers
+  searchComposerStudents: (q: string) =>
+    adminRequest<{ results: Array<{ id: number; name: string; email: string; student_id: string }> }>(
+      `/email-campaigns/students-search/?q=${encodeURIComponent(q)}`,
+    ),
+
+  validateComposerRecipients: (data: { user_ids: number[]; emails: string[] }) =>
+    adminRequest<{
+      recipients: Array<{ id: number | null; name: string; email: string; student_id: string; registered: boolean }>;
+      total: number;
+      invalid: string[];
+      duplicates_removed: string[];
+    }>("/email-campaigns/validate-recipients/", { method: "POST", body: JSON.stringify(data) }),
+
+  composerSenderIdentity: () =>
+    adminRequest<{ sender_name: string; sender_email: string; reply_to: string }>(
+      "/email-campaigns/sender-identity/",
+    ),
+
+  campaignRecipients: (id: number, params?: AdminListParams & { status?: string; search?: string; date_from?: string; date_to?: string }) => {
     const query = new URLSearchParams();
     Object.entries(params || {}).forEach(([key, value]) => {
       if (value !== undefined && value !== "") query.set(key, String(value));
@@ -1075,7 +1397,231 @@ export const adminApi = {
 
   removeRole: (userId: number, roleId: number) =>
     adminRequest(`/users/${userId}/roles/${roleId}/`, { method: "DELETE" }),
+
+  // ── Course Creation Studio ──────────────────────────────────────────────────
+  listStudioCourses: (params?: AdminListParams) => {
+    const query = new URLSearchParams();
+    Object.entries(params || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    });
+    const qs = query.toString();
+    return adminRequest<AdminPaginatedResponse<StudioCourseRow>>(`/course-studio/${qs ? `?${qs}` : ""}`);
+  },
+
+  getStudioBundle: (id: number) =>
+    adminRequest<StudioBundle>(`/course-studio/${id}/bundle/`),
+
+  createStudioCourse: (data: Partial<StudioCourse>) =>
+    adminRequest<StudioBundle>("/course-studio/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  // Autosave. Pass `expected_updated_at` and the server answers 409 when another tab
+  // has already written the course, instead of silently losing the edit.
+  saveStudioCourse: (id: number, data: Record<string, unknown>) =>
+    adminRequest<StudioBundle>(`/course-studio/${id}/`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  studioCreateChapter: (courseId: number, data: Partial<StudioChapter>) =>
+    adminRequest<StudioChapter>(`/course-studio/${courseId}/chapters/`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  studioUpdateChapter: (courseId: number, chapterId: number, data: Partial<StudioChapter>) =>
+    adminRequest<StudioChapter>(`/course-studio/${courseId}/chapters/${chapterId}/`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  studioDeleteChapter: (courseId: number, chapterId: number) =>
+    adminRequest(`/course-studio/${courseId}/chapters/${chapterId}/`, { method: "DELETE" }),
+
+  duplicateChapter: (courseId: number, chapterId: number) =>
+    adminRequest<StudioChapter>(`/course-studio/${courseId}/chapters/${chapterId}/duplicate/`, {
+      method: "POST",
+    }),
+
+  studioReorderChapters: (courseId: number, items: Array<{ id: number; order: number }>) =>
+    adminRequest(`/course-studio/${courseId}/chapters/reorder/`, {
+      method: "POST",
+      body: JSON.stringify({ items }),
+    }),
+
+  studioCreateLesson: (courseId: number, data: Partial<StudioLesson> & { chapter: number }) =>
+    adminRequest<StudioLesson>(`/course-studio/${courseId}/lessons/`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  studioUpdateLesson: (
+    courseId: number,
+    lessonId: number,
+    data: Partial<StudioLesson> & { expected_updated_at?: string }
+  ) =>
+    adminRequest<StudioLesson>(`/course-studio/${courseId}/lessons/${lessonId}/`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  studioDeleteLesson: (courseId: number, lessonId: number) =>
+    adminRequest(`/course-studio/${courseId}/lessons/${lessonId}/`, { method: "DELETE" }),
+
+  duplicateLesson: (courseId: number, lessonId: number) =>
+    adminRequest<StudioLesson>(`/course-studio/${courseId}/lessons/${lessonId}/duplicate/`, {
+      method: "POST",
+    }),
+
+  moveLesson: (courseId: number, lessonId: number, data: { chapter?: number; order?: number }) =>
+    adminRequest<StudioLesson>(`/course-studio/${courseId}/lessons/${lessonId}/move/`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  studioReorderLessons: (
+    courseId: number,
+    items: Array<{ id: number; order: number; chapter?: number | null }>
+  ) =>
+    adminRequest(`/course-studio/${courseId}/lessons/reorder/`, {
+      method: "POST",
+      body: JSON.stringify({ items }),
+    }),
+
+  studioCreateExercise: (
+    courseId: number,
+    lessonId: number,
+    data: Partial<ExerciseAdmin> & { chapter?: number }
+  ) =>
+    adminRequest<ExerciseAdmin>(
+      `/course-studio/${courseId}/lessons/${lessonId}/exercises/`,
+      { method: "POST", body: JSON.stringify(data) }
+    ),
+
+  studioUpdateExercise: (
+    courseId: number,
+    lessonId: number,
+    exerciseId: number,
+    data: Partial<ExerciseAdmin>
+  ) =>
+    adminRequest<ExerciseAdmin>(
+      `/course-studio/${courseId}/lessons/${lessonId}/exercises/${exerciseId}/`,
+      { method: "PATCH", body: JSON.stringify(data) }
+    ),
+
+  studioDeleteExercise: (courseId: number, lessonId: number, exerciseId: number) =>
+    adminRequest(
+      `/course-studio/${courseId}/lessons/${lessonId}/exercises/${exerciseId}/`,
+      { method: "DELETE" }
+    ),
+
+  bulkPublishLessons: (courseId: number, lessons: number[], isActive = true) =>
+    adminRequest<{ status: string; updated: number; checklist: PublishChecklist }>(
+      `/course-studio/${courseId}/lessons/bulk-publish/`,
+      { method: "POST", body: JSON.stringify({ lessons, is_active: isActive }) }
+    ),
+
+  getPublishChecklist: (courseId: number) =>
+    adminRequest<PublishChecklist>(`/course-studio/${courseId}/checklist/`),
+
+  publishStudioCourse: (courseId: number, data: { force?: boolean; override_reason?: string } = {}) =>
+    adminRequest<StudioBundle>(`/course-studio/${courseId}/publish/`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  unpublishStudioCourse: (courseId: number) =>
+    adminRequest<StudioBundle>(`/course-studio/${courseId}/unpublish/`, { method: "POST" }),
+
+  scheduleStudioCourse: (courseId: number, publishAt: string) =>
+    adminRequest<StudioBundle>(`/course-studio/${courseId}/schedule/`, {
+      method: "POST",
+      body: JSON.stringify({ publish_at: publishAt }),
+    }),
+
+  unscheduleStudioCourse: (courseId: number) =>
+    adminRequest<StudioBundle>(`/course-studio/${courseId}/unschedule/`, { method: "POST" }),
+
+  archiveStudioCourse: (courseId: number, reason?: string) =>
+    adminRequest<StudioBundle>(`/course-studio/${courseId}/archive/`, {
+      method: "POST",
+      body: JSON.stringify(reason ? { reason } : {}),
+    }),
+
+  unarchiveStudioCourse: (courseId: number) =>
+    adminRequest<StudioBundle>(`/course-studio/${courseId}/unarchive/`, { method: "POST" }),
+
+  // ── Course categories ───────────────────────────────────────────────────────
+  listCategories: () =>
+    adminRequest<AdminPaginatedResponse<CourseCategoryAdmin>>("/course-categories/"),
+
+  createCategory: (data: Partial<CourseCategoryAdmin>) =>
+    adminRequest<CourseCategoryAdmin>("/course-categories/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateCategory: (id: number, data: Partial<CourseCategoryAdmin>) =>
+    adminRequest<CourseCategoryAdmin>(`/course-categories/${id}/`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  // ── Analytics ───────────────────────────────────────────────────────────────
+  getAnalyticsOverview: (params?: { from?: string; to?: string; bucket?: string }) => {
+    const query = new URLSearchParams();
+    Object.entries(params || {}).forEach(([key, value]) => {
+      if (value) query.set(key, String(value));
+    });
+    const qs = query.toString();
+    return adminRequest<AnalyticsOverview>(`/analytics/overview/${qs ? `?${qs}` : ""}`);
+  },
 };
+
+/**
+ * Reports the analytics overview charts the data for; these are the same rows
+ * rendered as a downloadable CSV. Kept in sync with ``CSV_REPORTS`` server-side -
+ * an unknown name is refused there with the current list, so a stale entry here
+ * fails with a message rather than silently exporting the wrong thing.
+ */
+export const ANALYTICS_REPORTS = [
+  { id: 'registrations', label: 'Student registrations' },
+  { id: 'enrollments', label: 'Course enrolments' },
+  { id: 'completions', label: 'Course completions' },
+  { id: 'exercise_submissions', label: 'Exercise submissions' },
+  { id: 'certificates', label: 'Certificates issued' },
+  { id: 'competition_registrations', label: 'Competition registrations' },
+] as const;
+
+/** Stream an analytics report straight to the browser's save dialog. */
+export async function downloadAnalyticsCsv(
+  report: string,
+  params: { from?: string; to?: string } = {}
+): Promise<void> {
+  const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+  const query = new URLSearchParams({ report });
+  Object.entries(params).forEach(([key, value]) => {
+    if (value) query.set(key, value);
+  });
+  let token = getAccessToken();
+  if (!token) token = await refreshAccessToken();
+  const res = await fetch(`${base}/admin/analytics/export/?${query}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("The CSV export could not be generated.");
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `codeyaar-${report}.csv`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
+}
 
 /**
  * Download the filtered hackathon registrations as a CSV file. The endpoint
