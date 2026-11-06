@@ -1,0 +1,20 @@
+Using existing test database for alias 'default'...
+Skipping email "Your certificate for Course py is ready": recipient has no address
+.Skipping email "Your certificate for Course py is ready": recipient has no address
+...Skipping email "Your certificate for Course py is ready": recipient has no address
+.Skipping email "Your certificate for Course py is ready": recipient has no address
+.Skipping email "Your certificate for Course py is ready": recipient has no address
+..Skipping email "Your certificate for Course py is ready": recipient has no address
+.Skipping email "Your certificate for Course py is ready": recipient has no address
+.......Skipping email "Your certificate for Course py is ready": recipient has no address
+.Skipping email "Your certificate for Course py is ready": recipient has no address
+.Skipping email "Your certificate for Course py is ready": recipient has no address
+.Skipping email "Your certificate for Course py is ready": recipient has no address
+.Skipping email "Your certificate for Course py is ready": recipient has no address
+.Skipping email "Your certificate for Course py is ready": recipient has no address
+......................Skipping email "Enrolled: Python 101": recipient has no address
+......................................Skipping email "Badge unlocked: First Steps": recipient has no address
+................................................................................................Skipped "Decayed Course": 2 blocking issue(s): course_no_published_lessons, final_assessment_missing
+............................................................Campaign 8 failed for recipient 1: OSError: SMTP 550 mailbox unavailable
+.Campaign 10 failed for recipient 3: OSError: SMTP connection reset
+...........................................EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE.
