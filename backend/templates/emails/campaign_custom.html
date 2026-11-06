@@ -1,0 +1,13 @@
+{% extends "emails/base.html" %}{% comment %}
+Free-form composer mail (emails/campaign_custom.html).
+
+The admin wrote the whole message in the rich-text editor, so the body block
+is their sanitized HTML with the personalization variables already substituted
+per recipient. `custom_html` goes through |safe deliberately: the content was
+allowlist-sanitized by learning.services.email_composer and every substituted
+value was HTML-escaped first, which is what makes handing it to a mail client
+safe. The salutation block is emptied because the composer owns the greeting —
+"Dear {{student_name}}" is typed in the body, not added by the layout.
+{% endcomment %}
+{% block salutation %}{% endblock %}
+{% block body %}{{ custom_html|safe }}{% endblock %}

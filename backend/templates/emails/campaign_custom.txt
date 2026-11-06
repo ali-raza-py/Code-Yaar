@@ -1,0 +1,9 @@
+{% extends "emails/base.txt" %}{% comment %}
+Free-form composer mail, plain-text twin (emails/campaign_custom.html).
+`custom_text` is the admin's own plain-text override when they wrote one, or
+the readable conversion of the sanitized HTML body otherwise.
+{% endcomment %}
+{% block salutation %}{% endblock %}
+{% block body %}{% if custom_text %}{{ custom_text|safe }}
+
+{% endif %}{% endblock %}
