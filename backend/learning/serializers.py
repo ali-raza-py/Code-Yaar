@@ -1,5 +1,7 @@
+from django.db.models import Prefetch
 from rest_framework import serializers
 
+from . import batching
 from .models import (
     CareerTrack, Course, Chapter, Lesson, Exercise, Hint,
     Resource, Project, ProjectMilestone, Challenge, Enrollment,
@@ -34,6 +36,8 @@ class CompetitionListSerializer(serializers.ModelSerializer):
         ]
 
     def get_registration_status(self, obj):
+        if hasattr(obj, 'current_registration_status'):
+            return obj.current_registration_status
         user = self.context.get('request').user
         if not user.is_authenticated:
             return None
@@ -134,12 +138,16 @@ class PracticalListSerializer(serializers.ModelSerializer):
 
     def get_is_completed(self, obj):
         user = self._user()
+        if hasattr(obj, 'current_user_completed'):
+            return bool(obj.current_user_completed)
         return bool(user and obj.progress_entries.filter(
             user=user, completed_at__isnull=False
         ).exists())
 
     def get_is_bookmarked(self, obj):
         user = self._user()
+        if hasattr(obj, 'current_user_bookmarked'):
+            return bool(obj.current_user_bookmarked)
         return bool(user and obj.bookmarks.filter(user=user).exists())
 
 
@@ -293,7 +301,10 @@ class ExerciseListSerializer(TextbookReferenceMixin, serializers.ModelSerializer
         ]
 
     def get_hint_count(self, obj):
-        return obj.hints.count()
+        counts = batching.hint_counts_by_exercise(self.context)
+        if counts is None:
+            return obj.hints.count()
+        return counts.get(obj.id, 0)
 
 
 class ExerciseDetailSerializer(TextbookReferenceMixin, serializers.ModelSerializer):
@@ -350,17 +361,23 @@ class LessonListSerializer(serializers.ModelSerializer):
         ]
 
     def get_exercise_count(self, obj):
-        return obj.exercises.filter(is_active=True).count()
+        counts = batching.exercise_counts_by_lesson(self.context)
+        if counts is None:
+            return obj.exercises.filter(is_active=True).count()
+        return counts.get(obj.id, 0)
 
     def get_progress_status(self, obj):
-        request = self.context.get('request')
-        if request and hasattr(request, 'user') and request.user.is_authenticated:
-            progress = LessonProgress.objects.filter(
-                user=request.user, lesson=obj
-            ).first()
-            if progress:
-                return progress.status
-        return 'not_started'
+        progress = batching.lesson_progress_map(self.context)
+        if progress is None:
+            request = self.context.get('request')
+            if request and hasattr(request, 'user') and request.user.is_authenticated:
+                row = LessonProgress.objects.filter(
+                    user=request.user, lesson=obj
+                ).first()
+                if row:
+                    return row.status
+            return 'not_started'
+        return progress.get(obj.id, 'not_started')
 
 
 class LessonDetailSerializer(TextbookReferenceMixin, serializers.ModelSerializer):
@@ -387,21 +404,27 @@ class LessonDetailSerializer(TextbookReferenceMixin, serializers.ModelSerializer
         ]
 
     def get_exercise_count(self, obj):
-        return obj.exercises.filter(is_active=True).count()
+        counts = batching.exercise_counts_by_lesson(self.context)
+        if counts is None:
+            return obj.exercises.filter(is_active=True).count()
+        return counts.get(obj.id, 0)
 
     def get_exercises(self, obj):
         exercises = obj.exercises.filter(is_active=True)
         return ExerciseListSerializer(exercises, many=True, context=self.context).data
 
     def get_progress_status(self, obj):
-        request = self.context.get('request')
-        if request and hasattr(request, 'user') and request.user.is_authenticated:
-            progress = LessonProgress.objects.filter(
-                user=request.user, lesson=obj
-            ).first()
-            if progress:
-                return progress.status
-        return 'not_started'
+        progress = batching.lesson_progress_map(self.context)
+        if progress is None:
+            request = self.context.get('request')
+            if request and hasattr(request, 'user') and request.user.is_authenticated:
+                row = LessonProgress.objects.filter(
+                    user=request.user, lesson=obj
+                ).first()
+                if row:
+                    return row.status
+            return 'not_started'
+        return progress.get(obj.id, 'not_started')
 
     def _sibling(self, obj, direction):
         """Previous/next lesson across the whole course, by content order."""
@@ -446,32 +469,50 @@ class ChapterListSerializer(TextbookReferenceMixin, serializers.ModelSerializer)
             'textbook_reference',
         ]
 
+    def _active_lessons(self, obj):
+        """Active lessons for the chapter, served from the view's prefetch
+        cache when one was set up (keeps the course map at one query total)."""
+        cache = getattr(obj, '_prefetched_objects_cache', None)
+        if cache and 'lessons' in cache:
+            return list(cache['lessons'])
+        return list(obj.lessons.filter(is_active=True))
+
     def get_lessons(self, obj):
-        lessons = obj.lessons.filter(is_active=True)
+        lessons = self._active_lessons(obj)
         return LessonListSerializer(lessons, many=True, context=self.context).data
 
     def get_is_final_assessment(self, obj):
-        return Exercise.objects.filter(
-            lesson__chapter=obj,
-            lesson__is_active=True,
-            is_final_assessment=True,
-            is_active=True,
-        ).exists()
+        final_ids = batching.final_assessment_chapter_ids(self.context)
+        if final_ids is None:
+            return Exercise.objects.filter(
+                lesson__chapter=obj,
+                lesson__is_active=True,
+                is_final_assessment=True,
+                is_active=True,
+            ).exists()
+        return obj.id in final_ids
 
     def get_progress_percentage(self, obj):
-        lessons = obj.lessons.filter(is_active=True)
-        total = lessons.count()
+        lessons = self._active_lessons(obj)
+        total = len(lessons)
         if total == 0:
             return 0
-        request = self.context.get('request')
-        if request and hasattr(request, 'user') and request.user.is_authenticated:
-            completed = LessonProgress.objects.filter(
-                user=request.user,
-                lesson__in=lessons,
-                status__in=['completed', 'mastered']
-            ).count()
-            return round((completed / total) * 100)
-        return 0
+        progress = batching.lesson_progress_map(self.context)
+        if progress is None:
+            request = self.context.get('request')
+            if request and hasattr(request, 'user') and request.user.is_authenticated:
+                completed = LessonProgress.objects.filter(
+                    user=request.user,
+                    lesson__in=lessons,
+                    status__in=['completed', 'mastered']
+                ).count()
+                return round((completed / total) * 100)
+            return 0
+        completed = sum(
+            1 for lesson in lessons
+            if progress.get(lesson.id) in ('completed', 'mastered')
+        )
+        return round((completed / total) * 100)
 
 
 class ChapterDetailSerializer(serializers.ModelSerializer):
@@ -504,13 +545,13 @@ class ResourceSerializer(serializers.ModelSerializer):
 
 class CourseListSerializer(serializers.ModelSerializer):
     track_title = serializers.CharField(source='track.title', read_only=True)
-    chapter_count = serializers.IntegerField(read_only=True, default=0)
+    chapter_count = serializers.SerializerMethodField()
     lesson_count = serializers.SerializerMethodField()
     exercise_count = serializers.SerializerMethodField()
     enrolled = serializers.SerializerMethodField()
     progress_percentage = serializers.SerializerMethodField()
-    estimated_hours = serializers.IntegerField(read_only=True)
-    total_xp = serializers.IntegerField(read_only=True)
+    estimated_hours = serializers.SerializerMethodField()
+    total_xp = serializers.SerializerMethodField()
 
     class Meta:
         model = Course
@@ -521,20 +562,49 @@ class CourseListSerializer(serializers.ModelSerializer):
             'exercise_count', 'is_free', 'enrolled', 'progress_percentage',
         ]
 
+    def _stats(self, obj):
+        """Batched course counters from the shared request context; None
+        when the serializer runs outside a request (scripts, tests)."""
+        stats = batching.course_stats(self.context)
+        if stats is None:
+            return None
+        return stats.get(obj.id) or {}
+
+    def get_chapter_count(self, obj):
+        stats = self._stats(obj)
+        return obj.chapter_count if stats is None else stats.get('chapters', 0)
+
     def get_lesson_count(self, obj):
-        return obj.lesson_count
+        stats = self._stats(obj)
+        return obj.lesson_count if stats is None else stats.get('lessons', 0)
 
     def get_exercise_count(self, obj):
-        return obj.exercise_count
+        stats = self._stats(obj)
+        return obj.exercise_count if stats is None else stats.get('exercises', 0)
+
+    def get_total_xp(self, obj):
+        stats = self._stats(obj)
+        return obj.total_xp if stats is None else stats.get('xp', 0)
+
+    def get_estimated_hours(self, obj):
+        if obj.manual_estimated_hours:
+            return obj.manual_estimated_hours
+        stats = self._stats(obj)
+        if stats is None:
+            return obj.estimated_hours
+        return max(1, round((stats.get('minutes') or 0) / 60))
 
     def _user(self, request):
         return getattr(getattr(request, 'user', None), 'is_authenticated', False) and request.user
 
     def get_enrolled(self, obj):
-        user = self._user(self.context.get('request'))
-        if user:
-            return Enrollment.objects.filter(user=user, course=obj).exists()
-        return False
+        enrollments = batching.enrollment_map(self.context)
+        if enrollments is None:
+            user = self._user(self.context.get('request'))
+            if user:
+                return Enrollment.objects.filter(user=user, course=obj).exists()
+            return False
+        return obj.id in enrollments
 
     def get_progress_percentage(self, obj):
         """Lessons completed by the requester, same rule as the course
@@ -542,22 +612,29 @@ class CourseListSerializer(serializers.ModelSerializer):
         user = self._user(self.context.get('request'))
         if not user:
             return 0
-        cache = self.context.setdefault('_course_progress_cache', {})
-        if obj.id not in cache:
-            total = Lesson.objects.filter(
-                chapter__course=obj, chapter__is_active=True, is_active=True
-            ).count()
-            if total == 0:
-                cache[obj.id] = 0
-            else:
-                completed = LessonProgress.objects.filter(
-                    user=user,
-                    lesson__chapter__course=obj,
-                    lesson__is_active=True,
-                    status__in=['completed', 'mastered'],
+        stats = self._stats(obj)
+        completed_map = batching.completed_lessons_by_course(self.context)
+        if stats is None or completed_map is None:
+            cache = self.context.setdefault('_course_progress_cache', {})
+            if obj.id not in cache:
+                total = Lesson.objects.filter(
+                    chapter__course=obj, chapter__is_active=True, is_active=True
                 ).count()
-                cache[obj.id] = round((completed / total) * 100)
-        return cache[obj.id]
+                if total == 0:
+                    cache[obj.id] = 0
+                else:
+                    completed = LessonProgress.objects.filter(
+                        user=user,
+                        lesson__chapter__course=obj,
+                        lesson__is_active=True,
+                        status__in=['completed', 'mastered'],
+                    ).count()
+                    cache[obj.id] = round((completed / total) * 100)
+            return cache[obj.id]
+        total = stats.get('lessons', 0)
+        if total == 0:
+            return 0
+        return round((completed_map.get(obj.id, 0) / total) * 100)
 
 
 class CourseDetailSerializer(serializers.ModelSerializer):
@@ -571,8 +648,8 @@ class CourseDetailSerializer(serializers.ModelSerializer):
     enrollment_id = serializers.SerializerMethodField()
     resume_lesson = serializers.SerializerMethodField()
     progress_percentage = serializers.SerializerMethodField()
-    estimated_hours = serializers.IntegerField(read_only=True)
-    total_xp = serializers.IntegerField(read_only=True)
+    estimated_hours = serializers.SerializerMethodField()
+    total_xp = serializers.SerializerMethodField()
 
     class Meta:
         model = Course
@@ -587,33 +664,68 @@ class CourseDetailSerializer(serializers.ModelSerializer):
 
     def get_chapters(self, obj):
         # Sorted by content order so chapters follow the intended path and
-        # the final assessment always comes last.
-        chapters = obj.chapters.filter(is_active=True).order_by('order', 'id')
+        # the final assessment always comes last. Lessons arrive through one
+        # prefetch so the course map costs a single query, not one per chapter.
+        chapters = Chapter.objects.filter(
+            course=obj, is_active=True,
+        ).order_by('order', 'id').prefetch_related(
+            Prefetch(
+                'lessons',
+                queryset=Lesson.objects.filter(is_active=True).order_by(
+                    'chapter_id', 'order'
+                ),
+            ),
+        )
         return ChapterListSerializer(chapters, many=True, context=self.context).data
 
+    def _stats(self, obj):
+        stats = batching.course_stats(self.context)
+        if stats is None:
+            return None
+        return stats.get(obj.id) or {}
+
     def get_lesson_count(self, obj):
-        return obj.lesson_count
+        stats = self._stats(obj)
+        return obj.lesson_count if stats is None else stats.get('lessons', 0)
 
     def get_exercise_count(self, obj):
-        return obj.exercise_count
+        stats = self._stats(obj)
+        return obj.exercise_count if stats is None else stats.get('exercises', 0)
+
+    def get_total_xp(self, obj):
+        stats = self._stats(obj)
+        return obj.total_xp if stats is None else stats.get('xp', 0)
+
+    def get_estimated_hours(self, obj):
+        if obj.manual_estimated_hours:
+            return obj.manual_estimated_hours
+        stats = self._stats(obj)
+        if stats is None:
+            return obj.estimated_hours
+        return max(1, round((stats.get('minutes') or 0) / 60))
+
+    def _enrollment(self, obj):
+        enrollments = batching.enrollment_map(self.context)
+        if enrollments is None:
+            request = self.context.get('request')
+            if request and hasattr(request, 'user') and request.user.is_authenticated:
+                return Enrollment.objects.filter(
+                    user=request.user, course=obj
+                ).select_related('last_lesson').first()
+            return None
+        return enrollments.get(obj.id)
 
     def get_enrolled(self, obj):
-        request = self.context.get('request')
-        if request and hasattr(request, 'user') and request.user.is_authenticated:
-            return Enrollment.objects.filter(user=request.user, course=obj).exists()
-        return False
+        return self._enrollment(obj) is not None
 
     def get_enrollment_id(self, obj):
-        request = self.context.get('request')
-        if request and hasattr(request, 'user') and request.user.is_authenticated:
-            enrollment = Enrollment.objects.filter(user=request.user, course=obj).first()
-            return enrollment.id if enrollment else None
-        return None
+        enrollment = self._enrollment(obj)
+        return enrollment.id if enrollment else None
 
     def get_resume_lesson(self, obj):
         request = self.context.get('request')
         if request and hasattr(request, 'user') and request.user.is_authenticated:
-            enrollment = Enrollment.objects.filter(user=request.user, course=obj).first()
+            enrollment = self._enrollment(obj)
             if enrollment and enrollment.last_lesson:
                 return LessonListSerializer(enrollment.last_lesson, context=self.context).data
             # Find first incomplete lesson
@@ -630,7 +742,12 @@ class CourseDetailSerializer(serializers.ModelSerializer):
 
     def get_progress_percentage(self, obj):
         request = self.context.get('request')
-        if request and hasattr(request, 'user') and request.user.is_authenticated:
+        user = getattr(getattr(request, 'user', None), 'is_authenticated', False) and request.user
+        if not user:
+            return 0
+        stats = self._stats(obj)
+        completed_map = batching.completed_by_course_any(self.context)
+        if stats is None or completed_map is None:
             total = Lesson.objects.filter(chapter__course=obj).count()
             if total == 0:
                 return 0
@@ -640,7 +757,10 @@ class CourseDetailSerializer(serializers.ModelSerializer):
                 status__in=['completed', 'mastered']
             ).count()
             return round((completed / total) * 100)
-        return 0
+        total = stats.get('lessons_all', 0)
+        if total == 0:
+            return 0
+        return round((completed_map.get(obj.id, 0) / total) * 100)
 
 
 class CareerTrackSerializer(serializers.ModelSerializer):
@@ -679,39 +799,68 @@ class CareerTrackSerializer(serializers.ModelSerializer):
     def get_course_count(self, obj):
         # Only count what a learner can actually open — unpublished draft
         # courses (e.g. Class XI/XII shells) must not inflate the number.
-        return obj.courses.filter(is_active=True, is_published=True).count()
+        ids = batching.published_courses_by_track(self.context)
+        if ids is None:
+            return obj.courses.filter(is_active=True, is_published=True).count()
+        return len(ids.get(obj.id, []))
 
     def get_total_xp(self, obj):
-        return sum(c.total_xp for c in obj.published_courses)
+        ids = batching.published_courses_by_track(self.context)
+        stats = batching.course_stats(self.context)
+        if ids is None or stats is None:
+            return sum(c.total_xp for c in obj.published_courses)
+        return sum(stats.get(cid, {}).get('xp', 0) for cid in ids.get(obj.id, []))
 
     def get_cover_url(self, obj):
         return _media_url(self.context.get('request'), obj.cover_image)
 
     def _progress_rows(self, obj):
         """(lessons_total, lessons_completed, courses, enrollments_by_course)
-        for the requesting user; shared by the progress fields."""
+        for the requesting user; shared by the progress fields. Memoised per
+        track in the request context, and answered from the batched maps so
+        the whole track detail page costs a constant number of queries."""
+        cache = self.context.setdefault('_track_progress_rows', {})
+        if obj.id in cache:
+            return cache[obj.id]
         request = self.context.get('request')
         user = getattr(getattr(request, 'user', None), 'is_authenticated', False) and request.user
         courses = list(obj.published_courses)
+        stats = batching.course_stats(self.context)
+        completed_map = batching.completed_lessons_by_course(self.context)
+        enrollments_all = batching.enrollment_map(self.context)
         lessons_total = 0
         lessons_completed = 0
         enrollments = {}
         if courses:
-            lessons_total = Lesson.objects.filter(
-                chapter__course__in=courses, chapter__is_active=True, is_active=True
-            ).count()
-            if user:
-                lessons_completed = LessonProgress.objects.filter(
-                    user=user,
-                    lesson__chapter__course__in=courses,
-                    lesson__is_active=True,
-                    status__in=['completed', 'mastered'],
+            if stats is not None:
+                lessons_total = sum(stats.get(c.id, {}).get('lessons', 0) for c in courses)
+            else:
+                lessons_total = Lesson.objects.filter(
+                    chapter__course__in=courses, chapter__is_active=True, is_active=True
                 ).count()
-                enrollments = {
-                    e.course_id: e
-                    for e in Enrollment.objects.filter(user=user, course__in=courses)
-                }
-        return lessons_total, lessons_completed, courses, enrollments
+            if user:
+                if completed_map is not None:
+                    lessons_completed = sum(completed_map.get(c.id, 0) for c in courses)
+                else:
+                    lessons_completed = LessonProgress.objects.filter(
+                        user=user,
+                        lesson__chapter__course__in=courses,
+                        lesson__is_active=True,
+                        status__in=['completed', 'mastered'],
+                    ).count()
+                if enrollments_all is not None:
+                    course_ids = {c.id for c in courses}
+                    enrollments = {
+                        cid: e for cid, e in enrollments_all.items() if cid in course_ids
+                    }
+                else:
+                    enrollments = {
+                        e.course_id: e
+                        for e in Enrollment.objects.filter(user=user, course__in=courses)
+                    }
+        result = (lessons_total, lessons_completed, courses, enrollments)
+        cache[obj.id] = result
+        return result
 
     def get_enrolled_course_count(self, obj):
         _, _, _, enrollments = self._progress_rows(obj)
@@ -733,21 +882,33 @@ class CareerTrackSerializer(serializers.ModelSerializer):
         if not user:
             return None
         best_slug, best_progress = None, -1.0
+        stats = batching.course_stats(self.context)
+        completed_map = batching.completed_lessons_by_course(self.context)
+        enrollments_all = batching.enrollment_map(self.context)
         for course in obj.published_courses:
-            enrollment = course.enrollments.filter(user=user).first()
+            if enrollments_all is not None:
+                enrollment = enrollments_all.get(course.id)
+            else:
+                enrollment = course.enrollments.filter(user=user).first()
             if enrollment is None or enrollment.status in ('completed', 'dropped'):
                 continue
-            total = Lesson.objects.filter(
-                chapter__course=course, chapter__is_active=True, is_active=True
-            ).count()
+            if stats is not None:
+                total = stats.get(course.id, {}).get('lessons', 0)
+            else:
+                total = Lesson.objects.filter(
+                    chapter__course=course, chapter__is_active=True, is_active=True
+                ).count()
             if total == 0:
                 progress = 0.0
             else:
-                done = LessonProgress.objects.filter(
-                    user=user, lesson__chapter__course=course,
-                    lesson__is_active=True,
-                    status__in=['completed', 'mastered'],
-                ).count()
+                if completed_map is not None:
+                    done = completed_map.get(course.id, 0)
+                else:
+                    done = LessonProgress.objects.filter(
+                        user=user, lesson__chapter__course=course,
+                        lesson__is_active=True,
+                        status__in=['completed', 'mastered'],
+                    ).count()
                 progress = done / total
             if progress > best_progress:
                 best_progress, best_slug = progress, course.slug
@@ -773,15 +934,26 @@ class CareerTrackListSerializer(serializers.ModelSerializer):
 
     def get_course_count(self, obj):
         # Matches the course list endpoint, which only serves published courses.
-        return obj.courses.filter(is_active=True, is_published=True).count()
+        if hasattr(obj, 'published_course_count'):
+            return obj.published_course_count
+        ids = batching.published_courses_by_track(self.context)
+        if ids is None:
+            return obj.courses.filter(is_active=True, is_published=True).count()
+        return len(ids.get(obj.id, []))
 
     def get_total_xp(self, obj):
-        cache = self.context.setdefault('_track_xp_cache', {})
-        if obj.id not in cache:
-            cache[obj.id] = sum(
-                c.total_xp for c in obj.courses.filter(is_active=True, is_published=True)
-            )
-        return cache[obj.id]
+        if hasattr(obj, 'published_lesson_xp'):
+            return obj.published_lesson_xp + obj.published_exercise_xp
+        ids = batching.published_courses_by_track(self.context)
+        stats = batching.course_stats(self.context)
+        if ids is None or stats is None:
+            cache = self.context.setdefault('_track_xp_cache', {})
+            if obj.id not in cache:
+                cache[obj.id] = sum(
+                    c.total_xp for c in obj.courses.filter(is_active=True, is_published=True)
+                )
+            return cache[obj.id]
+        return sum(stats.get(cid, {}).get('xp', 0) for cid in ids.get(obj.id, []))
 
     def get_cover_url(self, obj):
         return _media_url(self.context.get('request'), obj.cover_image)
@@ -793,21 +965,41 @@ class CareerTrackListSerializer(serializers.ModelSerializer):
         if not user:
             return None
         if obj.id not in cache:
-            courses = list(obj.courses.filter(is_active=True, is_published=True))
-            enrollments = list(
-                Enrollment.objects.filter(user=user, course__in=courses)
-            ) if courses else []
-            total = Lesson.objects.filter(
-                chapter__course__in=courses, chapter__is_active=True, is_active=True
-            ).count() if courses else 0
-            completed = LessonProgress.objects.filter(
-                user=user,
-                lesson__chapter__course__in=courses,
-                lesson__is_active=True,
-                status__in=['completed', 'mastered'],
-            ).count() if courses else 0
+            ids = batching.published_courses_by_track(self.context)
+            completed_map = batching.completed_lessons_by_course(self.context)
+            enrollments_all = batching.enrollment_map(self.context)
+            if ids is not None and hasattr(obj, 'published_lesson_count'):
+                course_ids = ids.get(obj.id, [])
+                if enrollments_all is not None and course_ids:
+                    enrolled = any(cid in enrollments_all for cid in course_ids)
+                elif course_ids:
+                    enrolled = Enrollment.objects.filter(
+                        user=user, course_id__in=course_ids
+                    ).exists()
+                else:
+                    enrolled = False
+                total = obj.published_lesson_count
+                completed = (
+                    sum(completed_map.get(cid, 0) for cid in course_ids)
+                    if completed_map is not None else 0
+                )
+            else:
+                courses = list(obj.courses.filter(is_active=True, is_published=True))
+                enrollments = list(
+                    Enrollment.objects.filter(user=user, course__in=courses)
+                ) if courses else []
+                enrolled = bool(enrollments)
+                total = Lesson.objects.filter(
+                    chapter__course__in=courses, chapter__is_active=True, is_active=True
+                ).count() if courses else 0
+                completed = LessonProgress.objects.filter(
+                    user=user,
+                    lesson__chapter__course__in=courses,
+                    lesson__is_active=True,
+                    status__in=['completed', 'mastered'],
+                ).count() if courses else 0
             cache[obj.id] = {
-                'enrolled': bool(enrollments),
+                'enrolled': enrolled,
                 'progress': round((completed / total) * 100) if total else 0,
             }
         return cache[obj.id]
@@ -931,7 +1123,7 @@ class ChallengeSubmitSerializer(serializers.Serializer):
 class EnrollmentSerializer(serializers.ModelSerializer):
     course_title = serializers.CharField(source='course.title', read_only=True)
     track_title = serializers.CharField(source='course.track.title', read_only=True)
-    progress_percentage = serializers.IntegerField(read_only=True)
+    progress_percentage = serializers.SerializerMethodField()
     course_slug = serializers.CharField(source='course.slug', read_only=True)
 
     class Meta:
@@ -942,6 +1134,18 @@ class EnrollmentSerializer(serializers.ModelSerializer):
             'status', 'progress_percentage',
         ]
         read_only_fields = ['enrolled_at', 'completed_at', 'last_activity_at']
+
+    def get_progress_percentage(self, obj):
+        # Same arithmetic as Enrollment.progress_percentage, answered from
+        # two grouped queries instead of two queries per enrollment row.
+        stats = batching.course_stats(self.context)
+        done = batching.enrollment_completed_by_course(self.context)
+        if stats is None or done is None:
+            return obj.progress_percentage
+        total = (stats.get(obj.course_id) or {}).get('lessons_all', 0)
+        if total == 0:
+            return 0
+        return round((done.get(obj.course_id, 0) / total) * 100)
 
 
 class LessonProgressSerializer(serializers.ModelSerializer):
@@ -1014,6 +1218,9 @@ class AchievementSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not (request and hasattr(request, 'user') and request.user.is_authenticated):
             return None
+        earned_map = self.context.get('_earned_achievement_map')
+        if earned_map is not None:
+            return earned_map.get(obj.pk)
         cache = self._earned_cache()
         if obj.pk not in cache:
             from .models import UserAchievement
@@ -1039,6 +1246,9 @@ class AchievementSerializer(serializers.ModelSerializer):
         """Server-derived (current, target); hidden detail once earned."""
         request = self.context.get('request')
         if not (request and hasattr(request, 'user') and request.user.is_authenticated):
+            return None
+        row = self._user_achievement(obj)
+        if row and row.status == 'active':
             return None
         from .services.achievements import measure_progress
         current, target = measure_progress(request.user, obj)

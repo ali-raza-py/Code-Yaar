@@ -2,7 +2,7 @@ import hashlib
 import uuid
 
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, IntegrityError
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
@@ -188,12 +188,35 @@ class CareerTrack(models.Model):
         ordering = ['order', 'title']
 
 
+class CourseCategory(models.Model):
+    """Configurable catalogue category for a course.
+
+    Categories are data, not code: the Course Creation Studio offers these as a
+    dropdown and an administrator can add or retire one without a deploy.
+    Deliberately a real model rather than choices on ``Course`` so the student
+    catalogue can group by it and stay consistent as the list grows.
+    """
+    slug = models.SlugField(max_length=80, unique=True)
+    title = models.CharField(max_length=120)
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.title
+
+    class Meta:
+        ordering = ['order', 'title']
+        verbose_name_plural = 'course categories'
+
+
 class Course(models.Model):
     """A course within a career track."""
     DIFFICULTY_CHOICES = [
         ('beginner', 'Beginner'),
+        ('elementary', 'Elementary'),
         ('intermediate', 'Intermediate'),
         ('advanced', 'Advanced'),
+        ('expert', 'Expert'),
     ]
     LANGUAGE_CHOICES = [
         ('python', 'Python'),
@@ -226,7 +249,6 @@ class Course(models.Model):
     learning_objectives = models.JSONField(default=list, blank=True, help_text='List of skills learned')
     is_free = models.BooleanField(default=False)
     order = models.PositiveIntegerField(default=0)
-    is_published = models.BooleanField(default=True)
     is_active = models.BooleanField(default=True)
     is_published = models.BooleanField(default=False)
     # ── Certification policy (configurable per course) ──
@@ -246,6 +268,59 @@ class Course(models.Model):
         default=True,
         help_text='Learner must pass the exercises flagged as the final assessment'
     )
+    # ── Course Creation Studio metadata ──
+    category = models.ForeignKey(
+        CourseCategory,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='courses',
+        help_text='Configurable catalogue grouping shown on course cards'
+    )
+    cover_image = models.ImageField(
+        upload_to='course-covers/%Y/', null=True, blank=True,
+        help_text='Wide hero image for the course page; falls back to thumbnail'
+    )
+    tags = models.JSONField(default=list, blank=True, help_text='Topic tags for search')
+    # Account this course is assigned to. ``instructor`` above stays the display
+    # name, so existing seeded courses keep their credit while instructor-scoped
+    # permissions finally have a real relationship to check against.
+    instructor_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='taught_courses',
+        help_text='Instructor account with editorial access to this course'
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_courses'
+    )
+    prerequisite_courses = models.ManyToManyField(
+        'self', symmetrical=False, blank=True, related_name='unlocks'
+    )
+    sequential_learning = models.BooleanField(
+        default=False,
+        help_text='Learners must finish each lesson before the next one unlocks'
+    )
+    xp_completion_reward = models.PositiveIntegerField(
+        default=0,
+        help_text='Bonus XP granted once the whole course completes'
+    )
+    # Author-supplied estimate; 0 means "derive it from lesson durations" so the
+    # published figure is never a guess when nobody has filled the field in.
+    manual_estimated_hours = models.PositiveIntegerField(default=0)
+    # ── Publication lifecycle: draft -> scheduled/published -> archived ──
+    publish_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text='Publish automatically at this time (set by the schedule action)'
+    )
+    published_at = models.DateTimeField(null=True, blank=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -287,11 +362,17 @@ class Course(models.Model):
 
     @property
     def estimated_hours(self):
-        """Derived from actual lesson durations."""
+        """Admin override when set, otherwise derived from lesson durations."""
+        if self.manual_estimated_hours:
+            return self.manual_estimated_hours
         minutes = Lesson.objects.filter(
             chapter__course=self, chapter__is_active=True, is_active=True
         ).aggregate(s=models.Sum('duration_minutes'))['s'] or 0
         return max(1, round(minutes / 60))
+
+    @property
+    def is_archived(self):
+        return self.archived_at is not None
 
     class Meta:
         ordering = ['track', 'order', 'title']
@@ -411,6 +492,22 @@ class Chapter(SourceReference):
         return self.lessons.count()
 
     @property
+    def published_lesson_count(self):
+        return self.lessons.filter(is_active=True).count()
+
+    @property
+    def publication_state(self):
+        """Derived from its lessons, never stored, so the curriculum tree and the
+        learner-facing view cannot disagree about what is live."""
+        total = self.lessons.count()
+        if total == 0:
+            return 'empty'
+        published = self.published_lesson_count
+        if published == 0:
+            return 'draft'
+        return 'published' if published == total else 'partial'
+
+    @property
     def exercise_count(self):
         return Exercise.objects.filter(lesson__chapter=self).count()
 
@@ -455,7 +552,31 @@ class Lesson(SourceReference):
     duration_minutes = models.PositiveIntegerField(default=0)
     xp_reward = models.PositiveIntegerField(default=50)
     is_free_preview = models.BooleanField(default=False)
+    # ``is_active`` remains the single learner-visibility flag for a lesson: the
+    # studio's Publish/Draft control writes this and nothing else, precisely so
+    # a second "published" column can never drift out of sync with it.
     is_active = models.BooleanField(default=True)
+    is_required = models.BooleanField(
+        default=True,
+        help_text='Optional lessons are excluded from completion requirements'
+    )
+    prerequisite = models.ForeignKey(
+        'self',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='dependents',
+        help_text='Lesson that must be completed before this one unlocks'
+    )
+    estimated_reading_minutes = models.PositiveIntegerField(default=0)
+    completion_condition = models.JSONField(
+        default=dict, blank=True,
+        help_text='How this lesson is judged complete, e.g. {"type": "mark_complete"}'
+    )
+    instructor_notes = models.TextField(
+        blank=True, default='',
+        help_text='Internal guidance for instructors; never shown to learners'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1220,6 +1341,7 @@ class EmailCampaign(models.Model):
         STUDENTS = 'students', 'Students'
         INSTRUCTORS = 'instructors', 'Instructors'
         ADMINS = 'admins', 'Administrators'
+        SPECIFIC = 'specific', 'Selected recipients'
         COMP_PARTICIPANTS = 'comp_participants', 'Hackathon participants'
         COMP_APPROVED = 'comp_approved', 'Approved hackathon applicants'
         COMP_PENDING = 'comp_pending', 'Pending hackathon applicants'
@@ -1240,6 +1362,24 @@ class EmailCampaign(models.Model):
     cta_label = models.CharField(max_length=80, blank=True, default='')
     cta_url = models.URLField(blank=True, default='')
     audience = models.CharField(max_length=30, choices=Audience.choices, default=Audience.ALL)
+    selected_users = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, blank=True, related_name='selected_in_campaigns',
+        help_text='Only used by the “selected recipients” audience',
+    )
+    custom_emails = models.JSONField(
+        default=list, blank=True,
+        help_text='External addresses (people without a Code Yaar account) for the selected-recipients audience',
+    )
+    cc_emails = models.JSONField(default=list, blank=True)
+    bcc_emails = models.JSONField(default=list, blank=True)
+    body_html = models.TextField(
+        blank=True, default='',
+        help_text='Rich-text (HTML) body for the free-form composer; sanitized server-side and personalized per recipient',
+    )
+    plain_text_alternative = models.TextField(
+        blank=True, default='',
+        help_text='Optional plain-text override; derived from the HTML body when left empty',
+    )
     competition = models.ForeignKey(
         'Competition', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='email_campaigns',
@@ -1278,6 +1418,95 @@ class EmailCampaign(models.Model):
         return self.name
 
 
+#: The starter set of template categories shown in the library's filter bar.
+#: Administrators may type a new category name when creating a template; the
+#: full list offered by the API is these defaults plus every category already
+#: in use (see ``EmailTemplate.used_categories``). No extra table is needed to
+#: hold them: a category persists as long as a template uses it.
+EMAIL_TEMPLATE_CATEGORIES = [
+    'Welcome & Onboarding',
+    'Account Verification',
+    'Password Reset',
+    'Student Communications',
+    'Course Enrollment',
+    'Course Completion',
+    'Certificates & Achievements',
+    'Internship Opportunities',
+    'Hackathons & Competitions',
+    'Ambassador Programs',
+    'Team Communications',
+    'Partnership & Collaboration',
+    'Important Announcements',
+    'Custom Templates',
+]
+
+
+class EmailTemplate(models.Model):
+    """A reusable, saved starting point for an admin-composed email.
+
+    Deliberately *separate* from :class:`EmailCampaign`: a template stores no
+    audience, recipients or delivery state — only the authored content
+    (subject, heading, body, CTA, footer) with its ``{{variables}}`` left
+    unrendered. Choosing a template on the composer copies this content into
+    a fresh draft; the saved template itself is never mutated by sending, and
+    personalization still happens per recipient at fan-out time exactly as for
+    a hand-written email. This keeps the whole existing campaign/sending
+    pipeline untouched.
+    """
+
+    name = models.CharField(max_length=200)
+    category = models.CharField(
+        max_length=80, default='Custom Templates',
+        help_text='One of the preset categories, or a new category name typed by an administrator',
+    )
+    description = models.TextField(
+        blank=True, default='', help_text='Internal note describing when to use this template',
+    )
+    subject = models.CharField(max_length=200)
+    heading = models.CharField(max_length=200, blank=True, default='')
+    preview_text = models.CharField(
+        max_length=300, blank=True, default='',
+        help_text='Short preheader shown in inbox previews before the body',
+    )
+    body_html = models.TextField(
+        help_text='Rich-text (HTML) body; sanitized server-side and personalized per recipient when used',
+    )
+    plain_text = models.TextField(
+        blank=True, default='',
+        help_text='Optional plain-text body; derived from the HTML body when left empty',
+    )
+    cta_label = models.CharField(max_length=80, blank=True, default='')
+    cta_url = models.CharField(max_length=500, blank=True, default='')
+    footer_content = models.TextField(
+        blank=True, default='',
+        help_text='Optional closing line appended to the body when the template is used',
+    )
+    is_favorite = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='created_email_templates',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-is_favorite', '-updated_at']
+        verbose_name = 'email template'
+        verbose_name_plural = 'email templates'
+
+    def __str__(self):
+        return f'{self.name} ({self.category})'
+
+    @classmethod
+    def used_categories(cls):
+        """Preset categories plus every distinct category already saved."""
+        seen = list(EMAIL_TEMPLATE_CATEGORIES)
+        for value in cls.objects.exclude(category='').values_list('category', flat=True).distinct():
+            if value not in seen:
+                seen.append(value)
+        return seen
+
+
 class EmailCampaignRecipient(models.Model):
     """Per-recipient delivery record for one campaign.
 
@@ -1296,8 +1525,10 @@ class EmailCampaignRecipient(models.Model):
     campaign = models.ForeignKey(
         EmailCampaign, on_delete=models.CASCADE, related_name='recipients',
     )
+    # Null for external custom addresses: people mailed without a Code Yaar account.
     user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='campaign_emails',
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True,
+        related_name='campaign_emails',
     )
     email = models.CharField(max_length=254)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
@@ -1308,7 +1539,11 @@ class EmailCampaignRecipient(models.Model):
     class Meta:
         ordering = ['created_at']
         constraints = [
-            models.UniqueConstraint(fields=['campaign', 'user'], name='unique_campaign_recipient'),
+            # Dedupe on the snapshotted address itself: one copy per person per
+            # campaign, whether the recipient is a registered user or an
+            # external address (a NULL user would slip past a (campaign, user)
+            # constraint on both SQLite and Postgres).
+            models.UniqueConstraint(fields=['campaign', 'email'], name='unique_campaign_recipient'),
         ]
         indexes = [
             models.Index(fields=['campaign', 'status']),
@@ -1341,6 +1576,14 @@ class MaintenanceSettings(models.Model):
 
     SINGLETON_PK = 1
 
+    #: Where the short-lived read snapshot lives. The maintenance middleware
+    #: and the public status endpoint run on every request, and the hosted
+    #: database makes even a single-row SELECT a visible round trip; the
+    #: snapshot collapses those to one read per TTL window, and `save()`
+    #: invalidates it so a toggle is reflected immediately.
+    CACHE_KEY = 'maintenance_settings_snapshot'
+    CACHE_TTL_SECONDS = 15
+
     class Meta:
         verbose_name = 'Maintenance settings'
         verbose_name_plural = 'Maintenance settings'
@@ -1354,11 +1597,37 @@ class MaintenanceSettings(models.Model):
     def save(self, *args, **kwargs):
         self.pk = self.SINGLETON_PK
         super().save(*args, **kwargs)
+        from django.core.cache import cache
+        cache.delete(self.CACHE_KEY)
 
     @classmethod
     def get_solo(cls):
         settings, _ = cls.objects.get_or_create(pk=cls.SINGLETON_PK)
         return settings
+
+    @classmethod
+    def snapshot(cls):
+        """Plain-data view of the singleton, cached for CACHE_TTL_SECONDS.
+
+        Returns ``{is_enabled, message, estimated_return_time}`` where the
+        time is an aware datetime or None. Read-only callers (middleware,
+        status endpoint) use this instead of touching the database per
+        request; writes invalidate the snapshot in `save()`.
+        """
+        from django.core.cache import cache
+        cached = cache.get(cls.CACHE_KEY)
+        if cached is not None:
+            return cached
+        row = cls.objects.filter(pk=cls.SINGLETON_PK).values(
+            'is_enabled', 'maintenance_message', 'estimated_return_time',
+        ).first()
+        snapshot = {
+            'is_enabled': bool(row and row['is_enabled']),
+            'message': (row['maintenance_message'] if row else '') or '',
+            'estimated_return_time': row['estimated_return_time'] if row else None,
+        }
+        cache.set(cls.CACHE_KEY, snapshot, cls.CACHE_TTL_SECONDS)
+        return snapshot
 
     def __str__(self):
         return 'Maintenance mode'
@@ -1398,7 +1667,7 @@ class NotificationEmailLog(models.Model):
         max_length=60,
         help_text="Email preference kind, e.g. 'email_learning' or 'security'",
     )
-    category = models.CharField(max_length=20, blank=True, default='')
+    category = models.CharField(max_length=60, blank=True, default='')
     subject = models.CharField(max_length=200)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.QUEUED)
     error = models.CharField(max_length=500, blank=True, default='')
@@ -2519,3 +2788,81 @@ class AuthenticationAuditLog(models.Model):
 
     def __str__(self):
         return f"{self.event} @ {self.created_at:%Y-%m-%d %H:%M}"
+
+
+class AdminActionLog(models.Model):
+    """Append-only record of consequential administrator actions.
+
+    ``AuthenticationAuditLog`` only covers sign-in traffic, so the admin platform
+    needs its own trail for the things that actually change learner data:
+    publishing a course, overriding the publish checklist, promoting or deactivating
+    a competition application, launching a campaign, editing roles. Rows are written
+    through :func:`record_admin_action` and are guarded against edit and delete here
+    so the history stays trustworthy even against an administrator with database
+    access through the app.
+    """
+
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='admin_actions',
+    )
+    actor_role = models.CharField(
+        max_length=40, blank=True, default='',
+        help_text='Effective role captured at the time of the action, since roles change later'
+    )
+    action = models.CharField(max_length=60, help_text='e.g. course.publish, lesson.bulk_publish')
+    target_type = models.CharField(max_length=60, blank=True, default='')
+    target_id = models.CharField(max_length=60, blank=True, default='')
+    target_label = models.CharField(max_length=250, blank=True, default='')
+    detail = models.JSONField(default=dict, blank=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['action', '-created_at'], name='adminlog_action_created'),
+            models.Index(fields=['actor', '-created_at'], name='adminlog_actor_created'),
+        ]
+
+    def __str__(self):
+        return f"{self.action} {self.target_type}#{self.target_id} @ {self.created_at:%Y-%m-%d %H:%M}"
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise IntegrityError('AdminActionLog rows are append-only and cannot be modified.')
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise IntegrityError('AdminActionLog rows are append-only and cannot be deleted.')
+
+
+def record_admin_action(actor, action, *, obj=None, label='', detail=None, request=None):
+    """Write one audit row, tolerating a missing actor (management commands).
+
+    Audit failure must never mask the operation it is recording, so callers keep
+    working even if this raises; the log is written outside the caller's transaction
+    intent on purpose.
+    """
+    ip = None
+    if request is not None:
+        x_forwarded = request.META.get('HTTP_X_FORWARDED_FOR', '')
+        ip = (x_forwarded.split(',')[0].strip() if x_forwarded
+              else request.META.get('REMOTE_ADDR'))
+    # Imported lazily: ``learning.services.auth`` pulls in this module, so a
+    # top-level import would close a circular dependency at app-load time.
+    from .services.auth import user_role
+    actor_id = actor.pk if getattr(actor, 'pk', None) is not None else None
+    return AdminActionLog.objects.create(
+        actor_id=actor_id,
+        actor_role=(user_role(actor) if actor_id is not None else 'system'),
+        action=action,
+        target_type=obj.__class__.__name__ if obj is not None else '',
+        target_id=str(getattr(obj, 'pk', '') or ''),
+        target_label=label or (str(obj)[:250] if obj is not None else ''),
+        detail=detail or {},
+        ip_address=ip,
+    )

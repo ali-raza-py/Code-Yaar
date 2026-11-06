@@ -100,11 +100,52 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 
 
-# Database — PostgreSQL via env vars, with a SQLite fallback for local dev
-# (set DB_ENGINE=sqlite, or it activates automatically when no DB_NAME is configured)
+# Database resolution order:
+#   1. DATABASE_URL                 - full PostgreSQL connection string, parsed
+#                                     with dj-database-url.
+#   2. DB_ENGINE=postgres + DB_*    - discrete PostgreSQL settings.
+#   3. DB_ENGINE=sqlite             - explicit local-development override.
+#   4. sqlite file fallback         - keeps an unconfigured checkout usable.
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
-if os.getenv('DB_ENGINE', 'sqlite' if not os.getenv('DB_NAME') else 'postgres') == 'sqlite':
+_database_url = os.getenv('DATABASE_URL', '').strip()
+# Older local examples used a [YOUR-PASSWORD] marker. Retain support for it
+# while keeping the real password out of source code and allowing characters
+# such as @, /, and : in DB_PASSWORD.
+if '[YOUR-PASSWORD]' in _database_url:
+    from urllib.parse import quote
+
+    _database_url = _database_url.replace(
+        '[YOUR-PASSWORD]', quote(os.getenv('DB_PASSWORD', ''), safe='')
+    )
+_db_engine = os.getenv('DB_ENGINE', '').strip().lower()
+
+if _database_url and _db_engine == 'sqlite':
+    raise RuntimeError(
+        'DATABASE_URL is configured for PostgreSQL, but DB_ENGINE=sqlite. '
+        'Remove DB_ENGINE=sqlite or remove DATABASE_URL intentionally.'
+    )
+
+if _database_url:
+    import dj_database_url
+
+    if _database_url.startswith('sqlite'):
+        raise RuntimeError(
+            'DATABASE_URL must be a PostgreSQL URL. Use DB_ENGINE=sqlite '
+            'for an explicit local SQLite configuration.'
+        )
+
+    DATABASES = {
+        'default': dj_database_url.parse(
+            _database_url,
+            conn_max_age=int(os.getenv('DB_CONN_MAX_AGE', '600')),
+            conn_health_checks=True,
+        )
+    }
+    DATABASES['default'].setdefault('ENGINE', 'django.db.backends.postgresql')
+    _opts = DATABASES['default'].setdefault('OPTIONS', {})
+    _opts['sslmode'] = os.getenv('DB_SSLMODE', 'require')
+elif _db_engine == 'sqlite':
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
@@ -112,16 +153,35 @@ if os.getenv('DB_ENGINE', 'sqlite' if not os.getenv('DB_NAME') else 'postgres') 
         }
     }
 else:
+    _db_host = os.getenv('DB_HOST', 'localhost')
+    # Hosted Postgres (Supabase and similar) reject non-TLS connections and
+    # require sslmode; a local server does not. Default to 'require' for any
+    # remote host, '' (server preference) for localhost so local dev still works.
+    _default_sslmode = '' if _db_host in ('', 'localhost', '127.0.0.1', '::1') else 'require'
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
             'NAME': os.getenv('DB_NAME', 'code_yaar'),
             'USER': os.getenv('DB_USER', 'postgres'),
             'PASSWORD': os.getenv('DB_PASSWORD', ''),
-            'HOST': os.getenv('DB_HOST', 'localhost'),
+            'HOST': _db_host,
             'PORT': os.getenv('DB_PORT', '5432'),
+            # Reuse connections across requests; harmless for SQLite path.
+            # Reconnecting to hosted Postgres costs a full TCP+TLS handshake,
+            # so keep pooled connections alive for ten minutes by default.
+            'CONN_MAX_AGE': int(os.getenv('DB_CONN_MAX_AGE', '600')),
+            'OPTIONS': {
+                'sslmode': os.getenv('DB_SSLMODE', _default_sslmode),
+            },
         }
     }
+
+if DATABASES['default']['ENGINE'] != 'django.db.backends.sqlite3':
+    # Pool-safety for hosted Postgres: validate a reused connection before it
+    # is handed to a request, and cap how long one lives so a pooler-side kill
+    # can never strand a stale server-side connection.
+    DATABASES['default']['CONN_HEALTH_CHECKS'] = True
+    DATABASES['default']['CONN_MAX_AGE'] = int(os.getenv('DB_CONN_MAX_AGE', '600'))
 
 
 # Password validation
@@ -204,6 +264,10 @@ EMAIL_BACKEND_PATH = os.getenv(
     'EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend'
 )
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'Code Yaar <no-reply@codeyaar.dev>')
+# Reply-to for admin-composed campaign mail only; empty means mail replies go
+# back to the sender address itself. The composer never lets a caller override
+# the From identity — this is the only knob, and it lives here server-side.
+REPLY_TO_EMAIL = os.getenv('REPLY_TO_EMAIL', '').strip()
 
 MAILERS = {
     'default': {
@@ -354,5 +418,7 @@ REST_FRAMEWORK = {
         'auth_refresh': os.getenv('THROTTLE_AUTH_REFRESH', '120/min'),
         'avatar_upload': os.getenv('THROTTLE_AVATAR_UPLOAD', '10/min'),
         'portfolio_media_upload': os.getenv('THROTTLE_PORTFOLIO_MEDIA_UPLOAD', '20/min'),
+        # Admin composer sends (send / test / resend) per administrator.
+        'email_campaign_send': os.getenv('THROTTLE_EMAIL_CAMPAIGN_SEND', '60/hour'),
     },
 }
