@@ -11,7 +11,11 @@ from django.core.exceptions import ValidationError
 from django.core.validators import EmailValidator, URLValidator
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import F, Sum, Count, Q, Avg, Case, When, Value, IntegerField
+from django.db.models import (
+    F, Sum, Count, Q, Avg, Case, When, Value, CharField, IntegerField, Prefetch,
+    OuterRef, Subquery, Exists,
+)
+from django.db.models.functions import Coalesce
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -202,7 +206,13 @@ class CompetitionViewSet(viewsets.ReadOnlyModelViewSet):
             participant_count=Count(
                 'registrations',
                 filter=Q(registrations__registration_status__in=['registered', 'approved']),
-            )
+            ),
+            current_registration_status=Subquery(
+                CompetitionRegistration.objects.filter(
+                    competition=OuterRef('pk'),
+                    user=self.request.user,
+                ).values('registration_status')[:1]
+            ) if self.request.user.is_authenticated else Value(None, output_field=CharField()),
         )
         status_filter = self.request.query_params.get('status')
         if status_filter:
@@ -690,6 +700,58 @@ class CareerTrackViewSet(viewsets.ReadOnlyModelViewSet):
         # Tracks without a single openable course are not a browseable
         # destination, so they never reach the learner-facing list.
         qs = qs.filter(courses__is_active=True, courses__is_published=True).distinct()
+        if self.action == 'list':
+            visible_lessons = Lesson.objects.filter(
+                chapter__course__track=OuterRef('pk'),
+                chapter__course__is_active=True,
+                chapter__course__is_published=True,
+                chapter__is_active=True,
+                is_active=True,
+            )
+            visible_exercises = Exercise.objects.filter(
+                lesson__chapter__course__track=OuterRef('pk'),
+                lesson__chapter__course__is_active=True,
+                lesson__chapter__course__is_published=True,
+                lesson__chapter__is_active=True,
+                lesson__is_active=True,
+                is_active=True,
+            )
+            qs = qs.annotate(
+                published_course_count=Count(
+                    'courses',
+                    filter=Q(courses__is_active=True, courses__is_published=True),
+                    distinct=True,
+                ),
+                published_lesson_count=Count(
+                    'courses__chapters__lessons',
+                    filter=Q(
+                        courses__is_active=True,
+                        courses__is_published=True,
+                        courses__chapters__is_active=True,
+                        courses__chapters__lessons__is_active=True,
+                    ),
+                    distinct=True,
+                ),
+                published_lesson_xp=Coalesce(
+                    Subquery(
+                        visible_lessons.values('chapter__course__track')
+                        .annotate(total=Sum('xp_reward'))
+                        .values('total')[:1]
+                    ),
+                    Value(0),
+                ),
+                published_exercise_xp=Coalesce(
+                    Subquery(
+                        visible_exercises.values('lesson__chapter__course__track')
+                        .annotate(total=Sum('xp_reward'))
+                        .values('total')[:1]
+                    ),
+                    Value(0),
+                ),
+            )
+            # Aggregate annotations descope the model's Meta ordering, which
+            # would page the list nondeterministically; restate it explicitly.
+            qs = qs.order_by('order', 'title')
         return qs
 
     @action(
@@ -746,7 +808,7 @@ class CareerTrackViewSet(viewsets.ReadOnlyModelViewSet):
 
 class CourseViewSet(viewsets.ReadOnlyModelViewSet):
     """List and retrieve courses."""
-    queryset = Course.objects.filter(is_active=True, is_published=True)
+    queryset = Course.objects.filter(is_active=True, is_published=True).select_related('track')
     permission_classes = [permissions.AllowAny]
     lookup_field = 'slug'
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -841,7 +903,18 @@ class ChapterViewSet(viewsets.ReadOnlyModelViewSet):
             course__slug=course_slug,
             course__is_active=True,
             is_active=True
-        ).order_by('order')
+        ).select_related('course').order_by('order').prefetch_related(
+            Prefetch(
+                'lessons',
+                # The sidebar LessonListSerializer never emits content_body,
+                # yet the prefetch used to pull every lesson's full markdown
+                # (~48 KB for a 26-lesson course) across the high-latency
+                # hosted link on each course-map load. Deferring the column
+                # keeps the same single-query prefetch without that payload.
+                queryset=Lesson.objects.filter(is_active=True)
+                .defer('content_body').order_by('chapter_id', 'order'),
+            ),
+        )
 
 
 class LessonViewSet(viewsets.ReadOnlyModelViewSet):
@@ -867,7 +940,14 @@ class LessonViewSet(viewsets.ReadOnlyModelViewSet):
         qs = Lesson.objects.filter(
             chapter__course__is_active=True,
             is_active=True
-        ).order_by('chapter__order', 'order')
+        ).select_related('chapter', 'chapter__course').order_by('chapter__order', 'order')
+
+        # The list action renders LessonListSerializer, which omits
+        # content_body; deferring the column avoids shipping lesson markdown
+        # to the client for a list that never displays it. Retrieve keeps the
+        # full row because LessonDetailSerializer renders content_body.
+        if self.action == 'list':
+            qs = qs.defer('content_body')
 
         course_slug = self.kwargs.get('course_slug')
         chapter_slug = self.kwargs.get('chapter_slug')
@@ -1747,6 +1827,22 @@ class PracticalViewSet(viewsets.ReadOnlyModelViewSet):
             is_active=True,
             is_published=True,
         ).select_related('practical_class', 'subject')
+        if self.request.user.is_authenticated:
+            qs = qs.annotate(
+                current_user_completed=Exists(
+                    PracticalProgress.objects.filter(
+                        practical=OuterRef('pk'),
+                        user=self.request.user,
+                        completed_at__isnull=False,
+                    )
+                ),
+                current_user_bookmarked=Exists(
+                    PracticalBookmark.objects.filter(
+                        practical=OuterRef('pk'),
+                        user=self.request.user,
+                    )
+                ),
+            )
         subject_slug = self.request.query_params.get('subject')
         class_slug = self.request.query_params.get('class')
         if subject_slug:
@@ -1947,6 +2043,14 @@ class UserAchievementViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         return UserAchievement.objects.filter(user=self.request.user).select_related('achievement')
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['_earned_achievement_map'] = {
+            row.achievement_id: row
+            for row in self.get_queryset()
+        }
+        return context
+
 
 def resolve_badge(identifier: str) -> UserAchievement | None:
     if not identifier:
@@ -2113,17 +2217,29 @@ def leaderboard_view(request):
 
     profiles = UserProfile.objects.select_related('user').order_by('-xp_points')
     total = profiles.count()
-    page = profiles[offset:offset + limit]
+    page = list(profiles[offset:offset + limit])
+
+    # One grouped query per stat instead of one per leaderboard row: the
+    # hosted database makes every extra round trip visible to the learner.
+    user_ids = [profile.user_id for profile in page]
+    courses_completed_map = {
+        row['user_id']: row['n']
+        for row in Enrollment.objects.filter(user_id__in=user_ids, status='completed')
+        .values('user_id').annotate(n=Count('id'))
+    }
+    challenges_solved_map = {
+        row['user_id']: row['n']
+        for row in ExerciseAttempt.objects.filter(user_id__in=user_ids, status='correct')
+        .values('user_id').annotate(n=Count('exercise', distinct=True))
+    }
+    followers_count_map = {
+        row['following_id']: row['n']
+        for row in Follow.objects.filter(following_id__in=user_ids)
+        .values('following_id').annotate(n=Count('follower'))
+    }
 
     entries = []
     for rank, profile in enumerate(page, start=offset + 1):
-        courses_completed = Enrollment.objects.filter(
-            user=profile.user, status='completed'
-        ).count()
-        challenges_solved = ExerciseAttempt.objects.filter(
-            user=profile.user, status='correct'
-        ).values('exercise').distinct().count()
-
         entries.append({
             'rank': rank,
             'user_id': profile.user.id,
@@ -2131,11 +2247,11 @@ def leaderboard_view(request):
             'xp_points': profile.xp_points,
             'level': profile.level,
             'streak_days': profile.streak_days,
-            'courses_completed': courses_completed,
-            'challenges_solved': challenges_solved,
+            'courses_completed': courses_completed_map.get(profile.user_id, 0),
+            'challenges_solved': challenges_solved_map.get(profile.user_id, 0),
             'full_name': profile.full_name,
             'avatar': profile.avatar_url(),
-            'followers_count': profile.user.follower_relationships.count(),
+            'followers_count': followers_count_map.get(profile.user_id, 0),
         })
 
     return Response({
@@ -2199,6 +2315,8 @@ def progress_dashboard_view(request):
         subject__is_active=True, is_active=True, is_published=True,
     )
     practical_total = practical_qs.count()
+    # Restored: an earlier query-merge pass dropped this definition while its
+    # two consumers below remained, turning the whole dashboard into a 500.
     practical_completed = PracticalProgress.objects.filter(
         user=user, completed_at__isnull=False, practical__in=practical_qs,
     ).count()
@@ -2250,18 +2368,6 @@ def progress_dashboard_view(request):
             'activity_date': activity.activity_date.isoformat(),
         })
 
-    daily_counts = {
-        row['activity_date']: row['count']
-        for row in all_activities.filter(
-            activity_date__gte=today - timedelta(days=6),
-            activity_date__lte=today,
-        ).values('activity_date').annotate(count=Count('id'))
-    }
-    weekly_activity = [{
-        'date': (today - timedelta(days=offset)).isoformat(),
-        'count': daily_counts.get(today - timedelta(days=offset), 0),
-    } for offset in range(6, -1, -1)]
-
     contribution_start = today - timedelta(days=364)
     contribution_rows = all_activities.filter(
         activity_date__gte=contribution_start,
@@ -2283,6 +2389,15 @@ def progress_dashboard_view(request):
         elif row['activity_type'] == 'quiz_attempted':
             day['quizzes_completed'] = count
         day['total_activities'] += count
+
+    # weekly_activity reuses the year-long grouping above: within the
+    # 7-day window the filters are identical, so the separate daily
+    # COUNT query was one round trip too many on the hosted database.
+    weekly_activity = [{
+        'date': (today - timedelta(days=offset)).isoformat(),
+        'count': (contribution_counts.get(today - timedelta(days=offset)) or {})
+        .get('total_activities', 0),
+    } for offset in range(6, -1, -1)]
 
     contribution_data = []
     for offset in range(364, -1, -1):
@@ -2425,24 +2540,32 @@ def profile_stats_view(request):
     profile, _ = UserProfile.objects.get_or_create(user=user)
 
     # Enrollment stats
-    total_enrollments = Enrollment.objects.filter(user=user).count()
-    active_enrollments = Enrollment.objects.filter(user=user, status='active').count()
-    completed_courses = Enrollment.objects.filter(user=user, status='completed').count()
+    enrollment_stats = Enrollment.objects.filter(user=user).aggregate(
+        total=Count('id'),
+        active=Count('id', filter=Q(status='active')),
+        completed=Count('id', filter=Q(status='completed')),
+    )
+    total_enrollments = enrollment_stats['total']
+    active_enrollments = enrollment_stats['active']
+    completed_courses = enrollment_stats['completed']
 
     # Exercise stats
-    total_attempts = ExerciseAttempt.objects.filter(user=user).count()
-    correct_attempts = ExerciseAttempt.objects.filter(user=user, status='correct').count()
-    unique_exercises_solved = ExerciseAttempt.objects.filter(
-        user=user, status='correct'
-    ).values('exercise').distinct().count()
+    exercise_stats = ExerciseAttempt.objects.filter(user=user).aggregate(
+        total=Count('id'),
+        correct=Count('id', filter=Q(status='correct')),
+        unique_solved=Count('exercise', filter=Q(status='correct'), distinct=True),
+    )
+    total_attempts = exercise_stats['total']
+    correct_attempts = exercise_stats['correct']
+    unique_exercises_solved = exercise_stats['unique_solved']
 
     # Lesson stats
-    lessons_completed = LessonProgress.objects.filter(
-        user=user, status__in=['completed', 'mastered']
-    ).count()
-    lessons_in_progress = LessonProgress.objects.filter(
-        user=user, status='in_progress'
-    ).count()
+    lesson_stats = LessonProgress.objects.filter(user=user).aggregate(
+        completed=Count('id', filter=Q(status__in=['completed', 'mastered'])),
+        in_progress=Count('id', filter=Q(status='in_progress')),
+    )
+    lessons_completed = lesson_stats['completed']
+    lessons_in_progress = lesson_stats['in_progress']
 
     # XP breakdown
     xp_by_action = XPTransaction.objects.filter(user=user).values('action').annotate(
@@ -2464,25 +2587,102 @@ def profile_stats_view(request):
     ]
 
     # Achievements
-    achievements_earned = UserAchievement.objects.filter(
-        user=user
-    ).select_related('achievement').count()
-    all_achievements = Achievement.objects.filter(is_active=True)
-    total_achievements = all_achievements.count()
+    earned_rows = list(UserAchievement.objects.filter(
+        user=user,
+    ).select_related('achievement'))
+    achievements_earned = len(earned_rows)
+    # Fetched once and reused for both the total and the per-badge loop;
+    # a .count() followed by iteration paid two round trips for one list.
+    all_achievements = list(Achievement.objects.filter(is_active=True))
+    total_achievements = len(all_achievements)
     from .badge_art import level_label, palette_for
-    from .services.achievements import measure_progress
     earned_records = {
         item.achievement_id: item
-        for item in UserAchievement.objects.filter(
-            user=user, achievement__is_active=True,
-        )
+        for item in earned_rows
+        if item.achievement.is_active
     }
+    # One query answers both completed course slugs and how many of those
+    # courses belong to a track that carries projects (project badges).
+    # EXISTS, not a reverse-FK ``__isnull`` projection: a to-many join cannot
+    # be selected as a column, and duplicating rows per project would inflate
+    # the distinct course set.
+    completed_course_rows = list(
+        Enrollment.objects.filter(user=user, status='completed')
+        .annotate(
+            has_projects=Exists(Project.objects.filter(track=OuterRef('course__track')))
+        )
+        .values_list('course_id', 'course__slug', 'has_projects')
+        .distinct()
+    )
+    completed_course_slugs = {slug for _cid, slug, _hp in completed_course_rows}
+    project_course_count = len({
+        cid for cid, _slug, has_projects in completed_course_rows
+        if has_projects
+    })
+    # One query answers both "which challenges were solved" and their
+    # topics (topic badges); previously these were separate round trips.
+    solved_challenge_rows = list(
+        ChallengeSubmission.objects.filter(user=user, status='correct')
+        .values_list('challenge_id', 'challenge__topic')
+        .distinct()
+    )
+    solved_challenge_ids = {cid for cid, _topic in solved_challenge_rows}
+    solved_challenge_topics = [topic for _cid, topic in solved_challenge_rows]
+    chapter_completed = Chapter.objects.filter(is_active=True).annotate(
+        lesson_count=Count(
+            'lessons',
+            filter=Q(lessons__is_active=True),
+            distinct=True,
+        ),
+        completed_count=Count(
+            'lessons__progress_entries',
+            filter=Q(
+                lessons__is_active=True,
+                lessons__progress_entries__user=user,
+                lessons__progress_entries__status__in=['completed', 'mastered'],
+            ),
+            distinct=True,
+        ),
+    ).filter(lesson_count__gt=0, lesson_count=F('completed_count')).exists()
+    any_activity = bool(lessons_completed or unique_exercises_solved or solved_challenge_ids)
     achievements_data = []
     next_badge = None
     for achievement in all_achievements:
         record = earned_records.get(achievement.id)
         _, _, category_label = palette_for(achievement)
-        current, target = measure_progress(user, achievement)
+        condition = achievement.condition_type
+        value = achievement.condition_value or ''
+        if condition == 'lesson_complete':
+            current, target = lessons_completed, max(1, int(value or 1))
+        elif condition == 'chapter_complete':
+            current, target = int(chapter_completed), 1
+        elif condition in ('course_complete', 'project_course_complete'):
+            if condition == 'course_complete' and value and not value.isdigit():
+                current, target = int(value in completed_course_slugs), 1
+            elif condition == 'project_course_complete':
+                current, target = project_course_count, max(1, int(value or 1))
+            else:
+                current, target = len(completed_course_slugs), max(1, int(value or 1))
+        elif condition == 'exercise_correct_count':
+            current, target = unique_exercises_solved, max(1, int(value or 1))
+        elif condition == 'challenge_count':
+            current, target = len(solved_challenge_ids), max(1, int(value or 1))
+        elif condition == 'challenge_topic_count':
+            topic, _, count = value.partition(':')
+            current = sum(
+                bool(topic) and topic.casefold() in (challenge_topic or '').casefold()
+                for challenge_topic in solved_challenge_topics
+            )
+            target = max(1, int(count or 1))
+        elif condition in ('streak_n', 'streak_7'):
+            current = profile.streak_days
+            target = 7 if condition == 'streak_7' else max(1, int(value or 1))
+        elif condition == 'first_activity':
+            current, target = int(any_activity), 1
+        elif condition == 'account':
+            current, target = 1, 1
+        else:
+            current, target = 0, 1
         achievements_data.append({
             'id': achievement.id,
             'slug': achievement.slug,
@@ -2540,7 +2740,9 @@ def profile_stats_view(request):
     ]
 
     # Certifications
-    certs = UserCertification.objects.filter(user=user).select_related('certification')
+    certs = UserCertification.objects.filter(user=user).select_related(
+        'certification', 'certification__track'
+    )
     certs_data = [
         {
             'id': uc.id,
@@ -2554,13 +2756,38 @@ def profile_stats_view(request):
 
     # Active enrollments detail
     active_enrollments_data = []
-    for enrollment in Enrollment.objects.filter(user=user, status='active').select_related('course', 'course__track')[:5]:
+    for enrollment in Enrollment.objects.filter(
+        user=user, status='active',
+    ).select_related('course', 'course__track').annotate(
+        total_lessons=Count(
+            'course__chapters__lessons',
+            filter=Q(
+                course__chapters__is_active=True,
+                course__chapters__lessons__is_active=True,
+            ),
+            distinct=True,
+        ),
+        completed_lessons=Count(
+            'course__chapters__lessons__progress_entries',
+            filter=Q(
+                course__chapters__is_active=True,
+                course__chapters__lessons__is_active=True,
+                course__chapters__lessons__progress_entries__user=user,
+                course__chapters__lessons__progress_entries__status__in=[
+                    'completed', 'mastered',
+                ],
+            ),
+            distinct=True,
+        ),
+    )[:5]:
+        total = enrollment.total_lessons or 0
+        completed = enrollment.completed_lessons or 0
         active_enrollments_data.append({
             'id': enrollment.id,
             'course_slug': enrollment.course.slug,
             'course_title': enrollment.course.title,
             'track_title': enrollment.course.track.title,
-            'progress_percentage': enrollment.progress_percentage,
+            'progress_percentage': round((completed / total) * 100) if total else 0,
             'enrolled_at': enrollment.enrolled_at.isoformat(),
         })
 

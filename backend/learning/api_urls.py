@@ -2,6 +2,8 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from . import api_views
 from . import admin_views
+from . import analytics_views
+from . import studio_views
 
 router = DefaultRouter()
 router.register(r'tracks', api_views.CareerTrackViewSet, basename='track')
@@ -40,8 +42,13 @@ router.register(r'admin/competitions', admin_views.CompetitionAdminViewSet, base
 router.register(r'admin/announcements', admin_views.AnnouncementAdminViewSet, basename='admin-announcement')
 router.register(r'admin/platform-updates', admin_views.PlatformUpdateAdminViewSet, basename='admin-platform-update')
 router.register(r'admin/registration-form-fields', admin_views.RegistrationFormFieldAdminViewSet, basename='admin-registration-form-field')
+# Course Creation Studio: one bundle per course plus nested curriculum authoring.
+router.register(r'admin/course-studio', studio_views.CourseStudioViewSet, basename='admin-course-studio')
+router.register(r'admin/course-categories', studio_views.CourseCategoryViewSet,
+                basename='admin-course-category')
 router.register(r'admin/hackathon-registrations', admin_views.CompetitionRegistrationAdminViewSet, basename='admin-hackathon-registration')
 router.register(r'admin/email-campaigns', admin_views.EmailCampaignAdminViewSet, basename='admin-email-campaign')
+router.register(r'admin/email-templates', admin_views.EmailTemplateAdminViewSet, basename='admin-email-template')
 router.register(r'admin/achievements', admin_views.AchievementAdminViewSet, basename='admin-achievement')
 router.register(r'admin/certificates', admin_views.CertificateAdminViewSet, basename='admin-certificate')
 router.register(r'admin/audit-logs', admin_views.AuditLogAdminViewSet, basename='admin-audit-log')
@@ -183,6 +190,12 @@ urlpatterns = [
     path('admin/dashboard/stats/', admin_views.admin_dashboard_stats, name='admin-dashboard-stats'),
     path('admin/dashboard/recent-activity/', admin_views.admin_recent_activity, name='admin-dashboard-recent-activity'),
     path('admin/dashboard/top-courses/', admin_views.admin_top_courses, name='admin-dashboard-top-courses'),
+
+    # Analytics (spec section 2): charted overview + CSV extracts for offline reporting.
+    path('admin/analytics/overview/', analytics_views.admin_analytics_overview,
+         name='admin-analytics-overview'),
+    path('admin/analytics/export/', analytics_views.admin_analytics_export,
+         name='admin-analytics-export'),
     path('admin/settings/', admin_views.admin_settings, name='admin-settings'),
     path('admin/email/settings/', admin_views.email_settings, name='admin-email-settings'),
     # One-click opt-out for non-essential campaign mail (signed token, public)

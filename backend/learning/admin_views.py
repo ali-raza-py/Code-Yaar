@@ -5,14 +5,18 @@ All endpoints are guarded by IsAdministrator (or higher-privilege checks).
 They reuse the existing models, serializers, and business logic.
 """
 from django.conf import settings
+from django.contrib.auth.models import User
 from django.db import transaction
+from django.core.cache import cache
 from django.shortcuts import get_object_or_404
 from django.db.models import Count, Sum, Q, Avg, F
 from django.utils import timezone
+from django.utils.text import slugify
 from rest_framework import viewsets, permissions, status, filters, serializers
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.throttling import ScopedRateThrottle
 
 from .models import (
     UserProfile, CareerTrack, Course, Chapter, Lesson, Exercise,
@@ -20,12 +24,19 @@ from .models import (
     Certification, UserCertification, Competition, UserNotification,
     AuthenticationAuditLog, Announcement, LessonProgress, PlatformSetting, MaintenanceSettings, Practical, PracticalClass, PracticalSubject,
     CompetitionRegistration, RegistrationFormField, PlatformUpdate,
-    EmailCampaign, EmailCampaignRecipient,
+    EmailCampaign, EmailCampaignRecipient, EmailTemplate,
+    record_admin_action,
     seed_default_registration_fields,
 )
-from .permissions import IsAdministrator, IsSuperAdmin
-from .services.auth import audit
-from .services import email_campaigns
+from .permissions import (
+    HasAdminCapability, IsAdministrator, IsSuperAdmin, ScopedCourseAccess,
+)
+from .services.auth import audit, user_role, ADMIN_GROUP, INSTRUCTOR_GROUP
+from .services import email_campaigns, email_composer, publishing
+from .services.admin_access import (
+    ROLE_GROUPS, PLATFORM_CONFIG, ROLES_MANAGE, admin_roles as resolve_admin_roles,
+    capabilities as resolve_capabilities, can_manage_roles, has_capability,
+)
 from .services.notifications import notify
 from .serializers import (
     CareerTrackSerializer, CourseListSerializer, CourseDetailSerializer,
@@ -43,23 +54,35 @@ from .serializers import (
 @permission_classes([IsAdministrator])
 def admin_dashboard_stats(request):
     """Return aggregate platform statistics."""
+    cache_key = 'admin-dashboard-stats-v1'
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return Response(cached)
     from django.contrib.auth import get_user_model
     User = get_user_model()
 
-    total_students = UserProfile.objects.filter(role='student').count()
-    active_students = UserProfile.objects.filter(
-        role='student', last_active_at__gte=timezone.now() - timezone.timedelta(days=7)
-    ).count()
-
-    total_courses = Course.objects.filter(is_active=True).count()
-    published_courses = Course.objects.filter(is_active=True, is_published=True).count()
-
-    total_tracks = CareerTrack.objects.count()
-    published_tracks = CareerTrack.objects.filter(is_published=True).count()
-
-    total_enrollments = Enrollment.objects.count()
-    active_enrollments = Enrollment.objects.filter(status='active').count()
-    completed_courses = Enrollment.objects.filter(status='completed').count()
+    student_counts = UserProfile.objects.filter(role='student').aggregate(
+        total=Count('id'),
+        active=Count(
+            'id',
+            filter=Q(last_active_at__gte=timezone.now() - timezone.timedelta(days=7)),
+        ),
+    )
+    course_counts = Course.objects.aggregate(
+        total=Count('id', filter=Q(is_active=True)),
+        published=Count('id', filter=Q(is_active=True, is_published=True)),
+        scheduled=Count('id', filter=Q(publish_at__isnull=False, is_published=False)),
+        archived=Count('id', filter=Q(archived_at__isnull=False)),
+    )
+    track_counts = CareerTrack.objects.aggregate(
+        total=Count('id'),
+        published=Count('id', filter=Q(is_published=True)),
+    )
+    enrollment_counts = Enrollment.objects.aggregate(
+        total=Count('id'),
+        active=Count('id', filter=Q(status='active')),
+        completed=Count('id', filter=Q(status='completed')),
+    )
 
     total_assessments = Exercise.objects.filter(
         is_final_assessment=True, is_active=True
@@ -67,34 +90,54 @@ def admin_dashboard_stats(request):
 
     total_challenges = Challenge.objects.filter(is_active=True).count()
 
+    # Cards the specification lists that this endpoint did not answer: how much content
+    # exists at all, how many registrations are waiting on a human, and how many courses
+    # are queued to publish themselves. Each is one COUNT, no joins beyond the table.
+    total_lessons = Lesson.objects.filter(is_active=True).count()
+    pending_registrations = CompetitionRegistration.objects.filter(
+        registration_status='pending',
+    ).count()
     certificates_issued = UserCertification.objects.count()
 
     active_competitions = Competition.objects.filter(
         is_published=True
     ).count()
 
-    return Response({
-        'totalStudents': total_students,
-        'activeStudents': active_students,
-        'totalCourses': total_courses,
-        'publishedCourses': published_courses,
-        'totalTracks': total_tracks,
-        'publishedTracks': published_tracks,
-        'totalEnrollments': total_enrollments,
-        'activeEnrollments': active_enrollments,
-        'completedCourses': completed_courses,
+    payload = {
+        'totalStudents': student_counts['total'],
+        'activeStudents': student_counts['active'],
+        'totalCourses': course_counts['total'],
+        'publishedCourses': course_counts['published'],
+        'totalTracks': track_counts['total'],
+        'publishedTracks': track_counts['published'],
+        'totalEnrollments': enrollment_counts['total'],
+        'activeEnrollments': enrollment_counts['active'],
+        'completedCourses': enrollment_counts['completed'],
         'totalAssessments': total_assessments,
         'totalChallenges': total_challenges,
+        'totalLessons': total_lessons,
+        'pendingRegistrations': pending_registrations,
+        'scheduledCourses': course_counts['scheduled'],
+        'archivedCourses': course_counts['archived'],
         'certificatesIssued': certificates_issued,
         'activeCompetitions': active_competitions,
-    })
+    }
+    cache.set(cache_key, payload, 15)
+    return Response(payload)
 
 
 @api_view(['GET'])
 @permission_classes([IsAdministrator])
 def admin_recent_activity(request):
     """Return recent administrative activity."""
-    limit = int(request.query_params.get('limit', 20))
+    try:
+        limit = min(max(int(request.query_params.get('limit', 20)), 1), 100)
+    except (TypeError, ValueError):
+        return Response({'detail': 'limit must be a positive integer.'}, status=400)
+    cache_key = f'admin-recent-activity-v1-{limit}'
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return Response(cached)
 
     logs = AuthenticationAuditLog.objects.select_related('user').order_by('-created_at')[:limit]
 
@@ -109,6 +152,7 @@ def admin_recent_activity(request):
             'metadata': log.metadata or {},
         })
 
+    cache.set(cache_key, activities, 15)
     return Response(activities)
 
 
@@ -116,19 +160,38 @@ def admin_recent_activity(request):
 @permission_classes([IsAdministrator])
 def admin_top_courses(request):
     """Return top courses by enrollment count."""
-    limit = int(request.query_params.get('limit', 10))
+    try:
+        limit = min(max(int(request.query_params.get('limit', 10)), 1), 100)
+    except (TypeError, ValueError):
+        return Response({'detail': 'limit must be a positive integer.'}, status=400)
+    cache_key = f'admin-top-courses-v2-{limit}'
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return Response(cached)
 
-    courses = Course.objects.filter(is_active=True).annotate(
+    courses = Course.objects.filter(is_active=True).select_related('track').annotate(
         enrollment_count=Count('enrollments'),
         completed_count=Count('enrollments', filter=Q(enrollments__status='completed')),
+        total_lessons=Count(
+            'chapters__lessons',
+            filter=Q(chapters__is_active=True, chapters__lessons__is_active=True),
+            distinct=True,
+        ),
+        completed_lessons=Count(
+            'chapters__lessons__progress_entries',
+            filter=Q(
+                chapters__is_active=True,
+                chapters__lessons__is_active=True,
+                chapters__lessons__progress_entries__status='completed',
+            ),
+            distinct=True,
+        ),
     ).order_by('-enrollment_count')[:limit]
 
     result = []
     for course in courses:
-        total_lessons = Lesson.objects.filter(chapter__course=course).count()
-        completed_lessons = LessonProgress.objects.filter(
-            lesson__chapter__course=course, status='completed'
-        ).count() if total_lessons > 0 else 0
+        total_lessons = course.total_lessons
+        completed_lessons = course.completed_lessons if total_lessons > 0 else 0
         completion_rate = round((completed_lessons / total_lessons) * 100) if total_lessons > 0 else 0
 
         result.append({
@@ -139,6 +202,7 @@ def admin_top_courses(request):
             'completionRate': completion_rate,
         })
 
+    cache.set(cache_key, result, 15)
     return Response(result)
 
 
@@ -156,17 +220,39 @@ class CareerTrackAdminSerializer(serializers.ModelSerializer):
             'estimated_hours', 'order', 'is_published', 'is_active',
             'created_at', 'updated_at', 'courses_count', 'published_courses_count',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'slug', 'created_at', 'updated_at']
+
+    def create(self, validated_data):
+        title = validated_data.get('title', '')
+        base_slug = slugify(title) or 'track'
+        slug = base_slug
+        suffix = 2
+        while CareerTrack.objects.filter(slug=slug).exists():
+            slug = f'{base_slug}-{suffix}'
+            suffix += 1
+        validated_data['slug'] = slug
+        return super().create(validated_data)
 
     def get_courses_count(self, obj):
-        return obj.courses.count()
+        return obj.admin_courses_count if hasattr(obj, 'admin_courses_count') else obj.courses.count()
 
     def get_published_courses_count(self, obj):
+        if hasattr(obj, 'admin_published_courses_count'):
+            return obj.admin_published_courses_count
         return obj.courses.filter(is_active=True, is_published=True).count()
 
 
 class CareerTrackAdminViewSet(viewsets.ModelViewSet):
-    queryset = CareerTrack.objects.all()
+    # Explicit ordering: the aggregate annotations below descope the
+    # model's Meta ordering, which would otherwise page nondeterministically.
+    queryset = CareerTrack.objects.order_by('order', 'title').annotate(
+        admin_courses_count=Count('courses', distinct=True),
+        admin_published_courses_count=Count(
+            'courses',
+            filter=Q(courses__is_active=True, courses__is_published=True),
+            distinct=True,
+        ),
+    )
     serializer_class = CareerTrackAdminSerializer
     permission_classes = [IsAdministrator]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -222,29 +308,57 @@ class CourseAdminSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def get_chapter_count(self, obj):
+        if hasattr(obj, 'admin_chapter_count'):
+            return obj.admin_chapter_count
         return obj.chapters.count()
 
     def get_lesson_count(self, obj):
+        if hasattr(obj, 'admin_lesson_count'):
+            return obj.admin_lesson_count
         return Lesson.objects.filter(chapter__course=obj).count()
 
     def get_exercise_count(self, obj):
+        if hasattr(obj, 'admin_exercise_count'):
+            return obj.admin_exercise_count
         return Exercise.objects.filter(lesson__chapter__course=obj).count()
 
     def get_enrollment_count(self, obj):
+        if hasattr(obj, 'admin_enrollment_count'):
+            return obj.admin_enrollment_count
         return obj.enrollments.count()
 
     def get_completion_rate(self, obj):
-        total = obj.enrollments.count()
+        if hasattr(obj, 'admin_enrollment_count'):
+            total = obj.admin_enrollment_count
+        else:
+            total = obj.enrollments.count()
         if total == 0:
             return 0
-        completed = obj.enrollments.filter(status='completed').count()
+        if hasattr(obj, 'admin_completed_enrollment_count'):
+            completed = obj.admin_completed_enrollment_count
+        else:
+            completed = obj.enrollments.filter(status='completed').count()
         return round((completed / total) * 100)
 
 
 class CourseAdminViewSet(viewsets.ModelViewSet):
-    queryset = Course.objects.select_related('track').all()
+    # Ordered before the multi-join annotations, which descope Meta ordering.
+    queryset = Course.objects.select_related('track').order_by(
+        'track', 'order', 'title',
+    ).annotate(
+        admin_chapter_count=Count('chapters', distinct=True),
+        admin_lesson_count=Count('chapters__lessons', distinct=True),
+        admin_exercise_count=Count('chapters__lessons__exercises', distinct=True),
+        admin_enrollment_count=Count('enrollments', distinct=True),
+        admin_completed_enrollment_count=Count(
+            'enrollments', filter=Q(enrollments__status='completed'), distinct=True,
+        ),
+    ).all()
     serializer_class = CourseAdminSerializer
-    permission_classes = [IsAdministrator]
+    # ``HasAdminCapability`` with no declared capability resolves to the historical
+    # administrator check, so this is the same gate as before - it just no longer has
+    # to be re-tightened when a scoped admin role is added to the panel.
+    permission_classes = [HasAdminCapability, ScopedCourseAccess]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['title', 'description', 'subtitle']
     ordering_fields = ['title', 'order', 'created_at']
@@ -258,82 +372,70 @@ class CourseAdminViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def publish(self, request, pk=None):
+        """Publish a course, but not through its content problems.
+
+        This used to set ``is_published=True`` with no questions asked, so an empty
+        course went live into the student catalogue. ``?force`` still exists for a
+        genuine override, and every override is written to the audit log with the
+        reason and the exact blockers that were waved away.
+        """
         course = self.get_object()
+        report = publishing.run_publish_check(course)
+        force = str(request.data.get('force', '')).lower() in ('1', 'true', 'yes')
+        if not report['ok'] and not force:
+            return Response({
+                'detail': 'This course is not ready to publish.',
+                'code': 'publish_blocked',
+                'blocking': report['blocking'],
+                'warnings': report['warnings'],
+            }, status.HTTP_400_BAD_REQUEST)
+
         course.is_published = True
         course.is_active = True
-        course.save(update_fields=['is_published', 'is_active'])
+        course.published_at = timezone.now()
+        course.publish_at = None
+        course.archived_at = None
+        course.save(update_fields=[
+            'is_published', 'is_active', 'published_at', 'publish_at', 'archived_at',
+            'updated_at',
+        ])
+        record_admin_action(
+            request.user, 'course.publish', obj=course, label=course.title,
+            detail={
+                'forced': not report['ok'],
+                'override_reason': request.data.get('reason', ''),
+                'blocked_codes': [i['code'] for i in report['blocking']],
+                'warning_codes': [i['code'] for i in report['warnings']],
+            },
+            request=request,
+        )
         return Response(self.get_serializer(course).data)
 
     @action(detail=True, methods=['post'])
     def unpublish(self, request, pk=None):
         course = self.get_object()
         course.is_published = False
-        course.save(update_fields=['is_published'])
+        course.publish_at = None
+        course.save(update_fields=['is_published', 'publish_at', 'updated_at'])
+        record_admin_action(request.user, 'course.unpublish', obj=course,
+                            label=course.title, request=request)
         return Response(self.get_serializer(course).data)
 
     @action(detail=True, methods=['post'])
     def duplicate(self, request, pk=None):
+        """Deep-copy a course through the shared studio implementation.
+
+        The previous inline copy walked chapters and lessons but never touched
+        exercises, so every duplicated course lost all of its practice work, and its
+        ``f"{slug}-copy"`` collided on the second duplicate.
+        """
+        from .studio_views import duplicate_course
+
         course = self.get_object()
-        new_course = Course.objects.create(
-            slug=f"{course.slug}-copy",
-            title=f"{course.title} (Copy)",
-            subtitle=course.subtitle,
-            description=course.description,
-            thumbnail=course.thumbnail,
-            track=course.track,
-            academic_class=course.academic_class,
-            difficulty=course.difficulty,
-            language=course.language,
-            instructor=course.instructor,
-            prerequisites=course.prerequisites,
-            learning_objectives=course.learning_objectives,
-            is_free=course.is_free,
-            order=course.order + 1,
-            is_published=False,
-            is_active=True,
-        )
-        # Duplicate chapters and lessons
-        for chapter in course.chapters.all():
-            new_chapter = Chapter.objects.create(
-                course=new_course,
-                title=chapter.title,
-                slug=chapter.slug,
-                description=chapter.description,
-                order=chapter.order,
-                xp_reward=chapter.xp_reward,
-                is_active=chapter.is_active,
-                source_type=chapter.source_type,
-                verification_status=chapter.verification_status,
-                textbook_board=chapter.textbook_board,
-                textbook_class=chapter.textbook_class,
-                textbook_unit=chapter.textbook_unit,
-                textbook_topic=chapter.textbook_topic,
-                textbook_pages=chapter.textbook_pages,
-            )
-            for lesson in chapter.lessons.all():
-                new_lesson = Lesson.objects.create(
-                    chapter=new_chapter,
-                    title=lesson.title,
-                    slug=lesson.slug,
-                    content_type=lesson.content_type,
-                    learning_objective=lesson.learning_objective,
-                    content_body=lesson.content_body,
-                    video_url=lesson.video_url,
-                    video_duration_seconds=lesson.video_duration_seconds,
-                    order=lesson.order,
-                    duration_minutes=lesson.duration_minutes,
-                    xp_reward=lesson.xp_reward,
-                    is_free_preview=lesson.is_free_preview,
-                    is_active=lesson.is_active,
-                    source_type=lesson.source_type,
-                    verification_status=lesson.verification_status,
-                    textbook_board=lesson.textbook_board,
-                    textbook_class=lesson.textbook_class,
-                    textbook_unit=lesson.textbook_unit,
-                    textbook_topic=lesson.textbook_topic,
-                    textbook_pages=lesson.textbook_pages,
-                )
-        return Response(self.get_serializer(new_course).data, status=status.HTTP_201_CREATED)
+        copy = duplicate_course(course, actor=request.user)
+        record_admin_action(request.user, 'course.duplicate', obj=copy, label=copy.title,
+                            detail={'source_course': course.pk}, request=request)
+        return Response(self.get_serializer(copy).data, status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'])
     def chapters(self, request, pk=None):
@@ -346,6 +448,25 @@ class CourseAdminViewSet(viewsets.ModelViewSet):
     def students(self, request, pk=None):
         course = self.get_object()
         enrollments = Enrollment.objects.filter(course=course).select_related('user', 'user__profile')
+        # One grouped query per stat for the whole page instead of three
+        # per-student COUNT round trips — the hosted database makes each
+        # extra trip visible latency on a course with hundreds of students.
+        user_ids = [e.user_id for e in enrollments]
+        enrollment_count_map = {
+            row['user_id']: row['n']
+            for row in Enrollment.objects.filter(user_id__in=user_ids)
+            .values('user_id').annotate(n=Count('id'))
+        }
+        completed_courses_map = {
+            row['user_id']: row['n']
+            for row in Enrollment.objects.filter(user_id__in=user_ids, status='completed')
+            .values('user_id').annotate(n=Count('id'))
+        }
+        completed_lessons_map = {
+            row['user_id']: row['n']
+            for row in LessonProgress.objects.filter(user_id__in=user_ids, status='completed')
+            .values('user_id').annotate(n=Count('id'))
+        }
         students = []
         for e in enrollments:
             profile = getattr(e.user, 'profile', None)
@@ -366,9 +487,9 @@ class CourseAdminViewSet(viewsets.ModelViewSet):
                 'is_profile_public': profile.is_profile_public if profile else True,
                 'date_joined': e.user.date_joined.isoformat(),
                 'last_active_at': profile.last_active_at.isoformat() if profile and profile.last_active_at else None,
-                'enrollment_count': e.user.enrollments.count(),
-                'completed_courses': e.user.enrollments.filter(status='completed').count(),
-                'completed_lessons': LessonProgress.objects.filter(user=e.user, status='completed').count(),
+                'enrollment_count': enrollment_count_map.get(e.user_id, 0),
+                'completed_courses': completed_courses_map.get(e.user_id, 0),
+                'completed_lessons': completed_lessons_map.get(e.user_id, 0),
             })
         return Response(students)
 
@@ -392,14 +513,25 @@ class ChapterAdminSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def get_lesson_count(self, obj):
+        # The list queryset carries the counts as annotations; per-row
+        # COUNTs turn a 20-row page into 40 extra round trips on the
+        # hosted database. Direct instantiations fall back to the manager.
+        if hasattr(obj, 'admin_lesson_count'):
+            return obj.admin_lesson_count
         return obj.lessons.count()
 
     def get_exercise_count(self, obj):
+        if hasattr(obj, 'admin_exercise_count'):
+            return obj.admin_exercise_count
         return Exercise.objects.filter(lesson__chapter=obj).count()
 
 
 class ChapterAdminViewSet(viewsets.ModelViewSet):
-    queryset = Chapter.objects.select_related('course').all()
+    # Ordered before the annotations, which descope Meta ordering.
+    queryset = Chapter.objects.select_related('course').order_by('course', 'order', 'title').annotate(
+        admin_lesson_count=Count('lessons', distinct=True),
+        admin_exercise_count=Count('lessons__exercises', distinct=True),
+    )
     serializer_class = ChapterAdminSerializer
     permission_classes = [IsAdministrator]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -415,12 +547,57 @@ class ChapterAdminViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='reorder')
     def reorder(self, request):
+        """Reorder chapters inside one course.
+
+        The previous version wrote ``order`` onto whatever ids the caller sent, with no
+        check that those chapters belonged to the course it bothered to read out of the
+        payload and then ignore - so one request could renumber rows in an unrelated
+        course. Ids are now validated against ``course_id`` before anything is written.
+        """
         items = request.data.get('items', [])
         course_id = request.data.get('course_id')
+        if not isinstance(items, list):
+            return Response({'detail': '"items" must be a list.'}, status.HTTP_400_BAD_REQUEST)
+        mapping = {}
+        for entry in items:
+            if not isinstance(entry, dict):
+                return Response({'detail': 'Each item must be an object.'},
+                                status.HTTP_400_BAD_REQUEST)
+            try:
+                mapping[int(entry['id'])] = max(int(entry.get('order')), 0)
+            except (KeyError, TypeError, ValueError):
+                return Response({'detail': 'Each item needs numeric "id" and "order".'},
+                                status.HTTP_400_BAD_REQUEST)
+        if not mapping:
+            return Response({'detail': 'No chapters supplied.'}, status.HTTP_400_BAD_REQUEST)
+
+        queryset = Chapter.objects.filter(pk__in=mapping)
+        if course_id not in (None, ''):
+            queryset = queryset.filter(course_id=course_id)
+        elif not has_capability(request.user, '*'):
+            # Without an explicit course scope, only a platform administrator may
+            # renumber chapters, so a scoped role cannot widen its own reach.
+            return Response({
+                'detail': '"course_id" is required when reordering chapters.',
+                'code': 'course_scope_required',
+            }, status.HTTP_400_BAD_REQUEST)
         with transaction.atomic():
-            for item in items:
-                Chapter.objects.filter(id=item['id']).update(order=item['order'])
-        return Response({'status': 'ok'})
+            rows = list(queryset)
+            if len(rows) != len(mapping):
+                return Response({
+                    'detail': 'Some chapters are outside the supplied course.',
+                    'code': 'foreign_chapter',
+                }, status.HTTP_400_BAD_REQUEST)
+            for chapter in rows:
+                chapter.order = mapping[chapter.pk]
+            Chapter.objects.bulk_update(rows, ['order'])
+        if course_id not in (None, ''):
+            course = Course.objects.filter(pk=course_id).first()
+            if course is not None:
+                record_admin_action(request.user, 'chapter.reorder', obj=course,
+                                    label=course.title, detail={'count': len(rows)},
+                                    request=request)
+        return Response({'status': 'ok', 'reordered': len(rows)})
 
 
 # ─── Lessons (Admin) ───────────────────────────────────────────────────────────
@@ -443,11 +620,21 @@ class LessonAdminSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def get_exercise_count(self, obj):
+        # The list queryset carries the count as an annotation; per-row
+        # COUNTs turn a 20-row page into 20 extra round trips on the
+        # hosted database. Direct instantiations (retrieve, scripts)
+        # fall back to the manager.
+        if hasattr(obj, 'admin_exercise_count'):
+            return obj.admin_exercise_count
         return obj.exercises.count()
 
 
 class LessonAdminViewSet(viewsets.ModelViewSet):
-    queryset = Lesson.objects.select_related('chapter', 'chapter__course').all()
+    queryset = (
+        Lesson.objects.select_related('chapter', 'chapter__course')
+        .annotate(admin_exercise_count=Count('exercises', distinct=True))
+        .all()
+    )
     serializer_class = LessonAdminSerializer
     permission_classes = [IsAdministrator]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -466,11 +653,47 @@ class LessonAdminViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'], url_path='reorder')
     def reorder(self, request):
+        """Reorder lessons, scoped to a course or chapter when supplied.
+
+        Same hardening as chapter reorder: ids are verified against the requested
+        scope before any ``order`` value is written, so a caller cannot renumber rows
+        it has not named.
+        """
         items = request.data.get('items', [])
+        if not isinstance(items, list):
+            return Response({'detail': '"items" must be a list.'}, status.HTTP_400_BAD_REQUEST)
+        mapping = {}
+        for entry in items:
+            if not isinstance(entry, dict):
+                return Response({'detail': 'Each item must be an object.'},
+                                status.HTTP_400_BAD_REQUEST)
+            try:
+                mapping[int(entry['id'])] = max(int(entry.get('order')), 0)
+            except (KeyError, TypeError, ValueError):
+                return Response({'detail': 'Each item needs numeric "id" and "order".'},
+                                status.HTTP_400_BAD_REQUEST)
+        if not mapping:
+            return Response({'detail': 'No lessons supplied.'}, status.HTTP_400_BAD_REQUEST)
+
+        params = request.query_params
+        course_id = request.data.get('course_id') or params.get('course')
+        chapter_id = request.data.get('chapter_id') or params.get('chapter')
+        queryset = Lesson.objects.filter(pk__in=mapping)
+        if chapter_id not in (None, ''):
+            queryset = queryset.filter(chapter_id=chapter_id)
+        if course_id not in (None, ''):
+            queryset = queryset.filter(chapter__course_id=course_id)
         with transaction.atomic():
-            for item in items:
-                Lesson.objects.filter(id=item['id']).update(order=item['order'])
-        return Response({'status': 'ok'})
+            rows = list(queryset)
+            if len(rows) != len(mapping):
+                return Response({
+                    'detail': 'Some lessons are outside the supplied scope.',
+                    'code': 'foreign_lesson',
+                }, status.HTTP_400_BAD_REQUEST)
+            for lesson in rows:
+                lesson.order = mapping[lesson.pk]
+            Lesson.objects.bulk_update(rows, ['order'])
+        return Response({'status': 'ok', 'reordered': len(rows)})
 
 
 # ─── Exercises (Admin) ─────────────────────────────────────────────────────────
@@ -534,17 +757,37 @@ class StudentAdminSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'date_joined']
 
     def get_enrollment_count(self, obj):
-        return obj.user.enrollments.count()
+        return obj.admin_enrollment_count if hasattr(obj, 'admin_enrollment_count') else obj.user.enrollments.count()
 
     def get_completed_courses(self, obj):
+        if hasattr(obj, 'admin_completed_courses'):
+            return obj.admin_completed_courses
         return obj.user.enrollments.filter(status='completed').count()
 
     def get_completed_lessons(self, obj):
+        if hasattr(obj, 'admin_completed_lessons'):
+            return obj.admin_completed_lessons
         return LessonProgress.objects.filter(user=obj.user, status='completed').count()
 
 
 class StudentAdminViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = UserProfile.objects.filter(role='student').select_related('user')
+    # Ordered before the annotations, which would otherwise descope Meta
+    # ordering and page students nondeterministically.
+    queryset = UserProfile.objects.filter(role='student').select_related('user').order_by(
+        '-xp_points', 'id',
+    ).annotate(
+        admin_enrollment_count=Count('user__enrollments', distinct=True),
+        admin_completed_courses=Count(
+            'user__enrollments',
+            filter=Q(user__enrollments__status='completed'),
+            distinct=True,
+        ),
+        admin_completed_lessons=Count(
+            'user__lesson_progress',
+            filter=Q(user__lesson_progress__status='completed'),
+            distinct=True,
+        ),
+    )
     serializer_class = StudentAdminSerializer
     permission_classes = [IsAdministrator]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -587,7 +830,7 @@ class StudentAdminViewSet(viewsets.ReadOnlyModelViewSet):
                 'status': ua.status,
             })
 
-        certificates = UserCertification.objects.filter(user=user)
+        certificates = UserCertification.objects.filter(user=user).select_related('certification')
         certificate_data = []
         for uc in certificates:
             certificate_data.append({
@@ -679,6 +922,7 @@ class EnrollmentAdminSerializer(serializers.ModelSerializer):
     course_title = serializers.CharField(source='course.title', read_only=True)
     course_slug = serializers.CharField(source='course.slug', read_only=True)
     track_title = serializers.CharField(source='course.track.title', read_only=True)
+    progress_percentage = serializers.SerializerMethodField()
 
     class Meta:
         model = Enrollment
@@ -688,6 +932,17 @@ class EnrollmentAdminSerializer(serializers.ModelSerializer):
             'last_activity_at', 'status', 'progress_percentage',
         ]
         read_only_fields = ['id', 'enrolled_at', 'completed_at', 'last_activity_at']
+
+    def get_progress_percentage(self, obj):
+        # The list view attaches page-batched counts (see the viewset);
+        # `Enrollment.progress_percentage` costs two COUNT round trips
+        # per row on the hosted database, so it only serves as the
+        # fallback for single-object renders outside the list.
+        total = getattr(obj, 'admin_progress_total_lessons', None)
+        if total is None:
+            return obj.progress_percentage
+        completed = obj.admin_progress_completed_lessons
+        return round((completed / total) * 100) if total else 0
 
 
 class EnrollmentAdminViewSet(viewsets.ReadOnlyModelViewSet):
@@ -710,6 +965,39 @@ class EnrollmentAdminViewSet(viewsets.ReadOnlyModelViewSet):
         if status_filter:
             qs = qs.filter(status=status_filter)
         return qs
+
+    def paginate_queryset(self, queryset):
+        """Attach page-batched progress counts to the returned rows.
+
+        The serializer's progress percentage otherwise runs two COUNT
+        queries per enrollment; the whole page is answered with one
+        grouped query per side instead. Values mirror the model
+        property exactly (all course lessons; the learner's completed
+        LessonProgress rows for that course).
+        """
+        page = super().paginate_queryset(queryset)
+        if not page:
+            return page
+        course_ids = list({e.course_id for e in page})
+        totals = {
+            row['chapter__course_id']: row['n']
+            for row in Lesson.objects.filter(chapter__course_id__in=course_ids)
+            .values('chapter__course_id').annotate(n=Count('id'))
+        }
+        completed = {
+            (row['user_id'], row['lesson__chapter__course_id']): row['n']
+            for row in LessonProgress.objects.filter(
+                user_id__in={e.user_id for e in page},
+                status='completed',
+                lesson__chapter__course_id__in=course_ids,
+            ).values('user_id', 'lesson__chapter__course_id').annotate(n=Count('id'))
+        }
+        for enrollment in page:
+            enrollment.admin_progress_total_lessons = totals.get(enrollment.course_id, 0)
+            enrollment.admin_progress_completed_lessons = completed.get(
+                (enrollment.user_id, enrollment.course_id), 0,
+            )
+        return page
 
 
 # ─── Competitions (Admin) ───────────────────────────────────────────────────────
@@ -850,11 +1138,16 @@ class AchievementAdminSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at']
 
     def get_earned_count(self, obj):
+        # Annotation-first, same hosted-database N+1 reason as lesson counts.
+        if hasattr(obj, 'admin_earned_count'):
+            return obj.admin_earned_count
         return obj.user_achievements.count()
 
 
 class AchievementAdminViewSet(viewsets.ModelViewSet):
-    queryset = Achievement.objects.all()
+    queryset = Achievement.objects.annotate(
+        admin_earned_count=Count('user_achievements'),
+    )
     serializer_class = AchievementAdminSerializer
     permission_classes = [IsAdministrator]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
@@ -1357,13 +1650,20 @@ class CompetitionRegistrationAdminViewSet(viewsets.ReadOnlyModelViewSet):
 # ─── Email campaigns (Admin, Super Admin only) ────────────────────────────
 
 class EmailCampaignRecipientAdminSerializer(serializers.ModelSerializer):
-    username = serializers.CharField(source='user.username', read_only=True)
+    username = serializers.SerializerMethodField()
     email = serializers.SerializerMethodField()
 
     class Meta:
         model = EmailCampaignRecipient
         fields = ['id', 'user', 'username', 'email', 'status', 'error', 'sent_at', 'created_at']
         read_only_fields = fields
+
+    def get_username(self, obj):
+        # External custom addresses have no account behind the row.
+        if obj.user_id and obj.user is not None:
+            name = email_composer.display_name(obj.user)
+            return name or obj.user.username
+        return obj.email.partition('@')[0]
 
     def get_email(self, obj):
         # Addresses are masked unless the requester is a Super Admin: campaign
@@ -1378,12 +1678,31 @@ class EmailCampaignRecipientAdminSerializer(serializers.ModelSerializer):
 class EmailCampaignAdminSerializer(serializers.ModelSerializer):
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
     status = serializers.CharField(read_only=True)
+    # The model's plain-text body is only required *alongside* nothing else:
+    # composer drafts live in body_html, so the field must accept a blank
+    # value here and the cross-check in validate() enforces "one or the other".
+    body = serializers.CharField(required=False, allow_blank=True)
+    selected_users = serializers.PrimaryKeyRelatedField(
+        many=True, required=False,
+        queryset=User.objects.filter(is_active=True),
+    )
+    custom_emails = serializers.ListField(
+        child=serializers.CharField(max_length=254), required=False,
+    )
+    cc_emails = serializers.ListField(
+        child=serializers.CharField(max_length=254), required=False,
+    )
+    bcc_emails = serializers.ListField(
+        child=serializers.CharField(max_length=254), required=False,
+    )
 
     class Meta:
         model = EmailCampaign
         fields = [
             'id', 'name', 'subject', 'heading', 'body', 'template', 'banner_image',
             'cta_label', 'cta_url', 'audience', 'competition', 'essential',
+            'selected_users', 'custom_emails', 'cc_emails', 'bcc_emails',
+            'body_html', 'plain_text_alternative',
             'related_announcement', 'related_update', 'status', 'recipient_count',
             'sent_count', 'failed_count', 'skipped_count', 'sent_at',
             'created_by', 'created_by_name', 'created_at', 'updated_at',
@@ -1394,45 +1713,265 @@ class EmailCampaignAdminSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at',
         ]
 
+    def validate_body_html(self, value):
+        # Storing the sanitized form means the fan-out and every preview can
+        # trust the database; raw admin markup never reaches an inbox.
+        return email_composer.sanitize_html(value)
+
+    def _validate_addresses(self, value, field):
+        valid, invalid = email_composer.clean_address_list(value)
+        if invalid:
+            raise serializers.ValidationError(
+                f'{field} contains invalid addresses: {", ".join(invalid)}'
+            )
+        return valid
+
+    def validate_custom_emails(self, value):
+        return self._validate_addresses(value, 'custom emails')
+
+    def validate_cc_emails(self, value):
+        return self._validate_addresses(value, 'CC addresses')
+
+    def validate_bcc_emails(self, value):
+        return self._validate_addresses(value, 'BCC addresses')
+
+    def validate(self, attrs):
+        audience = attrs.get('audience', getattr(self.instance, 'audience', 'all'))
+        if audience == EmailCampaign.Audience.SPECIFIC:
+            users = attrs.get('selected_users', getattr(self.instance, 'selected_users', None))
+            emails = attrs.get('custom_emails', getattr(self.instance, 'custom_emails', None) or [])
+            if not (users and list(users) or emails):
+                raise serializers.ValidationError(
+                    'Select at least one recipient: a registered student or a custom email address.'
+                )
+        body = attrs.get('body', getattr(self.instance, 'body', '') if self.instance else '')
+        body_html = attrs.get(
+            'body_html', getattr(self.instance, 'body_html', '') if self.instance else '',
+        )
+        if not (body.strip() or body_html.strip()):
+            raise serializers.ValidationError('Write a message before saving the email.')
+        warnings = email_composer.unknown_variables(
+            attrs.get('subject', getattr(self.instance, 'subject', '')),
+            attrs.get('heading', getattr(self.instance, 'heading', '')),
+            body,
+            body_html,
+        )
+        if warnings:
+            raise serializers.ValidationError({
+                'subject': f'Unknown variable(s): {{{{{warnings[0]}}}}}. Supported: '
+                + ', '.join(f'{{{{{key}}}}}' for key, _ in email_composer.PERSONALIZATION_KEYS) + '.',
+            })
+        return attrs
+
 
 class EmailCampaignAdminViewSet(viewsets.ModelViewSet):
     """Compose, preview, and send platform email campaigns.
 
     Every route requires Super Admin; sending additionally requires an
     explicit ``confirm`` flag and only works from a draft, so a resent
-    request can never double-mail the audience.
+    request can never double-mail the audience. The "Send Official Email"
+    composer uses the same lifecycle with ``audience=specific``.
     """
 
     queryset = EmailCampaign.objects.select_related('created_by', 'competition').all()
     serializer_class = EmailCampaignAdminSerializer
     permission_classes = [IsSuperAdmin]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['name', 'subject']
+    search_fields = ['name', 'subject', 'recipients__email', 'recipients__user__username']
     ordering_fields = ['created_at', 'sent_at', 'status']
 
+    def get_throttles(self):
+        # Rate-limit the actions that can put mail on the wire, per administrator.
+        if self.action in ('send', 'test', 'resend_failed'):
+            scope = 'email_campaign_send'
+            throttle = ScopedRateThrottle()
+            throttle.scope = scope
+            throttle.rate = settings.REST_FRAMEWORK['DEFAULT_THROTTLE_RATES'].get(scope, '60/hour')
+            return [throttle]
+        return super().get_throttles()
+
+    def get_queryset(self):
+        qs = super().get_queryset().distinct()
+        # History filters apply to the campaign list only. Other actions —
+        # detail, send, recipients (which has its own status= filter for
+        # recipient rows) — must keep the full queryset so get_object() can
+        # find the campaign no matter what query params were passed.
+        if self.action != 'list':
+            return qs
+        params = self.request.query_params
+        if params.get('status'):
+            qs = qs.filter(status=params['status'])
+        from django.utils.dateparse import parse_date
+        date_from = parse_date(params.get('date_from') or '')
+        if date_from:
+            qs = qs.filter(created_at__date__gte=date_from)
+        date_to = parse_date(params.get('date_to') or '')
+        if date_to:
+            qs = qs.filter(created_at__date__lte=date_to)
+        return qs
+
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        campaign = serializer.save(created_by=self.request.user)
+        audit(
+            'email_campaign_draft_created', request=self.request, user=self.request.user,
+            identifier=str(campaign.pk),
+            metadata={'audience': campaign.audience, 'composed': bool(campaign.body_html)},
+        )
+
+    def perform_destroy(self, instance):
+        audit(
+            'email_campaign_draft_discarded', request=self.request, user=self.request.user,
+            identifier=str(instance.pk), metadata={'status': instance.status},
+        )
+        instance.delete()
 
     @action(detail=True, methods=['get'], url_path='audience-count')
     def audience_count(self, request, pk=None):
         campaign = self.get_object()
         return Response({
             'audience': campaign.audience,
-            'count': email_campaigns.audience_count(campaign),
+            'count': email_campaigns.planned_recipient_count(campaign),
+        })
+
+    @action(detail=False, methods=['get'], url_path='students-search')
+    def students_search(self, request):
+        """Look up registered students for the composer's recipient picker.
+
+        Matches on name, email address and username (student ID) and returns
+        only the three fields the composer needs — never any course or
+        activity data. Search is server-side so addresses are not dumped.
+        """
+        term = (request.query_params.get('q') or '').strip()
+        if not term:
+            return Response({'results': []})
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        matches = (
+            User.objects.filter(is_active=True, profile__role='student')
+            .exclude(email='')
+            .filter(
+                Q(first_name__icontains=term) | Q(last_name__icontains=term)
+                | Q(email__icontains=term) | Q(username__icontains=term)
+            )
+            .order_by('username')[:25]
+        )
+        results = [
+            {
+                'id': user.pk,
+                'name': email_composer.display_name(user),
+                'email': user.email,
+                'student_id': user.username,
+            }
+            for user in matches
+        ]
+        return Response({'results': results})
+
+    @action(detail=False, methods=['post'], url_path='validate-recipients')
+    def validate_recipients(self, request):
+        """Resolve a draft recipient selection into verified display rows.
+
+        Used by the composer's "recipient verification" step: the admin sees
+        exactly who each entry resolves to (name, address, ID, duplicate or
+        invalid flags) before anything is queued.
+        """
+        user_ids = request.data.get('user_ids') or []
+        emails = request.data.get('emails') or []
+        from django.contrib.auth import get_user_model
+        users = list(
+            get_user_model().objects.filter(is_active=True, pk__in=user_ids)
+            .exclude(email='')[:200]
+        )
+        known = {u.email.lower() for u in users}
+        valid, invalid = email_composer.clean_address_list(emails)
+        rows = [
+            {
+                'id': user.pk,
+                'name': email_composer.display_name(user),
+                'email': user.email,
+                'student_id': user.username,
+                'registered': True,
+            }
+            for user in users
+        ]
+        seen_duplicates = []
+        for address in valid:
+            if address in known:
+                seen_duplicates.append(address)
+                continue
+            known.add(address)
+            rows.append({
+                'id': None,
+                'name': address.partition('@')[0].replace('.', ' ').replace('_', ' ').title(),
+                'email': address,
+                'student_id': '',
+                'registered': False,
+            })
+        return Response({
+            'recipients': rows,
+            'total': len(rows),
+            'invalid': invalid,
+            'duplicates_removed': seen_duplicates,
+        })
+
+    @action(detail=False, methods=['get'], url_path='sender-identity')
+    def sender_identity(self, request):
+        """The fixed Code Yaar sender shown above the composer.
+
+        Read-only by design: administrators can never type a From address,
+        so campaign mail cannot be used to spoof another sender.
+        """
+        from email.utils import parseaddr
+        name, address = parseaddr(settings.DEFAULT_FROM_EMAIL)
+        return Response({
+            'sender_name': name or 'Code Yaar',
+            'sender_email': address,
+            'reply_to': settings.REPLY_TO_EMAIL or address,
         })
 
     @action(detail=True, methods=['get'])
     def preview(self, request, pk=None):
-        """Render the campaign exactly as one recipient would see it."""
+        """Render the campaign exactly as one recipient would see it.
+
+        Composed mail is personalized per recipient, so the preview accepts
+        ``?as_user=<id>`` to show one student's exact copy; without it the
+        requesting admin's own identity fills the variables.
+        """
         campaign = self.get_object()
-        html, text = email_campaigns.render_campaign_email(campaign, request.user)
-        return Response({'html': html, 'text': text})
+        target = None
+        as_user = request.query_params.get('as_user')
+        if as_user and str(as_user).isdigit():
+            target = User.objects.filter(pk=int(as_user), is_active=True).first()
+        if email_campaigns.is_composed(campaign):
+            viewer = target if target is not None else request.user
+            name = email_composer.display_name(viewer)
+            email = viewer.email or request.user.email
+            student_id = viewer.username
+            variables = email_campaigns.composed_variables(campaign, name, email, student_id)
+            html, text = email_campaigns.render_composed_email(
+                campaign, name=name, email=email, student_id=student_id,
+                has_account=True, user=viewer,
+            )
+            subject = email_campaigns.composed_subject(campaign, variables)
+        else:
+            html, text = email_campaigns.render_campaign_email(campaign, target or request.user)
+            subject = campaign.subject
+        return Response({'html': html, 'text': text, 'subject': subject})
 
     @action(detail=True, methods=['post'])
     def test(self, request, pk=None):
-        """Send the campaign to the requesting admin's own address only."""
+        """Send one test copy — to the requesting admin unless a test address is given.
+
+        The test rides the same render path as the real fan-out, so the admin
+        sees exactly the personalized layout a recipient would receive.
+        """
         campaign = self.get_object()
-        if not request.user.email:
+        to_email = email_composer.normalize_email(request.data.get('to'))
+        if to_email and not email_composer.validate_email(to_email):
+            return Response(
+                {'detail': 'That test address is not a valid email address.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not to_email and not request.user.email:
             return Response(
                 {'detail': 'Your account has no email address to test with.'},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -1443,15 +1982,19 @@ class EmailCampaignAdminViewSet(viewsets.ModelViewSet):
                 'heading': campaign.heading,
                 'name': campaign.name,
                 'body': campaign.body,
+                'body_html': campaign.body_html,
+                'plain_text': campaign.plain_text_alternative,
                 'template': campaign.template,
                 'cta_label': campaign.cta_label,
                 'cta_url': campaign.cta_url,
             },
             request.user,
+            to_email=to_email,
         )
         audit(
             'email_campaign_test_sent', request=request, user=request.user,
-            identifier=str(campaign.pk), metadata={'result': result['status']},
+            identifier=str(campaign.pk),
+            metadata={'result': result['status'], 'to_external': bool(to_email)},
         )
         return Response(result)
 
@@ -1473,7 +2016,7 @@ class EmailCampaignAdminViewSet(viewsets.ModelViewSet):
                 {'detail': 'Pick the hackathon this campaign should reach.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        count = email_campaigns.audience_count(campaign)
+        count = email_campaigns.planned_recipient_count(campaign)
         if count == 0:
             return Response(
                 {'detail': 'This audience has no recipients yet.'},
@@ -1483,7 +2026,11 @@ class EmailCampaignAdminViewSet(viewsets.ModelViewSet):
         campaign.save(update_fields=['status', 'updated_at'])
         audit(
             'email_campaign_queued', request=request, user=request.user,
-            identifier=str(campaign.pk), metadata={'audience': campaign.audience, 'count': count},
+            identifier=str(campaign.pk),
+            metadata={
+                'audience': campaign.audience, 'count': count,
+                'composed': email_campaigns.is_composed(campaign),
+            },
         )
         pk = campaign.pk
         transaction.on_commit(
@@ -1494,6 +2041,87 @@ class EmailCampaignAdminViewSet(viewsets.ModelViewSet):
             status=status.HTTP_202_ACCEPTED,
         )
 
+    @action(detail=True, methods=['post'], url_path='resend-failed')
+    def resend_failed(self, request, pk=None):
+        """Re-queue only the recipients whose delivery failed.
+
+        Successful copies are never re-sent: the row-level unique constraint
+        plus the PENDING filter mean exactly the failed addresses get a new
+        attempt, and the campaign leaves ``failed``/``partial`` behind.
+        """
+        campaign = self.get_object()
+        if request.data.get('confirm') is not True:
+            return Response(
+                {'detail': 'Resending requires explicit confirmation (confirm=true).'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if campaign.status not in (
+            EmailCampaign.Status.SENT, EmailCampaign.Status.PARTIAL, EmailCampaign.Status.FAILED,
+        ):
+            return Response(
+                {'detail': 'Only a finished campaign can have failed copies resent.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+        failed = campaign.recipients.filter(status=EmailCampaignRecipient.Status.FAILED)
+        count = failed.count()
+        if count == 0:
+            return Response(
+                {'detail': 'No failed recipients to resend to.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        failed.update(
+            status=EmailCampaignRecipient.Status.PENDING, error='', sent_at=None,
+        )
+        campaign.status = EmailCampaign.Status.QUEUED
+        campaign.save(update_fields=['status', 'updated_at'])
+        audit(
+            'email_campaign_resend_failed', request=request, user=request.user,
+            identifier=str(campaign.pk), metadata={'count': count},
+        )
+        pk = campaign.pk
+        transaction.on_commit(
+            lambda: email_campaigns.dispatch_campaign(EmailCampaign.objects.get(pk=pk))
+        )
+        return Response(
+            {'status': campaign.status, 'resending': count},
+            status=status.HTTP_202_ACCEPTED,
+        )
+
+    @action(detail=True, methods=['post'])
+    def duplicate(self, request, pk=None):
+        """Copy any sent or drafted email into a fresh draft."""
+        source = self.get_object()
+        clone = EmailCampaign.objects.create(
+            name=f'Copy of {source.name}'[:200],
+            subject=source.subject,
+            heading=source.heading,
+            body=source.body,
+            body_html=source.body_html,
+            plain_text_alternative=source.plain_text_alternative,
+            template=source.template,
+            banner_image=source.banner_image,
+            cta_label=source.cta_label,
+            cta_url=source.cta_url,
+            audience=source.audience,
+            competition=source.competition,
+            custom_emails=list(source.custom_emails or []),
+            cc_emails=list(source.cc_emails or []),
+            bcc_emails=list(source.bcc_emails or []),
+            essential=source.essential,
+            related_announcement=source.related_announcement,
+            related_update=source.related_update,
+            created_by=request.user,
+        )
+        clone.selected_users.set(source.selected_users.all())
+        audit(
+            'email_campaign_duplicated', request=request, user=request.user,
+            identifier=str(source.pk), metadata={'new_campaign': clone.pk},
+        )
+        return Response(
+            EmailCampaignAdminSerializer(clone, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
     @action(detail=True, methods=['get'], url_path='recipients')
     def recipients(self, request, pk=None):
         campaign = self.get_object()
@@ -1501,6 +2129,23 @@ class EmailCampaignAdminViewSet(viewsets.ModelViewSet):
         status_filter = request.query_params.get('status')
         if status_filter:
             qs = qs.filter(status=status_filter)
+        search = (request.query_params.get('search') or '').strip()
+        if search:
+            qs = qs.filter(
+                Q(email__icontains=search)
+                | Q(user__username__icontains=search)
+                | Q(user__first_name__icontains=search)
+                | Q(user__last_name__icontains=search)
+            )
+        date_from = request.query_params.get('date_from')
+        date_to = request.query_params.get('date_to')
+        from django.utils.dateparse import parse_date
+        parsed_from = parse_date(date_from) if date_from else None
+        parsed_to = parse_date(date_to) if date_to else None
+        if parsed_from:
+            qs = qs.filter(created_at__date__gte=parsed_from)
+        if parsed_to:
+            qs = qs.filter(created_at__date__lte=parsed_to)
         page = self.paginate_queryset(qs)
         serializer = EmailCampaignRecipientAdminSerializer(
             page if page is not None else qs, many=True, context={'request': request},
@@ -1508,6 +2153,182 @@ class EmailCampaignAdminViewSet(viewsets.ModelViewSet):
         if page is not None:
             return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
+
+
+class EmailTemplateAdminSerializer(serializers.ModelSerializer):
+    """A saved, reusable starting point for a composed email.
+
+    Content-only: it never carries recipients or delivery state. The HTML
+    body is allowlist-sanitized on save (same guard as the composer) and
+    unknown ``{{variables}}`` are refused, so a template can neither store
+    markup the mailer would not render nor reference a token the personalizer
+    cannot fill. ``{{tokens}}`` stay unrendered here on purpose — they are
+    substituted per recipient only when the template is actually used.
+    """
+
+    created_by_name = serializers.SerializerMethodField()
+    variables_used = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EmailTemplate
+        fields = [
+            'id', 'name', 'category', 'description', 'subject', 'heading',
+            'preview_text', 'body_html', 'plain_text', 'cta_label', 'cta_url',
+            'footer_content', 'is_favorite', 'created_by', 'created_by_name',
+            'variables_used', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
+
+    def get_created_by_name(self, obj):
+        return obj.created_by.username if obj.created_by else ''
+
+    def get_variables_used(self, obj):
+        combined = ' '.join(
+            part or '' for part in (obj.subject, obj.heading, obj.body_html, obj.footer_content)
+        )
+        return email_composer.used_variables(combined)
+
+    def validate(self, attrs):
+        subject = attrs.get('subject', getattr(self.instance, 'subject', ''))
+        heading = attrs.get('heading', getattr(self.instance, 'heading', ''))
+        body_html = attrs.get('body_html', getattr(self.instance, 'body_html', ''))
+        footer = attrs.get('footer_content', getattr(self.instance, 'footer_content', ''))
+        unknown = email_composer.unknown_variables(subject, heading, body_html, footer)
+        if unknown:
+            raise serializers.ValidationError({
+                'subject': f'Unknown variable(s): {{{{{unknown[0]}}}}}. Supported: '
+                + ', '.join(f'{{{{{key}}}}}' for key, _ in email_composer.PERSONALIZATION_KEYS) + '.',
+            })
+        return attrs
+
+    def to_internal_value(self, data):
+        validated = super().to_internal_value(data)
+        if 'body_html' in validated:
+            validated['body_html'] = email_composer.sanitize_html(validated['body_html'])
+        if not validated.get('plain_text') and validated.get('body_html'):
+            validated['plain_text'] = email_composer.plain_text_from_html(validated['body_html'])
+        return validated
+
+
+class EmailTemplateAdminViewSet(viewsets.ModelViewSet):
+    """CRUD for the admin Email Templates library.
+
+    Super Admin only, matching the composer/campaign permission boundary.
+    Templates are content only and never send anything; ``duplicate`` copies a
+    template into a new one, ``preview`` renders the branded layout as the
+    requesting admin so its ``{{variables}}`` show filled exactly as a
+    recipient would see them, and ``categories`` reports the preset list plus
+    every category already in use so the UI can offer custom ones.
+    """
+
+    queryset = EmailTemplate.objects.select_related('created_by').all()
+    serializer_class = EmailTemplateAdminSerializer
+    permission_classes = [IsSuperAdmin]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name', 'subject', 'description', 'category']
+    ordering_fields = ['updated_at', 'created_at', 'name']
+    ordering = ['-is_favorite', '-updated_at']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.action != 'list':
+            return qs
+        category = self.request.query_params.get('category')
+        if category == 'favorites':
+            qs = qs.filter(is_favorite=True)
+        elif category:
+            qs = qs.filter(category=category)
+        return qs
+
+    def perform_create(self, serializer):
+        template = serializer.save(created_by=self.request.user)
+        audit(
+            'email_template_created', request=self.request, user=self.request.user,
+            identifier=str(template.pk), metadata={'category': template.category},
+        )
+
+    def perform_update(self, serializer):
+        template = serializer.save()
+        audit(
+            'email_template_updated', request=self.request, user=self.request.user,
+            identifier=str(template.pk), metadata={'category': template.category},
+        )
+
+    def perform_destroy(self, instance):
+        audit(
+            'email_template_deleted', request=self.request, user=self.request.user,
+            identifier=str(instance.pk), metadata={'name': instance.name},
+        )
+        instance.delete()
+
+    @action(detail=False, methods=['get'])
+    def categories(self, request):
+        """Preset categories plus every custom one already saved."""
+        return Response({'categories': EmailTemplate.used_categories()})
+
+    @action(detail=True, methods=['post'])
+    def duplicate(self, request, pk=None):
+        """Copy a template into a fresh, independently editable one."""
+        source = self.get_object()
+        clone = EmailTemplate.objects.create(
+            name=f'Copy of {source.name}'[:200],
+            category=source.category,
+            description=source.description,
+            subject=source.subject,
+            heading=source.heading,
+            preview_text=source.preview_text,
+            body_html=source.body_html,
+            plain_text=source.plain_text,
+            cta_label=source.cta_label,
+            cta_url=source.cta_url,
+            footer_content=source.footer_content,
+            is_favorite=False,
+            created_by=request.user,
+        )
+        audit(
+            'email_template_duplicated', request=request, user=request.user,
+            identifier=str(source.pk), metadata={'new_template': clone.pk},
+        )
+        return Response(
+            EmailTemplateAdminSerializer(clone, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=['get'])
+    def preview(self, request, pk=None):
+        """Render the template in the branded layout, personalized for the viewer."""
+        template = self.get_object()
+        body_html = template.body_html
+        if template.footer_content:
+            from html import escape as _escape
+            footer_paragraphs = [
+                line.strip() for line in template.footer_content.splitlines() if line.strip()
+            ]
+            body_html += ''.join(f'<p>{_escape(paragraph)}</p>' for paragraph in footer_paragraphs)
+
+        from types import SimpleNamespace
+        as_campaign = SimpleNamespace(
+            subject=template.subject,
+            heading=template.heading,
+            name=template.name,
+            body='',
+            body_html=body_html,
+            plain_text_alternative=template.plain_text,
+            cta_label=template.cta_label,
+            cta_url=template.cta_url,
+        )
+
+        name = email_composer.display_name(request.user)
+        email = request.user.email or ''
+        html, text = email_campaigns.render_composed_email(
+            as_campaign, name=name, email=email, student_id=request.user.username,
+            has_account=True, user=request.user,
+        )
+        variables = email_composer.recipient_variables(
+            name=name, email=email, student_id=request.user.username,
+        )
+        subject = email_composer.personalize(template.subject, variables)
+        return Response({'html': html, 'text': text, 'subject': subject})
 
 
 @api_view(['GET'])
@@ -1631,27 +2452,126 @@ def admin_settings(request):
 
 @api_view(['GET'])
 def public_platform_status(request):
-    settings = MaintenanceSettings.objects.filter(pk=MaintenanceSettings.SINGLETON_PK).first()
+    # The cached snapshot (invalidated on save) answers the frontend's
+    # 15-second poll without a database round trip each time.
+    snapshot = MaintenanceSettings.snapshot()
     return Response({
-        'maintenance_mode': bool(settings and settings.is_enabled),
-        'maintenance_message': (settings.maintenance_message if settings else '') or
+        'maintenance_mode': snapshot['is_enabled'],
+        'maintenance_message': snapshot['message'] or
             'We are making improvements and will be back shortly.',
         'estimated_return_time': (
-            settings.estimated_return_time.isoformat()
-            if settings and settings.estimated_return_time else ''
+            snapshot['estimated_return_time'].isoformat()
+            if snapshot['estimated_return_time'] else ''
         ),
     })
 
 
 # ─── Roles (Admin) ─────────────────────────────────────────────────────────────
 
-@api_view(['GET'])
+@api_view(['GET', 'POST'])
 @permission_classes([IsAdministrator])
 def admin_roles(request):
-    """Return available roles."""
-    return Response([
-        {'id': 1, 'name': 'Super Admin', 'permissions': ['all']},
-        {'id': 2, 'name': 'Content Admin', 'permissions': ['courses', 'tracks', 'chapters', 'lessons', 'exercises']},
-        {'id': 3, 'name': 'Instructor', 'permissions': ['assigned_courses', 'assessments']},
-        {'id': 4, 'name': 'Moderator', 'permissions': ['moderation']},
-    ])
+    """The real role directory, and super-user-only group assignment.
+
+    This endpoint previously returned four hardcoded dictionaries that existed nowhere
+    in the database - the roles page was a picture of a permission system. It now reads
+    Django groups and the capability matrix, so what the panel shows is what the API
+    actually enforces.
+
+    Assignment is restricted to a super user, and nobody may change their own group
+    membership: an administrator must not be able to hand themselves a privilege.
+    """
+    from django.contrib.auth.models import Group
+
+    if request.method == 'GET':
+        from .services.admin_access import (
+            PLATFORM_ADMINISTRATOR_CAPABILITIES, ROLE_CAPABILITIES, SUPER_ADMIN_CAPABILITIES,
+        )
+
+        groups = {g.name: g for g in Group.objects.all()}
+        rows = [{
+            'id': 1,
+            'name': 'Super Admin',
+            'group': None,
+            'description': 'Full platform control, including role assignment.',
+            'capabilities': ['* (all capabilities)'],
+            'member_count': User.objects.filter(is_superuser=True).count(),
+            'label': 'Super Admin',
+        }, {
+            'id': 2,
+            'name': 'Platform Administrator',
+            'group': ADMIN_GROUP,
+            'description': 'Runs the whole admin panel; role changes need a super user.',
+            'capabilities': ['* (all capabilities)'],
+            'member_count': groups[ADMIN_GROUP].user_set.count() if ADMIN_GROUP in groups else 0,
+            'label': 'Platform Administrator',
+        }]
+        order = 3
+        for spec_role, group_name in sorted(ROLE_GROUPS.items()):
+            group = groups.get(group_name)
+            rows.append({
+                'id': order,
+                'name': group_name,
+                'group': group_name,
+                'description': f'Scope-limited admin role ({spec_role}).',
+                'capabilities': sorted(ROLE_CAPABILITIES[spec_role]),
+                'member_count': group.user_set.count() if group else 0,
+                'label': group_name,
+            })
+            order += 1
+        rows.append({
+            'id': order,
+            'name': 'Instructor',
+            'group': INSTRUCTOR_GROUP,
+            'description': 'Editorial access to assigned courses only.',
+            'capabilities': sorted(ROLE_CAPABILITIES['instructor']),
+            'member_count': (
+                groups[INSTRUCTOR_GROUP].user_set.count() if INSTRUCTOR_GROUP in groups else 0
+            ),
+            'label': 'Instructor',
+        })
+        return Response({
+            'roles': rows,
+            'your_roles': resolve_admin_roles(request.user),
+            'your_capabilities': sorted(resolve_capabilities(request.user)),
+            'can_assign_roles': can_manage_roles(request.user),
+        })
+
+    if not can_manage_roles(request.user):
+        return Response({
+            'detail': 'Only a super user can assign administrative roles.',
+            'code': 'roles_locked',
+        }, status.HTTP_403_FORBIDDEN)
+
+    group_name = (request.data.get('group') or '').strip()
+    user_id = request.data.get('user')
+    operation = (request.data.get('action') or 'add').lower()
+    valid_groups = {ADMIN_GROUP, INSTRUCTOR_GROUP, *ROLE_GROUPS.values()}
+    if group_name not in valid_groups:
+        return Response({'detail': 'Unknown role group.'}, status.HTTP_400_BAD_REQUEST)
+    if str(user_id) == str(request.user.pk):
+        # The self-escalation guard: a super user editing their own groups could remove
+        # their own access by accident, and a non-super caller never reaches this line.
+        return Response({
+            'detail': 'You cannot change your own role assignments.',
+            'code': 'self_modification_forbidden',
+        }, status.HTTP_400_BAD_REQUEST)
+
+    target = get_object_or_404(User, pk=user_id)
+    group = Group.objects.get(name=group_name)
+    if operation == 'remove':
+        target.groups.remove(group)
+        event = 'role.remove'
+    else:
+        target.groups.add(group)
+        event = 'role.add'
+    record_admin_action(
+        request.user, event, obj=target, label=target.username,
+        detail={'group': group_name}, request=request,
+    )
+    return Response({
+        'status': 'ok',
+        'user': target.username,
+        'group': group_name,
+        'roles': [name for name in target.groups.values_list('name', flat=True)],
+    })
