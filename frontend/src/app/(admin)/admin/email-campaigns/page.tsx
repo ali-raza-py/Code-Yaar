@@ -26,6 +26,7 @@ const AUDIENCE_LABELS: Record<string, string> = {
   students: "Students",
   instructors: "Instructors",
   admins: "Administrators",
+  specific: "Selected recipients",
   comp_participants: "Hackathon participants",
   comp_approved: "Approved applicants",
   comp_pending: "Pending applicants",
@@ -39,11 +40,24 @@ export default function EmailCampaignsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [forbidden, setForbidden] = useState(false);
+  // History filters handled server-side: search over name/subject/recipient
+  // emails, plus status and a creation-date range.
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const load = useCallback(async () => {
     if (!user) return;
     try {
-      const data = await adminApi.listCampaigns({ page_size: 100, ordering: "-created_at" });
+      const data = await adminApi.listCampaigns({
+        page_size: 100,
+        ordering: "-created_at",
+        search: search || undefined,
+        status: statusFilter || undefined,
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
+      });
       setCampaigns(data.results);
       setLoadError(false);
     } catch (caught) {
@@ -55,7 +69,7 @@ export default function EmailCampaignsPage() {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, search, statusFilter, dateFrom, dateTo]);
 
   useEffect(() => {
     (async () => { await load(); })();
@@ -86,6 +100,8 @@ export default function EmailCampaignsPage() {
 
   if (loadError) return <NetworkError onRetry={load} />;
 
+  const hasActiveFilters = Boolean(search || statusFilter || dateFrom || dateTo);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -98,13 +114,58 @@ export default function EmailCampaignsPage() {
           </p>
         </div>
         {isSuperAdmin && (
-          <Link href="/admin/email-campaigns/new">
-            <Button size="sm">
-              <Plus className="mr-1 h-4 w-4" /> New campaign
-            </Button>
-          </Link>
+          <div className="flex gap-2">
+            <Link href="/admin/send-email">
+              <Button size="sm">Send official email</Button>
+            </Link>
+            <Link href="/admin/email-campaigns/new">
+              <Button size="sm" variant="outline">
+                <Plus className="mr-1 h-4 w-4" /> New campaign
+              </Button>
+            </Link>
+          </div>
         )}
       </div>
+
+      <Card>
+        <CardContent className="grid gap-3 py-4 md:grid-cols-4">
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search by name, subject or recipient email…"
+            className="rounded-md border bg-background px-3 py-2 text-sm"
+          />
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            className="rounded-md border bg-background px-3 py-2 text-sm"
+          >
+            <option value="">Any status</option>
+            {Object.keys(STATUS_BADGE).map((status) => (
+              <option key={status} value={status}>{status}</option>
+            ))}
+          </select>
+          <label className="text-sm">
+            <span className="text-xs text-muted-foreground">From</span>
+            <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} className="mt-0.5 w-full rounded-md border bg-background px-3 py-1.5 text-sm" />
+          </label>
+          <label className="text-sm">
+            <span className="text-xs text-muted-foreground">To</span>
+            <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="mt-0.5 w-full rounded-md border bg-background px-3 py-1.5 text-sm" />
+          </label>
+        </CardContent>
+        {hasActiveFilters && (
+          <CardContent className="pb-4 pt-0">
+            <button
+              type="button"
+              className="text-xs text-muted-foreground underline hover:text-foreground"
+              onClick={() => { setSearch(""); setStatusFilter(""); setDateFrom(""); setDateTo(""); }}
+            >
+              Clear filters
+            </button>
+          </CardContent>
+        )}
+      </Card>
 
       <Card>
         <CardHeader>

@@ -11,6 +11,7 @@ import {
   ClipboardList,
   History,
   Mail,
+  MailPlus,
   Megaphone,
   Rocket,
   ChevronDown,
@@ -82,6 +83,8 @@ const adminNavItems: NavItem[] = [
     icon: Megaphone,
     roles: ["administrator", "content_admin", "instructor"],
     children: [
+      { href: "/admin/send-email", label: "Send Official Email", icon: MailPlus },
+      { href: "/admin/email-templates", label: "Email Templates", icon: FileText },
       { href: "/admin/announcements", label: "Announcements", icon: Megaphone },
       { href: "/admin/email-campaigns", label: "Email Campaigns", icon: Mail },
       { href: "/admin/email-settings", label: "Email Settings", icon: Settings },

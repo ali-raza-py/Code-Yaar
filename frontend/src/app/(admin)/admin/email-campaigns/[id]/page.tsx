@@ -68,6 +68,7 @@ export default function CampaignDetailPage() {
   const [previewMode, setPreviewMode] = useState<"html" | "text">("html");
   const [recipients, setRecipients] = useState<EmailCampaignRecipientAdmin[]>([]);
   const [recipientFilter, setRecipientFilter] = useState("");
+  const [recipientSearch, setRecipientSearch] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -77,7 +78,11 @@ export default function CampaignDetailPage() {
       setLoadError(false);
       if (data.status !== "draft") {
         try {
-          const rows = await adminApi.campaignRecipients(id, { page_size: 100, status: recipientFilter || undefined });
+          const rows = await adminApi.campaignRecipients(id, {
+            page_size: 100,
+            status: recipientFilter || undefined,
+            search: recipientSearch || undefined,
+          });
           setRecipients(rows.results);
         } catch {
           // Recipient table stays empty; the summary counters still show.
@@ -88,7 +93,7 @@ export default function CampaignDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [id, recipientFilter]);
+  }, [id, recipientFilter, recipientSearch]);
 
   useEffect(() => {
     (async () => {
@@ -199,6 +204,39 @@ export default function CampaignDetailPage() {
     }
   }
 
+  async function resendFailed() {
+    if (!campaign) return;
+    const confirmed = confirm(
+      `Retry only the ${campaign.failed_count} failed recipient${campaign.failed_count === 1 ? "" : "s"}?\n\n` +
+        "Everyone who already received a copy is left untouched.",
+    );
+    if (!confirmed) return;
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const data = await adminApi.campaignResendFailed(id);
+      setNotice(`Re-sending started for ${data.resending} failed recipient${data.resending === 1 ? "" : "s"}. Refresh to see updated results.`);
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The failed copies could not be re-sent.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function duplicateAsDraft() {
+    setSaving(true);
+    setError("");
+    try {
+      const clone = await adminApi.campaignDuplicate(id);
+      router.push(clone.audience === "specific" ? `/admin/send-email?draft=${clone.id}` : `/admin/email-campaigns/${clone.id}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The email could not be duplicated.");
+      setSaving(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="animate-pulse space-y-4">
@@ -211,6 +249,8 @@ export default function CampaignDetailPage() {
   if (loadError || !campaign) return <NetworkError onRetry={load} />;
 
   const isDraft = campaign.status === "draft";
+  const isComposed = campaign.audience === "specific";
+  const canResendFailed = !isDraft && campaign.failed_count > 0;
 
   return (
     <div className="space-y-6">
@@ -260,6 +300,22 @@ export default function CampaignDetailPage() {
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <Button variant="outline" size="sm" onClick={load}>Refresh status</Button>
+              {!isDraft && (
+                <Button variant="outline" size="sm" disabled={saving} onClick={duplicateAsDraft}>
+                  Duplicate as new draft
+                </Button>
+              )}
+              {canResendFailed && (
+                <Button variant="outline" size="sm" disabled={saving} onClick={resendFailed}>
+                  Resend {campaign.failed_count} failed
+                </Button>
+              )}
+              <input
+                value={recipientSearch}
+                onChange={(event) => setRecipientSearch(event.target.value)}
+                placeholder="Search recipient name or email…"
+                className="rounded-md border bg-background px-3 py-2 text-sm"
+              />
               <select
                 value={recipientFilter}
                 onChange={(e) => setRecipientFilter(e.target.value)}
@@ -298,6 +354,15 @@ export default function CampaignDetailPage() {
           <CardTitle>{isDraft ? "Compose" : "Content (locked after sending)"}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
+          {isComposed ? (
+            <p className="text-sm text-muted-foreground">
+              This email was written in the{" "}
+              <Link href={isDraft ? `/admin/send-email?draft=${campaign.id}` : "/admin/send-email"} className="text-primary underline">
+                Send Official Email composer
+              </Link>
+              {" "}— recipients and the custom body are edited there, not in the campaign form.
+            </p>
+          ) : (
           <CampaignForm
             values={values}
             onChange={setValues}
@@ -310,8 +375,9 @@ export default function CampaignDetailPage() {
             }}
             onCancel={() => router.push("/admin/email-campaigns")}
           />
+          )}
 
-          {isDraft && (
+          {isDraft && !isComposed && (
             <div className="border-t pt-4">
               <p className="mb-3 text-sm text-muted-foreground">
                 Check the audience size, preview the exact email, send a test to
