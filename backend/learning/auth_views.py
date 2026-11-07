@@ -49,6 +49,7 @@ from .services.auth import (
     verify_email,
 )
 from .services.notifications import notify
+from .services.email_automation import trigger_automation
 
 User = get_user_model()
 
@@ -242,6 +243,12 @@ class LoginView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        profile = get_profile(user)
+        first_login = profile.first_login_at is None
+        if first_login:
+            profile.first_login_at = timezone.now()
+            profile.save(update_fields=['first_login_at'])
+
         user.last_login = timezone.now()
         user.save(update_fields=['last_login'])
         audit(
@@ -250,6 +257,14 @@ class LoginView(APIView):
             user=user,
             identifier=identifier,
         )
+
+        if first_login:
+            trigger_automation(
+                'first_login',
+                user,
+                email_key=f'first-login:{user.pk}',
+                context={'dashboard_url': f"{settings.FRONTEND_URL}/dashboard"},
+            )
 
         raw_refresh, access = _start_session(user)
         response = Response(_session_payload(user, access))

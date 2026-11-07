@@ -163,20 +163,34 @@ def render_email(template: str, context: dict) -> tuple[str, str]:
 def _claim(user, email_key: str, defaults: dict) -> NotificationEmailLog | None:
     """Claim the delivery for ``email_key`` exactly once.
 
-    Returns the existing claim when the event was already handled (sent,
-    rendered or still queued), ``None`` when a fresh claim could not be created
-    or a previous *failed* attempt is being retried by a new claim.
+    A sent, rendered, or queued row means another call already owns the event,
+    so it returns ``None`` and the caller does not deliver again. A failed row
+    is atomically moved back to ``queued`` and reused, making transport failures
+    retryable without weakening the unique idempotency key.
     """
     existing = NotificationEmailLog.objects.filter(email_key=email_key).first()
     if existing is not None:
-        if existing.status in (
-            NotificationEmailLog.Status.SENT,
-            NotificationEmailLog.Status.RENDER_ONLY,
-            NotificationEmailLog.Status.QUEUED,
-        ):
+        if existing.status != NotificationEmailLog.Status.FAILED:
             logger.debug('Email %s already claimed (%s); skipping', email_key, existing.status)
-            return existing
-        return None
+            return None
+
+        retry_defaults = {
+            **defaults,
+            'user': user,
+            'status': NotificationEmailLog.Status.QUEUED,
+            'error': '',
+            'attempted_at': None,
+            'sent_at': None,
+        }
+        claimed = NotificationEmailLog.objects.filter(
+            pk=existing.pk,
+            status=NotificationEmailLog.Status.FAILED,
+        ).update(**retry_defaults)
+        if not claimed:
+            logger.debug('Email retry for %s was claimed concurrently', email_key)
+            return None
+        existing.refresh_from_db()
+        return existing
     try:
         return NotificationEmailLog.objects.create(user=user, email_key=email_key, **defaults)
     except Exception:  # pragma: no cover - concurrent claim trips the unique key

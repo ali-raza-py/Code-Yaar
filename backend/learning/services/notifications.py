@@ -186,20 +186,20 @@ def _write_notification(
         return None
 
     if dedupe_key:
-        existing = UserNotification.objects.filter(dedupe_key=dedupe_key).first()
-        if existing is not None:
-            return existing
-        return UserNotification.objects.create(
-            user=user,
-            type=type_value,
-            category=graph['category'],
-            title=title[:200],
-            body=body,
-            link=link[:300],
-            related_object_type=related_object_type[:50],
-            related_object_id=related_object_id[:64],
+        notification, _ = UserNotification.objects.get_or_create(
             dedupe_key=dedupe_key[:150],
+            defaults={
+                'user': user,
+                'type': type_value,
+                'category': graph['category'],
+                'title': title[:200],
+                'body': body,
+                'link': link[:300],
+                'related_object_type': related_object_type[:50],
+                'related_object_id': related_object_id[:64],
+            },
         )
+        return notification
     return UserNotification.objects.create(
         user=user,
         type=type_value,
@@ -269,7 +269,10 @@ def notify(
 
     graph = graph_for(type)
     template = graph.get('email_template')
-    if notification is None or email_key is None or not send_email or not template:
+    # In-app and email preferences are independent. A muted in-app category
+    # returns no row, but its companion email must still be allowed when the
+    # corresponding ``email_*`` preference remains enabled.
+    if email_key is None or not send_email or not template:
         return notification
 
     try:

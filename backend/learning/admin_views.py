@@ -24,7 +24,7 @@ from .models import (
     Certification, UserCertification, Competition, UserNotification,
     AuthenticationAuditLog, Announcement, LessonProgress, PlatformSetting, MaintenanceSettings, Practical, PracticalClass, PracticalSubject,
     CompetitionRegistration, RegistrationFormField, PlatformUpdate,
-    EmailCampaign, EmailCampaignRecipient, EmailTemplate,
+    EmailCampaign, EmailCampaignRecipient, EmailTemplate, EmailTheme, EmailAutomationRule,
     record_admin_action,
     seed_default_registration_fields,
 )
@@ -2174,7 +2174,7 @@ class EmailTemplateAdminSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'category', 'description', 'subject', 'heading',
             'preview_text', 'body_html', 'plain_text', 'cta_label', 'cta_url',
-            'footer_content', 'is_favorite', 'created_by', 'created_by_name',
+            'footer_content', 'theme', 'is_favorite', 'created_by', 'created_by_name',
             'variables_used', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
@@ -2374,6 +2374,66 @@ class AuditLogAdminSerializer(serializers.ModelSerializer):
             'user_agent', 'metadata', 'created_at',
         ]
         read_only_fields = fields
+
+
+class EmailThemeAdminSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EmailTheme
+        fields = ['id', 'slug', 'name', 'description', 'best_for', 'primary_color',
+                  'accent_color', 'highlight_color', 'background_color', 'is_default',
+                  'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class EmailThemeAdminViewSet(viewsets.ModelViewSet):
+    queryset = EmailTheme.objects.all()
+    serializer_class = EmailThemeAdminSerializer
+    permission_classes = [IsSuperAdmin]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name', 'description']
+    ordering = ['name']
+
+
+class EmailAutomationRuleAdminSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EmailAutomationRule
+        fields = ['id', 'trigger', 'name', 'description', 'enabled', 'template',
+                  'theme', 'subject_override', 'delay_minutes', 'recipient_group',
+                  'last_run_at', 'success_count', 'failure_count', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'last_run_at', 'success_count', 'failure_count', 'created_at', 'updated_at']
+
+
+class EmailAutomationRuleAdminViewSet(viewsets.ModelViewSet):
+    queryset = EmailAutomationRule.objects.select_related('template').all()
+    serializer_class = EmailAutomationRuleAdminSerializer
+    permission_classes = [IsSuperAdmin]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name', 'trigger', 'description']
+    ordering = ['name']
+
+    @action(detail=True, methods=['post'])
+    def toggle(self, request, pk=None):
+        obj = self.get_object()
+        obj.enabled = not obj.enabled
+        obj.save(update_fields=['enabled', 'updated_at'])
+        return Response(EmailAutomationRuleAdminSerializer(obj).data)
+
+    @action(detail=True, methods=['post'])
+    def test(self, request, pk=None):
+        obj = self.get_object()
+        to_email = request.data.get('to_email') or request.user.email
+        from .services.email_campaigns import send_test_email
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        data = {
+            'subject': obj.subject_override or (obj.template.subject if obj.template else 'Test'),
+            'heading': (obj.template.heading if obj.template else obj.name),
+            'body_html': (obj.template.body_html if obj.template else '<p>Test</p>'),
+            'cta_label': (obj.template.cta_label if obj.template else ''),
+            'cta_url': (obj.template.cta_url if obj.template else ''),
+        }
+        result = send_test_email(data, request.user, to_email=to_email)
+        return Response(result)
 
 
 class AuditLogAdminViewSet(viewsets.ReadOnlyModelViewSet):

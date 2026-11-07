@@ -1,0 +1,31 @@
+[Unit]
+Description=Code Yaar Django API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=codeyaar
+Group=codeyaar
+WorkingDirectory=/opt/codeyaar/backend
+EnvironmentFile=/etc/codeyaar/api.env
+Environment=DJANGO_SETTINGS_MODULE=config.production
+ExecStart=/opt/codeyaar/venv/bin/gunicorn config.wsgi:application --bind 127.0.0.1:8000 --workers 2 --threads 2 --timeout 120 --graceful-timeout 30 --keep-alive 5 --error-logfile -
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/srv/codeyaar/media
+MemoryMax=2G
+CPUQuota=150%
+
+[Install]
+WantedBy=multi-user.target

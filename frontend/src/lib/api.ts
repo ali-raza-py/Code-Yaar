@@ -694,12 +694,13 @@ export async function restoreSession(): Promise<MePayload | null> {
 // ─── Course Endpoints ───────────────────────────────────────────────────────
 
 export const courses = {
-  list: async (params?: { track?: string; difficulty?: string; language?: string; search?: string }): Promise<Course[]> => {
+  list: async (params?: { track?: string; difficulty?: string; language?: string; search?: string; page_size?: number }): Promise<Course[]> => {
     const query = new URLSearchParams();
     if (params?.track) query.set('track', params.track);
     if (params?.difficulty) query.set('difficulty', params.difficulty);
     if (params?.language) query.set('language', params.language);
     if (params?.search) query.set('search', params.search);
+    query.set('page_size', String(params?.page_size ?? 200));
     const qs = query.toString();
     const data = await request<Paginated<Course>>(`/courses/${qs ? `?${qs}` : ''}`);
     return unwrapList(data);

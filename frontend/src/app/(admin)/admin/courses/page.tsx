@@ -21,7 +21,7 @@ export default function AdminCoursesPage() {
   const load = useCallback(async () => {
     if (!user) return;
     try {
-      const data = await adminApi.listCourses({ page_size: 100 });
+      const data = await adminApi.listCourses({ page_size: 200 });
       setCourses(data.results);
       setError(false);
     } catch {

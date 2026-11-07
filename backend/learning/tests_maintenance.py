@@ -1,6 +1,7 @@
 import json
 
 from django.contrib.auth.models import User
+from django.core.cache import cache
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -26,6 +27,10 @@ class MaintenanceModeTests(TestCase):
         settings.is_enabled = True
         settings.maintenance_message = 'Scheduled maintenance.'
         settings.save()
+
+    def tearDown(self):
+        cache.delete(MaintenanceSettings.CACHE_KEY)
+        super().tearDown()
 
     def test_anonymous_api_request_returns_structured_503(self):
         response = self.client.get('/api/courses/')

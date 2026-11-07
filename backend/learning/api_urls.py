@@ -49,6 +49,8 @@ router.register(r'admin/course-categories', studio_views.CourseCategoryViewSet,
 router.register(r'admin/hackathon-registrations', admin_views.CompetitionRegistrationAdminViewSet, basename='admin-hackathon-registration')
 router.register(r'admin/email-campaigns', admin_views.EmailCampaignAdminViewSet, basename='admin-email-campaign')
 router.register(r'admin/email-templates', admin_views.EmailTemplateAdminViewSet, basename='admin-email-template')
+router.register(r'admin/email-themes', admin_views.EmailThemeAdminViewSet, basename='admin-email-theme')
+router.register(r'admin/email-automations', admin_views.EmailAutomationRuleAdminViewSet, basename='admin-email-automation')
 router.register(r'admin/achievements', admin_views.AchievementAdminViewSet, basename='admin-achievement')
 router.register(r'admin/certificates', admin_views.CertificateAdminViewSet, basename='admin-certificate')
 router.register(r'admin/audit-logs', admin_views.AuditLogAdminViewSet, basename='admin-audit-log')

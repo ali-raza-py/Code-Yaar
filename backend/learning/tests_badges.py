@@ -230,6 +230,82 @@ class NotificationAPITest(TestCase):
         self.assertEqual(res.data['unread_count'], 1)
         self.assertEqual(len(res.data['results']), 1)
         self.assertTrue(res.data['results'][0]['unread'])
+        self.assertIn('category', res.data['results'][0])
+        self.assertGreaterEqual(res.data['count'], 1)
+        self.assertGreaterEqual(res.data['total_pages'], 1)
+
+    def test_category_filter_validates_input(self):
+        UserNotification.objects.create(
+            user=self.user, type='competition_registered',
+            category='competition', title='comp',
+        )
+        res = self.client.get('/api/notifications/', {'category': 'learning'})
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(res.data['results']), 1)
+        self.assertEqual(res.data['results'][0]['category'], 'learning')
+        res = self.client.get('/api/notifications/', {'category': 'nope'})
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_status_filter(self):
+        UserNotification.objects.create(user=self.user, type='xp_milestone', title='xp')
+        read_one = UserNotification.objects.filter(user=self.user).first()
+        read_one.read_at = timezone.now()
+        read_one.save(update_fields=['read_at'])
+        res = self.client.get('/api/notifications/', {'status': 'unread'})
+        self.assertEqual(len(res.data['results']), 1)
+        res = self.client.get('/api/notifications/', {'status': 'read'})
+        self.assertEqual(len(res.data['results']), 1)
+
+    def test_unread_count_endpoint(self):
+        res = self.client.get('/api/notifications/unread-count/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['unread_count'], 1)
+
+    def test_delete_removes_only_own_notification(self):
+        other = make_learner('notif-other')
+        foreign = UserNotification.objects.create(user=other, type='xp_milestone', title='x')
+        mine = UserNotification.objects.get(user=self.user)
+        res = self.client.delete(f'/api/notifications/{foreign.id}/')
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertTrue(UserNotification.objects.filter(pk=foreign.pk).exists())
+        res = self.client.delete(f'/api/notifications/{mine.id}/')
+        self.assertEqual(res.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(UserNotification.objects.filter(pk=mine.pk).exists())
+
+    def test_preferences_echo_effective_defaults_including_digest(self):
+        res = self.client.get('/api/notifications/preferences/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        prefs = res.data['notification_preferences']
+        for key in (
+            'achievements', 'learning_reminders', 'streak_reminders',
+            'community', 'announcements', 'competitions',
+            'email_learning', 'email_competitions', 'email_achievements',
+            'email_certificates', 'email_announcements',
+        ):
+            self.assertIn(key, prefs)
+            self.assertTrue(prefs[key])
+        self.assertEqual(prefs['email_digest'], 'none')
+
+    def test_preferences_patch_validates_digest_choice(self):
+        res = self.client.patch(
+            '/api/notifications/preferences/',
+            {'email_digest': 'hourly'},
+            format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        res = self.client.patch(
+            '/api/notifications/preferences/',
+            {'email_digest': 'weekly', 'competitions': False, 'email_competitions': False},
+            format='json',
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        prefs = res.data['notification_preferences']
+        self.assertEqual(prefs['email_digest'], 'weekly')
+        self.assertFalse(prefs['competitions'])
+        self.assertFalse(prefs['email_competitions'])
+        self.user.profile.refresh_from_db()
+        stored = self.user.profile.notification_preferences
+        self.assertEqual(stored['email_digest'], 'weekly')
 
     def test_mark_single_read(self):
         n = UserNotification.objects.get(user=self.user)

@@ -481,6 +481,35 @@ export interface EmailSettingsAdmin {
   note?: string;
 }
 
+export interface EmailThemeAdmin {
+  id: number;
+  slug: string;
+  name: string;
+  description: string;
+  best_for: string;
+  primary_color: string;
+  accent_color: string;
+  highlight_color: string;
+  background_color: string;
+  is_default: boolean;
+}
+
+export interface EmailAutomationAdmin {
+  id: number;
+  trigger: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  template: number | null;
+  theme: string;
+  subject_override: string;
+  delay_minutes: number;
+  recipient_group: string;
+  last_run_at: string | null;
+  success_count: number;
+  failure_count: number;
+}
+
 export interface AuditLogAdmin {
   id: number;
   admin_user: number;
@@ -1349,6 +1378,13 @@ export const adminApi = {
 
   getEmailSettings: () =>
     adminRequest<EmailSettingsAdmin>("/email/settings/"),
+
+  listEmailThemes: () =>
+    adminRequest<AdminPaginatedResponse<EmailThemeAdmin>>("/email-themes/?page_size=100"),
+  listEmailAutomations: () =>
+    adminRequest<AdminPaginatedResponse<EmailAutomationAdmin>>("/email-automations/?page_size=100"),
+  toggleEmailAutomation: (id: number) =>
+    adminRequest<EmailAutomationAdmin>(`/email-automations/${id}/toggle/`, { method: "POST" }),
 
   // Audit Logs
   listAuditLogs: (params?: AdminListParams) => {

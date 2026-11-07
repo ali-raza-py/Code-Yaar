@@ -97,6 +97,7 @@ class UserProfile(models.Model):
         help_text='Set when the learner requests account deletion; an admin action follows'
     )
     last_active_at = models.DateTimeField(null=True, blank=True)
+    first_login_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1481,6 +1482,10 @@ class EmailTemplate(models.Model):
         blank=True, default='',
         help_text='Optional closing line appended to the body when the template is used',
     )
+    theme = models.CharField(
+        max_length=40, default='emerald-signature', blank=True,
+        help_text='Visual theme applied when rendering this template',
+    )
     is_favorite = models.BooleanField(default=False)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
@@ -1551,6 +1556,56 @@ class EmailCampaignRecipient(models.Model):
 
     def __str__(self):
         return f'{self.campaign_id}:{self.status}'
+
+
+class EmailTheme(models.Model):
+    """A visual theme for transactional/composed emails."""
+
+    slug = models.SlugField(max_length=40, unique=True)
+    name = models.CharField(max_length=80)
+    description = models.TextField(blank=True, default='')
+    best_for = models.TextField(blank=True, default='')
+    primary_color = models.CharField(max_length=20, default='#073D32')
+    accent_color = models.CharField(max_length=20, default='#087F68')
+    highlight_color = models.CharField(max_length=20, default='#A9EDCC')
+    background_color = models.CharField(max_length=20, default='#FFFFFF')
+    is_default = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class EmailAutomationRule(models.Model):
+    """Configuration for an event-driven automated email."""
+
+    trigger = models.CharField(max_length=80, unique=True)
+    name = models.CharField(max_length=120)
+    description = models.TextField(blank=True, default='')
+    enabled = models.BooleanField(default=True)
+    template = models.ForeignKey(
+        'EmailTemplate', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='automation_rules',
+    )
+    theme = models.CharField(max_length=40, default='emerald-signature', blank=True)
+    subject_override = models.CharField(max_length=200, blank=True, default='')
+    delay_minutes = models.PositiveIntegerField(default=0)
+    recipient_group = models.CharField(max_length=80, default='trigger_recipient')
+    last_run_at = models.DateTimeField(null=True, blank=True)
+    success_count = models.PositiveIntegerField(default=0)
+    failure_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return f'{self.name} ({self.trigger})'
 
 
 class PlatformSetting(models.Model):

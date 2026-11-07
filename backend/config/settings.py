@@ -394,8 +394,8 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticatedOrReadOnly',
     ],
-    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 20,
+    'DEFAULT_PAGINATION_CLASS': 'learning.pagination.FlexiblePagination',
+    'PAGE_SIZE': 100,
     # Scoped throttles guard credential endpoints against brute force and
     # email-bombing. Views opt in through `throttle_scope`.
     'DEFAULT_THROTTLE_CLASSES': [
@@ -422,3 +422,5 @@ REST_FRAMEWORK = {
         'email_campaign_send': os.getenv('THROTTLE_EMAIL_CAMPAIGN_SEND', '60/hour'),
     },
 }
+
+
