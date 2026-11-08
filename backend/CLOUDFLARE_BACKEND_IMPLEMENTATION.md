@@ -16,6 +16,21 @@ CPython with Pillow 11.3.0, but Worker-runtime tests remain unverified. No
 Worker has been deployed, no DNS/routes were changed, and no production
 configuration or database was modified.
 
+The first connected-build deployment then failed with Cloudflare error 10021
+(`multipart: message too large`). Wrangler measured the staged Worker at
+80,528 KiB uncompressed, above Cloudflare's 64 MiB Worker-size limit. The
+application uses boto3 only through Django's S3 storage backend, but the
+default Botocore wheel includes service models for hundreds of AWS services.
+The staging script now retains Botocore's shared configuration and S3 model
+only. This preserves the configured R2/S3 storage client while removing
+unreferenced service metadata. It also removes Django gettext `.po` source
+catalogs from the staged bundle while retaining compiled `.mo` translations
+used at runtime. The Worker name is aligned to `code-yaar` to match the
+connected-build setting and avoid name override warnings. The final Wrangler
+dry-run passed at 60,941 KiB uncompressed (15,479 KiB gzip), below the 64 MiB
+Worker limit. The reduced bundle's boto3 S3 client and Django S3Storage
+presigned-URL generation both passed local checks.
+
 The Worker project root is `backend/cloudflare/`, isolated from the
 conventional `backend/requirements.txt`. Cloudflare Workers Builds must use
 this root so Pywrangler can find its manifest without encountering the

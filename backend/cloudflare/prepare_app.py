@@ -44,6 +44,42 @@ def main() -> None:
             "pyvenv.cfg", ".synced", "__pycache__", "*.py[cod]"
         ),
     )
+    modules = DIST_ROOT / "python_modules"
+    _prune_unused_aws_service_models(modules)
+    _prune_translation_sources(modules)
+
+
+def _prune_unused_aws_service_models(python_modules: Path) -> None:
+    """Keep Botocore's shared data and S3 model used by django-storages."""
+    data_dir = python_modules / "botocore" / "data"
+    if not data_dir.is_dir():
+        raise FileNotFoundError(f"Botocore service data is missing: {data_dir}")
+
+    s3_model = data_dir / "s3"
+    required_shared_data = (
+        "_retry.json",
+        "endpoints.json",
+        "partitions.json",
+        "sdk-default-configuration.json",
+    )
+    missing = [name for name in required_shared_data if not (data_dir / name).is_file()]
+    if missing or not s3_model.is_dir():
+        raise FileNotFoundError(
+            f"Botocore S3 runtime data is incomplete: {', '.join(missing) or s3_model}"
+        )
+
+    for path in data_dir.iterdir():
+        if path.is_dir() and path.name != "s3":
+            shutil.rmtree(path)
+
+
+def _prune_translation_sources(python_modules: Path) -> None:
+    """Keep compiled translations; omit gettext source catalogs not used at runtime."""
+    locale_dir = python_modules / "django" / "conf" / "locale"
+    if not locale_dir.is_dir():
+        raise FileNotFoundError(f"Django locale data is missing: {locale_dir}")
+    for path in locale_dir.rglob("*.po"):
+        path.unlink()
 
 
 if __name__ == "__main__":
