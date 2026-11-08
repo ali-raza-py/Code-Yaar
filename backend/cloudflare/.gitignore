@@ -1,0 +1,11 @@
+.venv/
+.venv-workers/
+.wrangler/
+.python-version
+.uv-cache/
+.dev.vars
+.dev.vars.*
+python_modules/
+dist/
+pylock.toml
+node_modules/

@@ -25,6 +25,7 @@ from django.apps import apps
 from django.conf import settings
 from django.core.management import BaseCommand, call_command
 from django.db import connection, transaction
+from django.db.models import JSONField
 
 
 # Transfer order: providers before dependents. Django's content apps first,
@@ -100,6 +101,14 @@ TRANSFER_ORDER = [
     'certificates_certificate',
     'certificates_certificateevent',
 ]
+
+
+def prepare_json_value(value, field, database_connection):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = json.loads(value)
+    return (field or JSONField()).get_db_prep_save(value, database_connection)
 
 
 class Command(BaseCommand):
@@ -223,7 +232,7 @@ class Command(BaseCommand):
             # in the stale SQLite snapshot (added by a migration applied after
             # the backup). Values come from the model field's own default, so
             # they exactly match what the ORM would store for a new row - no
-            # fabricated content. jsonb columns receive a JSON literal string.
+            # fabricated content.
             model_by_table = {m._meta.db_table: m for m in apps.get_models()}
             with connection.cursor() as cur:
                 bool_type_code = next(
@@ -250,6 +259,14 @@ class Command(BaseCommand):
                 # Columns PostgreSQL needs but SQLite never had (skip the pk).
                 model = model_by_table.get(table)
                 extra = []  # (col, default_value)
+                model_fields = {
+                    field.column: field
+                    for field in (model._meta.local_concrete_fields if model else [])
+                }
+                json_columns = {
+                    name for name, type_code, _ in pg_cols
+                    if type_code in json_type_codes
+                }
                 for name, tc, is_pk in pg_cols:
                     if name in src_set or is_pk:
                         continue
@@ -263,16 +280,26 @@ class Command(BaseCommand):
                         value = {}
                     else:
                         value = None  # nullable FK / timestamp / text column
-                    if tc in json_type_codes:
-                        value = json.dumps(value)
                     extra.append((name, value))
 
                 cols = src_cols + [name for name, _ in extra]
-                defaults = [v for _, v in extra]
+                defaults = [
+                    prepare_json_value(value, model_fields.get(name), connection)
+                    if name in json_columns else value
+                    for name, value in extra
+                ]
                 insert_rows = []
                 for r in src.execute(f'SELECT * FROM "{table}"'):
-                    coerced = [bool(r[c]) if c in bool_idx and r[c] is not None else r[c]
-                               for c in src_cols]
+                    coerced = []
+                    for column in src_cols:
+                        value = r[column]
+                        if column in bool_idx and value is not None:
+                            value = bool(value)
+                        if column in json_columns:
+                            value = prepare_json_value(
+                                value, model_fields.get(column), connection,
+                            )
+                        coerced.append(value)
                     insert_rows.append(tuple(coerced + defaults))
 
                 col_list = ', '.join(f'"{c}"' for c in cols)

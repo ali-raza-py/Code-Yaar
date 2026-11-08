@@ -113,6 +113,8 @@ class UserProfile(models.Model):
         text = getattr(value, 'name', '') or str(value)
         if text.startswith(('http://', 'https://')):
             return text
+        if getattr(settings, 'CLOUD_STORAGE_ENABLED', False):
+            return value.url
         # Frontend and API commonly run on different origins. Keep legacy
         # root-relative values usable by pointing them at the configured API.
         path = text if text.startswith('/') else f'/{text}'

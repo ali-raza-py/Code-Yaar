@@ -152,6 +152,19 @@ class RemoteSandboxClientTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             DockerSandbox('http://127.0.0.1:8765', 'short')
 
+    def test_allows_https_runner_on_remote_host(self):
+        sandbox = DockerSandbox('https://runner.example.test', 't' * 32)
+
+        self.assertEqual(sandbox.runner_url, 'https://runner.example.test')
+
+    def test_rejects_remote_runner_urls_with_path_or_credentials(self):
+        for url in (
+            'https://runner.example.test/api',
+            'https://user:password@runner.example.test',
+        ):
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                DockerSandbox(url, 't' * 32)
+
     def test_execute_sends_auth_and_converts_runner_result(self):
         result_body = json.dumps({
             'status': 'success',
