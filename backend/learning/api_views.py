@@ -9,7 +9,8 @@ from rest_framework.throttling import ScopedRateThrottle
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import F, Sum, Count, Q, Avg, Case, When, Value, IntegerField
+from django.db.models import F, Sum, Count, Q, Avg, Case, When, Value, IntegerField, OuterRef, Subquery
+from django.db.models.functions import Coalesce
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -2259,7 +2260,21 @@ def leaderboard_view(request):
 
     profiles = UserProfile.objects.select_related('user').order_by('-xp_points')
     total = profiles.count()
-    page = profiles[offset:offset + limit]
+
+    def per_user_count(queryset, expression):
+        inner = queryset.order_by().values('user').annotate(n=expression).values('n')[:1]
+        return Coalesce(Subquery(inner), 0, output_field=IntegerField())
+
+    page = profiles.annotate(
+        courses_completed=per_user_count(
+            Enrollment.objects.filter(user=OuterRef('user_id'), status='completed'),
+            Count('pk'),
+        ),
+        challenges_solved=per_user_count(
+            ExerciseAttempt.objects.filter(user=OuterRef('user_id'), status='correct'),
+            Count('exercise', distinct=True),
+        ),
+    )[offset:offset + limit]
 
     entries = []
     for rank, profile in enumerate(page, start=offset + 1):
@@ -2270,8 +2285,8 @@ def leaderboard_view(request):
             'xp_points': profile.xp_points,
             'level': profile.level,
             'streak_days': profile.streak_days,
-            'courses_completed': courses_completed,
-            'challenges_solved': challenges_solved,
+            'courses_completed': profile.courses_completed,
+            'challenges_solved': profile.challenges_solved,
         })
 
     return Response({

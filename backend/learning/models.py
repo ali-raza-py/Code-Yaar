@@ -3,6 +3,8 @@ import uuid
 
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Count, OuterRef, Subquery, Sum
+from django.db.models.functions import Coalesce
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
@@ -191,6 +193,74 @@ class CareerTrack(models.Model):
         ordering = ['order', 'title']
 
 
+class CourseCategory(models.Model):
+    """Configurable catalogue category for a course.
+
+    Categories are data, not code: the Course Creation Studio offers these as a
+    dropdown and an administrator can add or retire one without a deploy.
+    """
+
+    slug = models.SlugField(max_length=80, unique=True)
+    title = models.CharField(max_length=120)
+    order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.title
+
+    class Meta:
+        ordering = ['order', 'title']
+        verbose_name_plural = 'course categories'
+
+
+class CourseQuerySet(models.QuerySet):
+    """Course listings with content aggregates in a single query."""
+
+    def with_catalogue_stats(self):
+        def scalar(queryset, group_by, expression):
+            inner = (
+                queryset.order_by()
+                .values(group_by)
+                .annotate(value=expression)
+                .values('value')[:1]
+            )
+            return Coalesce(
+                Subquery(inner),
+                0,
+                output_field=models.IntegerField(),
+            )
+
+        active_chapters = Chapter.objects.filter(
+            course=OuterRef('pk'),
+            is_active=True,
+        )
+        active_lessons = Lesson.objects.filter(
+            chapter__course=OuterRef('pk'),
+            chapter__is_active=True,
+            is_active=True,
+        )
+        active_exercises = Exercise.objects.filter(
+            lesson__chapter__course=OuterRef('pk'),
+            lesson__chapter__is_active=True,
+            lesson__is_active=True,
+            is_active=True,
+        )
+        return self.annotate(
+            chapter_count_agg=scalar(active_chapters, 'course', Count('pk')),
+            lesson_count_agg=scalar(active_lessons, 'chapter__course', Count('pk')),
+            exercise_count_agg=scalar(
+                active_exercises, 'lesson__chapter__course', Count('pk')
+            ),
+            lesson_xp_agg=scalar(active_lessons, 'chapter__course', Sum('xp_reward')),
+            exercise_xp_agg=scalar(
+                active_exercises, 'lesson__chapter__course', Sum('xp_reward')
+            ),
+            lesson_minutes_agg=scalar(
+                active_lessons, 'chapter__course', Sum('duration_minutes')
+            ),
+        )
+
+
 class Course(models.Model):
     """A course within a career track."""
     DIFFICULTY_CHOICES = [
@@ -365,9 +435,11 @@ class Course(models.Model):
     @property
     def estimated_hours(self):
         """Derived from actual lesson durations."""
-        minutes = Lesson.objects.filter(
-            chapter__course=self, chapter__is_active=True, is_active=True
-        ).aggregate(s=models.Sum('duration_minutes'))['s'] or 0
+        minutes = self._agg('lesson_minutes_agg')
+        if minutes is None:
+            minutes = Lesson.objects.filter(
+                chapter__course=self, chapter__is_active=True, is_active=True
+            ).aggregate(s=models.Sum('duration_minutes'))['s'] or 0
         return max(1, round(minutes / 60))
 
     @property
