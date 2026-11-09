@@ -33,7 +33,7 @@ def main() -> None:
         shutil.copy2(source, destination)
 
     if DIST_ROOT.exists():
-        shutil.rmtree(DIST_ROOT)
+        shutil.rmtree(DIST_ROOT, ignore_errors=True)
     DIST_ROOT.mkdir()
     shutil.copy2(WORKER_ROOT / "worker.py", DIST_ROOT / "worker.py")
     shutil.copy2(WORKER_ROOT / "wrangler.jsonc", DIST_ROOT / "wrangler.jsonc")
@@ -46,7 +46,7 @@ def main() -> None:
     )
     modules = DIST_ROOT / "python_modules"
     _prune_unused_aws_service_models(modules)
-    _prune_translation_sources(modules)
+    _prune_non_runtime_python_artifacts(modules)
 
 
 def _prune_unused_aws_service_models(python_modules: Path) -> None:
@@ -73,13 +73,19 @@ def _prune_unused_aws_service_models(python_modules: Path) -> None:
             shutil.rmtree(path)
 
 
-def _prune_translation_sources(python_modules: Path) -> None:
-    """Keep compiled translations; omit gettext source catalogs not used at runtime."""
-    locale_dir = python_modules / "django" / "conf" / "locale"
-    if not locale_dir.is_dir():
-        raise FileNotFoundError(f"Django locale data is missing: {locale_dir}")
-    for path in locale_dir.rglob("*.po"):
-        path.unlink()
+def _prune_non_runtime_python_artifacts(python_modules: Path) -> None:
+    """Drop generated metadata and source artifacts not needed at runtime."""
+    for pattern in ("*.po", "*.mo", "*.pyc", "*.pyo"):
+        for path in list(python_modules.rglob(pattern)):
+            path.unlink()
+
+    for path in list(python_modules.rglob("__pycache__")):
+        if path.is_dir():
+            shutil.rmtree(path)
+
+    for path in list(python_modules.rglob("*.dist-info")):
+        if path.is_dir():
+            shutil.rmtree(path)
 
 
 if __name__ == "__main__":

@@ -23,13 +23,14 @@ application uses boto3 only through Django's S3 storage backend, but the
 default Botocore wheel includes service models for hundreds of AWS services.
 The staging script now retains Botocore's shared configuration and S3 model
 only. This preserves the configured R2/S3 storage client while removing
-unreferenced service metadata. It also removes Django gettext `.po` source
-catalogs from the staged bundle while retaining compiled `.mo` translations
-used at runtime. The Worker name is aligned to `code-yaar` to match the
-connected-build setting and avoid name override warnings. The final Wrangler
-dry-run passed at 60,941 KiB uncompressed (15,479 KiB gzip), below the 64 MiB
-Worker limit. The reduced bundle's boto3 S3 client and Django S3Storage
-presigned-URL generation both passed local checks.
+unreferenced service metadata. A clean re-sync and rebuild then removed the
+remaining generated `.po`, `.mo`, `.pyc`, `.pyo`, `__pycache__`, and
+`*.dist-info` artifacts from the Worker bundle. The final dry-run now uploads
+46,770.87 KiB uncompressed / 12,548.75 KiB gzip, well below Cloudflare's 64
+MiB Worker-size limit, and it completes without the 10021 multipart error. The
+Worker name is aligned to `code-yaar` to match the connected-build setting and
+avoid name override warnings. The reduced bundle's boto3 S3 client and Django
+S3Storage presigned-URL generation passed local checks.
 
 The Worker project root is `backend/cloudflare/`, isolated from the
 conventional `backend/requirements.txt`. Cloudflare Workers Builds must use
