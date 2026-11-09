@@ -1,0 +1,31 @@
+[Unit]
+Description=Code Yaar isolated code execution runner
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=codeyaar-runner
+Group=codeyaar-runner
+SupplementaryGroups=docker
+WorkingDirectory=/opt/codeyaar/backend
+EnvironmentFile=/etc/codeyaar/sandbox-runner.env
+ExecStart=/opt/codeyaar/venv/bin/python /opt/codeyaar/backend/learning/services/sandbox_runner.py
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/srv/codeyaar/sandbox /run/docker.sock
+MemoryMax=512M
+CPUQuota=100%
+
+[Install]
+WantedBy=multi-user.target

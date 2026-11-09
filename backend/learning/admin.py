@@ -10,9 +10,87 @@ from .models import (
     Skill, UserSkill, EmailVerificationToken, PasswordResetToken,
     AuthenticationAuditLog, PracticalClass, PracticalSubject, Practical,
     PracticalProgress, PracticalBookmark, LearningActivity,
+    Portfolio, StudentProject, ProjectImage,
+    Competition, CompetitionRegistration, CompetitionTeam,
+    CompetitionTeamMember, CompetitionSubmission, CompetitionResult,
+    UserNotification, NotificationEmailLog, MaintenanceSettings,
 )
 
 User = get_user_model()
+
+
+@admin.register(MaintenanceSettings)
+class MaintenanceSettingsAdmin(admin.ModelAdmin):
+    list_display = ['status', 'maintenance_message', 'estimated_return_time', 'updated_at']
+    fields = ['is_enabled', 'maintenance_message', 'estimated_return_time', 'updated_at']
+    readonly_fields = ['updated_at']
+    list_display_links = ['status']
+
+    @admin.display(description='Status', boolean=True)
+    def status(self, obj):
+        return obj.is_enabled
+
+    def has_module_permission(self, request):
+        return request.user.is_superuser
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(Competition)
+class CompetitionAdmin(admin.ModelAdmin):
+    list_display = ['title', 'organizer', 'category', 'status', 'is_published', 'registration_deadline']
+    list_filter = ['is_published', 'difficulty', 'format', 'delivery_mode']
+    search_fields = ['title', 'slug', 'organizer__username']
+    prepopulated_fields = {'slug': ('title',)}
+    readonly_fields = ['created_at', 'updated_at']
+
+
+@admin.register(CompetitionRegistration)
+class CompetitionRegistrationAdmin(admin.ModelAdmin):
+    list_display = ['competition', 'user', 'registration_status', 'team', 'registered_at']
+    list_filter = ['registration_status']
+    search_fields = ['competition__title', 'user__username']
+    raw_id_fields = ['competition', 'user', 'team']
+
+
+@admin.register(CompetitionTeam)
+class CompetitionTeamAdmin(admin.ModelAdmin):
+    list_display = ['name', 'competition', 'leader', 'created_at']
+    search_fields = ['name', 'competition__title', 'leader__username']
+
+
+@admin.register(CompetitionTeamMember)
+class CompetitionTeamMemberAdmin(admin.ModelAdmin):
+    list_display = ['team', 'user', 'invitation_status', 'joined_at']
+    list_filter = ['invitation_status']
+
+
+@admin.register(CompetitionSubmission)
+class CompetitionSubmissionAdmin(admin.ModelAdmin):
+    list_display = ['project_title', 'competition_display', 'status', 'submitted_at']
+    list_filter = ['status']
+    search_fields = ['project_title', 'registration__competition__title']
+    readonly_fields = ['submitted_at', 'updated_at']
+
+    @admin.display(description='Competition')
+    def competition_display(self, obj):
+        return obj.registration.competition.title
+
+
+@admin.register(CompetitionResult)
+class CompetitionResultAdmin(admin.ModelAdmin):
+    list_display = ['competition', 'registration', 'rank', 'final_score', 'is_published']
+    list_filter = ['is_published']
 
 
 # ─── Textbook provenance ────────────────────────────────────────────────
@@ -490,6 +568,29 @@ class ProjectAdmin(admin.ModelAdmin):
     inlines = [ProjectMilestoneInline]
 
 
+class ProjectImageInline(admin.TabularInline):
+    model = ProjectImage
+    extra = 0
+
+
+@admin.register(Portfolio)
+class PortfolioAdmin(admin.ModelAdmin):
+    list_display = ['user', 'is_published', 'show_skills', 'show_achievements', 'updated_at']
+    list_filter = ['is_published', 'show_skills', 'show_achievements', 'show_learning_progress']
+    search_fields = ['user__username', 'headline']
+    readonly_fields = ['created_at', 'updated_at']
+
+
+@admin.register(StudentProject)
+class StudentProjectAdmin(admin.ModelAdmin):
+    list_display = ['title', 'user', 'category', 'status', 'featured', 'visibility', 'display_order']
+    list_filter = ['category', 'status', 'visibility', 'featured']
+    search_fields = ['title', 'short_description', 'user__username']
+    prepopulated_fields = {'slug': ('title',)}
+    ordering = ['user', 'display_order']
+    inlines = [ProjectImageInline]
+
+
 @admin.register(Challenge)
 class ChallengeAdmin(admin.ModelAdmin):
     list_display = ['title', 'difficulty', 'topic', 'estimated_minutes', 'xp_reward', 'is_active']
@@ -770,6 +871,47 @@ class AuthenticationAuditLogAdmin(admin.ModelAdmin):
         'metadata', 'created_at',
     ]
     date_hierarchy = 'created_at'
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(UserNotification)
+class UserNotificationAdmin(admin.ModelAdmin):
+    """Operational view of in-app notifications; never hand-authored here —
+    services create notifications so titles/links/dedupe keys stay consistent."""
+
+    list_display = ['user', 'type', 'category', 'title', 'is_unread', 'created_at']
+    list_filter = ['category', 'type', 'created_at']
+    search_fields = ['user__username', 'user__email', 'title', 'body']
+    raw_id_fields = ['user']
+    date_hierarchy = 'created_at'
+    readonly_fields = [
+        'type', 'category', 'related_object_type', 'related_object_id',
+        'dedupe_key', 'read_at', 'created_at', 'updated_at',
+    ]
+
+
+@admin.register(NotificationEmailLog)
+class NotificationEmailLogAdmin(admin.ModelAdmin):
+    """Delivery ledger for event-triggered email; read-only — rows are owned
+    by the email service (claims, outcomes, retries)."""
+
+    list_display = [
+        'email_key', 'user', 'kind', 'subject', 'status',
+        'sent_at', 'created_at',
+    ]
+    list_filter = ['status', 'kind', 'created_at']
+    search_fields = ['email_key', 'user__username', 'user__email', 'subject']
+    raw_id_fields = ['user', 'notification']
+    date_hierarchy = 'created_at'
+    readonly_fields = [
+        'user', 'notification', 'email_key', 'kind', 'category', 'subject',
+        'status', 'error', 'attempted_at', 'sent_at', 'created_at',
+    ]
 
     def has_add_permission(self, request):
         return False

@@ -1,0 +1,13 @@
+{% extends "emails/base.html" %}
+{% comment %}
+Admin-composed campaign mail (emails/campaign_general.html).
+
+The header pill, greeting, action button and the footer links — including the
+one-click unsubscribe — all come from the shared layout, so this template only
+has to lay out the optional banner and the paragraphs the admin wrote.
+{% endcomment %}
+{% block body %}
+{% if banner_url %}<img src="{{ banner_url }}" alt="" style="display: block; width: 100%; border: 0; border-radius: 10px; margin: 0 0 20px;" />{% endif %}
+{% for paragraph in paragraphs %}{% include "emails/_p.html" with text=paragraph %}
+{% endfor %}
+{% endblock %}

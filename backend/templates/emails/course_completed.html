@@ -1,0 +1,10 @@
+{% extends "emails/base.html" %}
+{% block preheader %}Nice work — {{ course_title }} is complete.{% endblock %}
+{% block heading %}Course completed — congratulations{% endblock %}
+{% block body %}
+<p style="margin: 0 0 14px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.7; color: #334155;">You completed <strong>{{ course_title }}</strong> and earned the XP that comes with it.</p>
+{% if certification_note %}<p style="margin: 0 0 14px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.7; color: #334155;">{{ certification_note }}</p>{% endif %}
+<p style="margin: 0 0 14px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.7; color: #334155;">Keep the momentum — the next course in your track is a good place to aim.</p>
+{% endblock %}
+{% block cta_label %}Review the course{% endblock %}
+{% block footer_note %}{% include "emails/_small.html" with text="You are receiving learning updates because they are enabled in your notification settings." %}{% endblock %}

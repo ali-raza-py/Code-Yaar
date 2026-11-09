@@ -1,0 +1,13 @@
+{% extends "emails/base.txt" %}
+{% block heading %}Confirm your email address{% endblock %}
+{% block body %}Welcome to Code Yaar. Confirm this email address to finish setting up your account — courses, practice, competitions and credentials unlock right after.
+
+The link below is single-use and expires in {{ ttl_hours }} hours.
+
+{% endblock %}
+{% block note %}Keep this link private: opening it signs the holder in to your account.
+
+{% endblock %}
+{% block cta_label %}Verify my email{% endblock %}
+{% block footer_note %}If you did not create a Code Yaar account, you can ignore this email — nothing happens until the link is opened. Security mail like this is always sent.
+{% endblock %}

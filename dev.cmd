@@ -5,4 +5,11 @@ rem        dev -Setup     (also install dependencies)
 rem        dev -Force     (stop whatever holds the ports, then start)
 rem        dev -BackendPort 8001 -FrontendPort 3001
 rem Extra arguments are forwarded to scripts\dev.ps1.
-powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\dev.ps1" %*
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\dev.ps1" %*
+if errorlevel 1 (
+    set "exitCode=%errorlevel%"
+    echo.
+    echo Code Yaar development servers stopped with an error.
+    pause
+)
+if defined exitCode exit /b %exitCode%

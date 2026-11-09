@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowRight, Trophy, BookOpen } from "lucide-react";
-import { leaderboard as leaderboardApi, profileStats } from "@/lib/api";
-import type { LeaderboardEntry, ProfileStatsData } from "@/lib/api";
+import { ArrowRight, Trophy, BookOpen, Award, Megaphone } from "lucide-react";
+import { announcements as announcementsApi, leaderboard as leaderboardApi, profileStats } from "@/lib/api";
+import type { LeaderboardEntry, ProfileStatsData, PublicAnnouncement } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
 import { NetworkError } from "@/components/learning/workspace/error-states";
+import { AchievementIcon } from "@/components/achievements/achievement-icon";
 
 function timeAgo(iso: string): string {
   const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
@@ -24,15 +25,21 @@ export default function DashboardPage() {
   const { user, loading: authLoading } = useAuth();
   const [stats, setStats] = useState<ProfileStatsData | null>(null);
   const [topLearners, setTopLearners] = useState<LeaderboardEntry[]>([]);
+  const [latestAnnouncements, setLatestAnnouncements] = useState<PublicAnnouncement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) return;
     try {
-      const [statsData, board] = await Promise.all([profileStats.get(), leaderboardApi.list({ limit: 10 })]);
+      const [statsData, board, announcementList] = await Promise.all([
+        profileStats.get(),
+        leaderboardApi.list({ limit: 10 }),
+        announcementsApi.list().catch(() => [] as PublicAnnouncement[]),
+      ]);
       setStats(statsData);
       setTopLearners(board.entries);
+      setLatestAnnouncements(announcementList.slice(0, 4));
       setError(false);
     } catch {
       setError(true);
@@ -50,13 +57,13 @@ export default function DashboardPage() {
   if (authLoading || (loading && user)) {
     return (
       <div className="mx-auto max-w-7xl animate-pulse px-4 py-6 sm:px-6 lg:px-8">
-        <div className="mb-6 h-8 w-48 rounded bg-white" />
+        <div className="mb-6 h-8 w-48 rounded bg-muted" />
         <div className="grid gap-6 lg:grid-cols-3">
           <div className="space-y-6 lg:col-span-2">
-            <div className="h-40 rounded-xl bg-white" />
-            <div className="h-32 rounded-xl bg-white" />
+            <div className="h-40 rounded-xl bg-muted" />
+            <div className="h-32 rounded-xl bg-muted" />
           </div>
-          <div className="h-64 rounded-xl bg-white" />
+          <div className="h-64 rounded-xl bg-muted" />
         </div>
       </div>
     );
@@ -118,7 +125,7 @@ export default function DashboardPage() {
       {/* Top bar */}
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <div className="flex items-center gap-3"><h1 className="text-2xl font-bold text-foreground">My Activity</h1><Link href="/progress" className="rounded-lg bg-cta/10 px-3 py-1.5 text-xs font-bold text-cta hover:bg-cta/20">View progress</Link></div>
+          <div className="flex items-center gap-3"><h1 className="text-2xl font-bold text-foreground">My Activity</h1><Link href="/progress?tab=overview" className="rounded-lg bg-cta/10 px-3 py-1.5 text-xs font-bold text-cta hover:bg-cta/20">View progress</Link></div>
           <p className="mt-1 text-sm text-muted-foreground">Level {profile?.level ?? 1} · {displayName}</p>
         </div>
       </div>
@@ -228,10 +235,94 @@ export default function DashboardPage() {
               </div>
             </Link>
           </div>
+
+          {/* Achievements snapshot — earned badges + the next one in reach */}
+          {stats && (
+            <div className="card-hairline p-6">
+              <div className="flex items-center justify-between">
+                <h2 className="flex items-center gap-2 font-bold text-foreground">
+                  <Award className="h-5 w-5 text-primary" />
+                  Achievements
+                </h2>
+                <Link href="/progress?tab=achievements" className="text-sm font-medium text-primary hover:underline">
+                  View all
+                </Link>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {stats.stats.achievements_earned} of {stats.stats.total_achievements} badges earned
+              </p>
+              {(() => {
+                const earned = stats.achievements.filter((a) => a.earned).slice(0, 6);
+                if (earned.length === 0) {
+                  return (
+                    <p className="mt-4 text-sm text-muted-foreground">
+                      No badges yet — complete lessons, exercises and courses to earn your first one.
+                    </p>
+                  );
+                }
+                return (
+                  <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-6">
+                    {earned.map((b) => (
+                      <div key={b.id} className="flex flex-col items-center text-center">
+                        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+                          <AchievementIcon name={b.icon} className="h-6 w-6" />
+                        </span>
+                        <span className="mt-1 line-clamp-2 text-[10px] leading-tight text-muted-foreground">{b.title}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+              {stats.next_badge && (
+                <div className="mt-4 rounded-lg border border-border bg-background p-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Next badge</p>
+                  <p className="mt-1 text-sm font-semibold text-foreground">{stats.next_badge.title}</p>
+                  <div className="mt-2 h-1.5 w-full overflow-hidden rounded-pill bg-muted">
+                    <div className="h-full rounded-pill bg-primary" style={{ width: `${stats.next_badge.progress.target > 0 ? Math.min(100, Math.round((stats.next_badge.progress.current / stats.next_badge.progress.target) * 100)) : 0}%` }} />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* RIGHT — Sidebar (1/3) */}
         <div className="space-y-6">
+          {/* Latest announcements — live from the publishing system */}
+          {latestAnnouncements.length > 0 && (
+            <div className="card-hairline p-6">
+              <h3 className="flex items-center gap-2 font-bold text-foreground">
+                <Megaphone className="h-5 w-5 text-primary" />
+                Announcements
+              </h3>
+              <ul className="mt-4 space-y-3">
+                {latestAnnouncements.map((item) => (
+                  <li key={item.id}>
+                    <Link
+                      href={item.slug ? `/announcements/${item.slug}` : "/announcements"}
+                      className="group block rounded-lg border border-border p-3 transition-colors hover:border-primary"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          {item.category_label}
+                        </span>
+                        {item.priority !== "normal" && (
+                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${item.priority === "urgent" ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300" : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300"}`}>
+                            {item.priority_label}
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-sm font-semibold text-foreground group-hover:text-[var(--primary)]">{item.title}</p>
+                      {item.short_description && (
+                        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.short_description}</p>
+                      )}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {/* Streak + XP from the server-side profile */}
           <div className="card-hairline p-6">
             <div className="flex items-center gap-4">

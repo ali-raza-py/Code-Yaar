@@ -7,20 +7,23 @@ const footerLinks = [
   {
     title: "Platform",
     links: [
-      { label: "Learn", href: "/learn" },
-      { label: "Projects", href: "/projects" },
+      { label: "Courses", href: "/courses" },
+      { label: "Learning Tracks", href: "/tracks" },
       { label: "Challenges", href: "/challenges" },
+      { label: "Hackathons", href: "/competitions" },
+      { label: "Announcements", href: "/announcements" },
+      { label: "Updates", href: "/updates" },
       { label: "Leaderboard", href: "/leaderboard" },
       { label: "Dashboard", href: "/dashboard" },
     ],
   },
   {
-    title: "Resources",
+    title: "Credentials",
     links: [
-      { label: "Documentation", href: "/learn" },
-      { label: "Blog", href: "/learn" },
-      { label: "Community", href: "/leaderboard" },
-      { label: "FAQ", href: "/about#faq" },
+      { label: "Verify a certificate", href: "/verify/certificate/" },
+      { label: "Verify a badge", href: "/verify/badge/" },
+      { label: "Certificates", href: "/certificates" },
+      { label: "Achievements", href: "/achievements" },
     ],
   },
   {
@@ -37,7 +40,7 @@ const footerLinks = [
 
 export function Footer() {
   return (
-    <footer className="border-t border-[var(--color-section-border)] bg-white">
+    <footer className="border-t border-[var(--color-section-border)] bg-background">
       <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
         <div className="grid grid-cols-2 gap-8 md:grid-cols-5">
           {/* Brand */}
@@ -52,6 +55,7 @@ export function Footer() {
                   src="/logo-light.png"
                   alt="Code-Yaar"
                   fill
+                  sizes="24px"
                   className="object-contain"
                 />
               </div>

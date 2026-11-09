@@ -10,6 +10,8 @@ import {
   Users,
 } from "lucide-react";
 
+import { FoundingTeam } from "@/components/marketing/founding-team";
+
 export const metadata: Metadata = {
   title: "About Code-Yaar",
   description: "Learn how Code-Yaar helps developers move from concepts to confident building.",
@@ -46,7 +48,7 @@ export default function AboutPage() {
             Code-Yaar is a practical learning platform for people who are done collecting tutorials and ready to turn understanding into working software.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <Link href="/learn" className="focus-ring inline-flex items-center gap-2 rounded-lg bg-cta px-5 py-3 text-sm font-bold text-cta-fg hover:bg-cta-hover">
+            <Link href="/tracks" className="focus-ring inline-flex items-center gap-2 rounded-lg bg-cta px-5 py-3 text-sm font-bold text-cta-fg hover:bg-cta-hover">
               Explore learning paths <ArrowRight className="h-4 w-4" />
             </Link>
             <Link href="#contact" className="focus-ring inline-flex items-center gap-2 rounded-lg border border-white/20 px-5 py-3 text-sm font-bold text-white hover:bg-white/10">
@@ -76,6 +78,8 @@ export default function AboutPage() {
           ))}
         </div>
       </section>
+
+      <FoundingTeam />
 
       <section className="border-y border-[var(--color-section-border)] bg-card">
         <div className="mx-auto grid max-w-6xl gap-10 px-4 py-16 sm:px-6 lg:grid-cols-[0.8fr_1.2fr] lg:px-8">

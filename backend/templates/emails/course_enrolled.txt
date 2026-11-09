@@ -1,0 +1,10 @@
+{% extends "emails/base.txt" %}
+{% block heading %}Course enrollment confirmed{% endblock %}
+{% block body %}You are enrolled in {{ course_title }}. Your progress is saved lesson by lesson, and you will see XP land as you finish work.
+
+Pick it up whenever suits you — short sessions count.
+
+{% endblock %}
+{% block cta_label %}Start learning{% endblock %}
+{% block footer_note %}You are receiving learning updates because they are enabled in your notification settings.
+{% endblock %}

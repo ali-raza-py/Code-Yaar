@@ -1,0 +1,33 @@
+{% comment %}
+Shared plain-text Code Yaar email layout. Every event template mirrors its HTML
+twin through these blocks: heading, salutation, body, extra, cta_label and
+footer_note. Kept strictly ASCII apart from the brand line, because text parts
+are what mail clients show when HTML is stripped — and they are what carries the
+single-use auth links.
+{% endcomment %}============================================================
+CODE YAAR — Think. Build. Evolve.
+{% block eyebrow %}{% if eyebrow %}{{ eyebrow|upper }}
+{% endif %}{% endblock %}============================================================
+
+{% block heading %}{{ heading }}{% endblock %}
+
+{% block salutation %}{% if first_name %}Hi {{ first_name }},{% else %}Hello,{% endif %}{% endblock %}
+
+{% block body %}{% if message %}{{ message }}
+
+{% endif %}{% endblock %}{% block extra %}{% endblock %}{% block note %}{% if note %}NOTE: {{ note }}
+
+{% endif %}{% endblock %}{% if info_rows %}------------------------------------------------------------
+{% for row in info_rows %}{{ row.0 }}: {{ row.1 }}
+{% endfor %}------------------------------------------------------------
+
+{% endif %}{% if cta_url %}{% block cta_label %}{{ cta_label|default:"Open Code Yaar" }}{% endblock %}:
+{{ cta_url }}
+
+{% endif %}============================================================
+{% block footer_note %}{% if footer_note %}{{ footer_note }}
+{% endif %}{% endblock %}Dashboard: {{ dashboard_url }}
+Email preferences: {{ preferences_url }}{% if unsubscribe_url %}
+Unsubscribe: {{ unsubscribe_url }}{% endif %}
+
+© {{ current_year }} Code Yaar — Think. Build. Evolve.

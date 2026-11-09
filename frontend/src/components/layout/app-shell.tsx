@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { AppSidebar } from "@/components/layout/app-sidebar";
+import { BadgeToastProvider } from "@/components/notifications/badge-toast";
 import { cn } from "@/lib/utils";
 
 const NAV_STORAGE_KEY = "codeyaar:nav-collapsed";
@@ -68,22 +69,24 @@ export function AppShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="flex min-h-dvh flex-col bg-background">
-      <Suspense fallback={null}>
-        <AppSidebar collapsed={collapsed} onToggle={toggle} />
-      </Suspense>
-      {/* Main content area — offset for the sidebar on desktop, and for the
-          mobile header below md. */}
-      <div
-        className={cn(
-          "flex min-h-0 flex-1 flex-col pt-14 md:pt-0",
-          collapsed ? "md:pl-0" : "md:pl-[272px]"
-        )}
-      >
-        <main className="min-h-0 flex-1">
-          <Suspense fallback={null}>{children}</Suspense>
-        </main>
+    <BadgeToastProvider>
+      <div className="flex min-h-dvh flex-col bg-background">
+        <Suspense fallback={null}>
+          <AppSidebar collapsed={collapsed} onToggle={toggle} />
+        </Suspense>
+        {/* Main content area — offset for the sidebar on desktop, and for the
+            mobile header below md. */}
+        <div
+          className={cn(
+            "flex min-h-0 flex-1 flex-col pt-14 md:pt-0",
+            collapsed ? "md:pl-0" : "md:pl-[272px]"
+          )}
+        >
+          <main className="min-h-0 flex-1">
+            <Suspense fallback={null}>{children}</Suspense>
+          </main>
+        </div>
       </div>
-    </div>
+    </BadgeToastProvider>
   );
 }

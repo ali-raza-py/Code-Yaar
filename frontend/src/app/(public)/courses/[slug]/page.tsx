@@ -5,23 +5,11 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ApiError, courses as coursesApi } from '@/lib/api';
 import { useAuth } from '@/hooks/use-auth';
-import { Course, Chapter, Difficulty } from '@/types';
+import { Course, Chapter } from '@/types';
 import { NetworkError, NotFoundError } from '@/components/learning/workspace/error-states';
+import { DifficultyPill } from '@/components/ui/difficulty-pill';
 
 // ─── Components ─────────────────────────────────────────────────────────────
-
-function DifficultyBadge({ difficulty }: { difficulty: Difficulty }) {
-  const colors = {
-    beginner: 'bg-difficulty-easy-soft text-difficulty-easy',
-    intermediate: 'bg-difficulty-medium-soft text-difficulty-medium',
-    advanced: 'bg-difficulty-hard-soft text-difficulty-hard',
-  };
-  return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${colors[difficulty]}`}>
-      {difficulty}
-    </span>
-  );
-}
 
 function CheckIcon() {
   return (
@@ -160,7 +148,7 @@ export default function CourseLandingPage() {
         <div className="mx-auto max-w-4xl px-4 py-10 sm:px-6 lg:px-8">
           {/* Breadcrumb */}
           <nav className="mb-6 flex items-center gap-2 text-sm text-muted-foreground">
-            <Link href="/learn" className="hover:text-foreground">Courses</Link>
+            <Link href="/courses" className="hover:text-foreground">Courses</Link>
             <span>/</span>
             <span className="text-foreground">{course.track_title}</span>
           </nav>
@@ -199,7 +187,7 @@ export default function CourseLandingPage() {
               )
             ) : (
               <Link
-                href="/sign-up"
+                href={`/sign-up?next=${encodeURIComponent(`/courses/${course.slug}`)}`}
                 className="inline-flex items-center rounded-lg bg-cta px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-cta-hover transition-colors"
               >
                 Sign up to start
@@ -207,7 +195,7 @@ export default function CourseLandingPage() {
             )}
             {firstLessonSlug && (
               <Link
-                href={`/learn/${course.slug}?lesson=${firstLessonSlug}`}
+                href={`/courses/${course.slug}/lesson/${firstLessonSlug}`}
                 className="inline-flex items-center rounded-lg border border-border px-5 py-2.5 text-sm font-semibold text-foreground hover:bg-muted transition-colors"
               >
                 Preview first lesson
@@ -218,7 +206,7 @@ export default function CourseLandingPage() {
 
           {/* Meta */}
           <div className="mt-6 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-            <DifficultyBadge difficulty={course.difficulty} />
+            <DifficultyPill difficulty={course.difficulty} />
             <span>{course.estimated_hours} hours</span>
             <span>{chapters.length} Chapters</span>
             <span>{course.lesson_count} Lessons</span>

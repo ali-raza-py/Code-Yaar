@@ -1,0 +1,13 @@
+{% extends "emails/base.txt" %}
+{% block heading %}Welcome to Code Yaar{% endblock %}
+{% block body %}Your new Code Yaar account is created. You are joining a learning platform built for students in Pakistan: structured tracks, hands-on coding practice, competitions and verifiable credentials.
+
+A good first step is picking a learning track — you can also jump straight into daily practice challenges.
+
+{% endblock %}
+{% block extra %}Your email address is not verified yet. Verify it any time from your dashboard to keep the account secure.
+
+{% endblock %}
+{% block cta_label %}Start learning{% endblock %}
+{% block footer_note %}You are receiving this email because a Code Yaar account was recently registered with this address.
+{% endblock %}

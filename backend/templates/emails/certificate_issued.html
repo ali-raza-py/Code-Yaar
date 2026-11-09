@@ -1,0 +1,9 @@
+{% extends "emails/base.html" %}
+{% block preheader %}Your certificate for {{ course_title }} is ready.{% endblock %}
+{% block heading %}Your certificate is ready{% endblock %}
+{% block body %}
+<p style="margin: 0 0 14px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.7; color: #334155;">Your <strong>Certificate of Completion</strong> for {{ course_title }} has been issued. It is publicly verifiable and carries the credential ID below.</p>
+{% if final_score is not None %}<p style="margin: 0 0 14px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.7; color: #334155;">Final score: <strong>{{ final_score }}%</strong></p>{% endif %}
+{% endblock %}
+{% block cta_label %}View your certificate{% endblock %}
+{% block footer_note %}{% include "emails/_small.html" with text="You receive certificate emails while they are enabled in your notification settings." %}{% endblock %}

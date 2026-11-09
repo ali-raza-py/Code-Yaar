@@ -21,7 +21,7 @@ interface ErrorStateProps {
 }
 
 function ErrorIllustration({ type }: { type: string }) {
-  const iconClass = 'h-12 w-12 text-gray-300';
+  const iconClass = 'h-12 w-12 text-muted-foreground';
 
   switch (type) {
     case 'network':
@@ -64,8 +64,8 @@ export function ErrorState({ title, message, action, illustration = 'server' }: 
         <div className="flex justify-center mb-4">
           <ErrorIllustration type={illustration} />
         </div>
-        <h2 className="text-lg font-semibold text-gray-900 mb-2">{title}</h2>
-        <p className="text-sm text-gray-600 mb-6">{message}</p>
+        <h2 className="mb-2 text-lg font-semibold text-foreground">{title}</h2>
+        <p className="mb-6 text-sm text-muted-foreground">{message}</p>
         {action && (
           action.onRetry ? (
             <button

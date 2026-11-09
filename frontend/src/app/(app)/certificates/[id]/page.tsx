@@ -142,7 +142,7 @@ export default function CertificateViewerPage() {
           </p>
           <div className="mt-6 flex flex-wrap justify-center gap-3">
             <Link
-              href="/certificates"
+              href="/progress?tab=certificates"
               className="focus-ring inline-flex min-h-10 items-center rounded-lg bg-cta px-4 py-2 text-sm font-semibold text-white hover:bg-cta-hover"
             >
               My certificates
@@ -184,7 +184,7 @@ export default function CertificateViewerPage() {
           </li>
           <li aria-hidden="true">/</li>
           <li>
-            <Link href="/certificates" className="hover:text-primary">
+            <Link href="/progress?tab=certificates" className="hover:text-primary">
               Certificates
             </Link>
           </li>
@@ -227,7 +227,7 @@ export default function CertificateViewerPage() {
             Back to Dashboard
           </Link>
           <Link
-            href="/achievements"
+            href="/progress?tab=achievements"
             className="focus-ring inline-flex min-h-10 items-center gap-2 rounded-lg border border-border bg-card px-3.5 py-2 text-sm font-medium text-foreground hover:bg-muted"
           >
             <Award className="h-4 w-4" aria-hidden="true" />
@@ -327,7 +327,7 @@ export default function CertificateViewerPage() {
       {/* ── Footer navigation ── */}
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-5">
         <Link
-          href="/certificates"
+          href="/progress?tab=certificates"
           className="focus-ring inline-flex min-h-10 items-center gap-2 text-sm font-medium text-primary hover:underline"
         >
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
@@ -337,7 +337,7 @@ export default function CertificateViewerPage() {
           <Link href="/dashboard" className="font-medium text-foreground hover:text-primary">
             Dashboard
           </Link>
-          <Link href="/achievements" className="font-medium text-foreground hover:text-primary">
+          <Link href="/progress?tab=achievements" className="font-medium text-foreground hover:text-primary">
             View My Achievements
           </Link>
           <Link href="/learn?view=courses" className="font-medium text-foreground hover:text-primary">

@@ -4,7 +4,7 @@ Seed command for the Practice challenges — idempotent upsert.
 Usage:
     python manage.py seed_challenges
 
-Populates (or refreshes) the six standalone coding challenges from the
+Populates (or refreshes) the standalone coding challenge library from the
 canonical catalog in ``learning.challenge_catalog``. Content is the single
 source of truth; running this command again updates every field in place, so
 editors can iterate on statements, starter code and test cases without
@@ -27,7 +27,7 @@ CHALLENGE_FIELDS = (
     'title', 'description', 'difficulty', 'topic', 'estimated_minutes',
     'languages',
     'starter_code', 'starter_code_cpp', 'solution_code', 'solution_code_cpp',
-    'problem_statement', 'requirements', 'input_description',
+    'problem_statement', 'learning_objective', 'requirements', 'input_description',
     'output_description', 'constraints', 'examples', 'hints',
     'solution_explanation', 'time_complexity', 'space_complexity',
     'sample_tests', 'hidden_tests',
@@ -36,7 +36,7 @@ CHALLENGE_FIELDS = (
 
 
 class Command(BaseCommand):
-    help = 'Create or update the six Practice coding challenges.'
+    help = 'Create or update the Practice coding challenge library.'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -103,5 +103,5 @@ class Command(BaseCommand):
             raise SystemExit(self.style.ERROR(msg))
 
         self.stdout.write(self.style.SUCCESS(
-            'All six reference solutions pass their sample and hidden tests.'
+            'All reference solutions pass their sample and hidden tests.'
         ))

@@ -1,0 +1,10 @@
+{% extends "emails/base.txt" %}
+{% block heading %}Registration waitlisted{% endblock %}
+{% block body %}Your registration for {{ competition_title }} has been placed on the waitlist{% if registration_reason %} ({{ registration_reason }}){% endif %}.
+
+When a spot opens up the organizers move waitlisted entries into the approved list — you will get an email the moment your status changes. Keep your registration reference handy.
+
+{% endblock %}
+{% block cta_label %}View competition{% endblock %}
+{% block footer_note %}You receive competition emails while they are enabled in your notification settings.
+{% endblock %}

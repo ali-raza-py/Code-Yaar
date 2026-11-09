@@ -1,0 +1,7 @@
+{% extends "emails/base.html" %}
+{% block cta_label %}{{ cta_label|default:"View competition" }}{% endblock %}
+{% block footer_note %}{% include "emails/_small.html" with text="Deadlines are shown as announced on Code Yaar; times are in UTC." %}{% endblock %}
+{% comment %}
+Context-driven reminder template: heading/message/info_rows come from the
+send_reminders command (registration closing, start soon, submission deadline).
+{% endcomment %}

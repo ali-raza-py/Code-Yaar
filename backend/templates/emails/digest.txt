@@ -1,0 +1,14 @@
+{% extends "emails/base.txt" %}
+{% block heading %}{{ period_label }}{% endblock %}
+{% block body %}Here is what happened on your Code Yaar account{% if first_name %}, {{ first_name }}{% endif %}.
+
+{% if items %}{% for item in items %}{{ item.title }}
+{{ item.url }}{% if item.body %}
+{{ item.body }}{% endif %}
+
+{% endfor %}{% else %}No new activity this period — keep your streak alive.{% endif %}
+
+{% endblock %}
+{% block cta_label %}Open notifications{% endblock %}
+{% block footer_note %}Digests summarize events that did not already email you individually. Set them to daily, weekly or off in your notification settings.
+{% endblock %}

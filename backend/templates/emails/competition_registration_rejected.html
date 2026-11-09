@@ -1,0 +1,9 @@
+{% extends "emails/base.html" %}
+{% block preheader %}Update on your {{ competition_title }} registration.{% endblock %}
+{% block heading %}Registration not approved{% endblock %}
+{% block body %}
+<p style="margin: 0 0 14px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.7; color: #334155;">Your registration for <strong>{{ competition_title }}</strong> was not approved by the organizers{% if registration_reason %} ({{ registration_reason }}){% endif %}.</p>
+<p style="margin: 0 0 14px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.7; color: #334155;">Your other competitions and learning progress are unaffected — new competitions open regularly.</p>
+{% endblock %}
+{% block cta_label %}Browse competitions{% endblock %}
+{% block footer_note %}{% include "emails/_small.html" with text="You receive competition emails while they are enabled in your notification settings." %}{% endblock %}

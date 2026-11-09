@@ -1,0 +1,12 @@
+{% extends "emails/base.txt" %}
+{% block heading %}Badge unlocked — {{ badge_title }}{% endblock %}
+{% block body %}{% if achievement_description %}{{ achievement_description }}
+
+{% endif %}{% if xp_bonus %}This badge came with a +{{ xp_bonus }} XP bonus on top of what you already earned.
+
+{% endif %}Your badge is verifiable and can be shared straight from your profile.
+
+{% endblock %}
+{% block cta_label %}View your badges{% endblock %}
+{% block footer_note %}You receive achievement emails while they are enabled in your notification settings.
+{% endblock %}

@@ -1,6 +1,6 @@
-from django.db.models import Count
 from rest_framework import serializers
 
+from . import batching
 from .models import (
     CareerTrack, Course, Chapter, Lesson, Exercise, Hint,
     Resource, Project, ProjectMilestone, Challenge, Enrollment,
@@ -8,11 +8,86 @@ from .models import (
     UserAchievement, Progress, Certification, UserCertification,
     Skill, UserSkill, PracticalClass, PracticalSubject, Practical,
     PracticalProgress, PracticalBookmark, UserNotification,
+    UserProfile, Portfolio, StudentProject, ProjectImage,
+    Competition, CompetitionRegistration, CompetitionTeam,
+    CompetitionSubmission, CompetitionResult, Follow,
 )
 
 
 # ─── Content Serializers ────────────────────────────────────────────────────
 # Authentication serializers live in `learning.auth_serializers`.
+
+
+class CompetitionListSerializer(serializers.ModelSerializer):
+    status = serializers.CharField(read_only=True)
+    organizer_name = serializers.CharField(source='organizer.get_full_name', read_only=True)
+    participant_count = serializers.IntegerField(read_only=True)
+    registration_status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Competition
+        fields = [
+            'id', 'slug', 'title', 'short_description', 'banner', 'category',
+            'difficulty', 'format', 'delivery_mode', 'registration_deadline',
+            'competition_start', 'competition_end', 'participant_limit',
+            'participant_count', 'prize_information', 'status', 'organizer_name',
+            'registration_status',
+        ]
+
+    def get_registration_status(self, obj):
+        if hasattr(obj, 'current_registration_status'):
+            return obj.current_registration_status
+        user = self.context.get('request').user
+        if not user.is_authenticated:
+            return None
+        return obj.registrations.filter(user=user).values_list(
+            'registration_status', flat=True
+        ).first()
+
+
+class CompetitionDetailSerializer(CompetitionListSerializer):
+    class Meta(CompetitionListSerializer.Meta):
+        fields = CompetitionListSerializer.Meta.fields + [
+            'description', 'location', 'registration_start', 'submission_deadline',
+            'judging_end', 'results_announcement', 'minimum_team_size',
+            'maximum_team_size', 'eligibility_rules', 'competition_rules',
+            'problem_statement', 'submission_configuration',
+        ]
+
+
+class CompetitionRegistrationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CompetitionRegistration
+        fields = ['id', 'reference', 'team', 'registration_status', 'registration_data', 'rules_accepted_at', 'registered_at']
+        read_only_fields = ['id', 'reference', 'registration_status', 'registered_at']
+
+
+class CompetitionSubmissionSerializer(serializers.ModelSerializer):
+    competition_slug = serializers.CharField(source='registration.competition.slug', read_only=True)
+
+    class Meta:
+        model = CompetitionSubmission
+        fields = [
+            'id', 'competition_slug', 'project_title', 'description', 'github_url',
+            'demo_url', 'additional_data', 'status', 'organizer_feedback',
+            'submitted_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'competition_slug', 'status', 'organizer_feedback', 'submitted_at', 'updated_at']
+
+
+class CompetitionResultSerializer(serializers.ModelSerializer):
+    participant_name = serializers.SerializerMethodField()
+    project_title = serializers.CharField(source='registration.submission.project_title', read_only=True)
+
+    class Meta:
+        model = CompetitionResult
+        fields = ['rank', 'participant_name', 'project_title', 'final_score', 'award']
+
+    def get_participant_name(self, obj):
+        if obj.registration.team_id:
+            return obj.registration.team.name
+        profile = getattr(obj.registration.user, 'profile', None)
+        return profile.full_name if profile else obj.registration.user.username
 
 
 class PracticalClassSerializer(serializers.ModelSerializer):
@@ -68,23 +143,13 @@ class PracticalListSerializer(serializers.ModelSerializer):
 
     def get_is_completed(self, obj):
         user = self._user()
-        if not user:
-            return False
-        annotated = getattr(obj, 'is_completed_for_user', None)
-        if annotated is not None:
-            return annotated
-        return obj.progress_entries.filter(
+        return bool(user and obj.progress_entries.filter(
             user=user, completed_at__isnull=False
         ).exists()
 
     def get_is_bookmarked(self, obj):
         user = self._user()
-        if not user:
-            return False
-        annotated = getattr(obj, 'is_bookmarked_for_user', None)
-        if annotated is not None:
-            return annotated
-        return obj.bookmarks.filter(user=user).exists()
+        return bool(user and obj.bookmarks.filter(user=user).exists())
 
 
 class PracticalDetailSerializer(PracticalListSerializer):
@@ -237,7 +302,10 @@ class ExerciseListSerializer(TextbookReferenceMixin, serializers.ModelSerializer
         ]
 
     def get_hint_count(self, obj):
-        return obj.hints.count()
+        counts = batching.hint_counts_by_exercise(self.context)
+        if counts is None:
+            return obj.hints.count()
+        return counts.get(obj.id, 0)
 
 
 class ExerciseDetailSerializer(TextbookReferenceMixin, serializers.ModelSerializer):
@@ -294,17 +362,23 @@ class LessonListSerializer(serializers.ModelSerializer):
         ]
 
     def get_exercise_count(self, obj):
-        return obj.exercises.filter(is_active=True).count()
+        counts = batching.exercise_counts_by_lesson(self.context)
+        if counts is None:
+            return obj.exercises.filter(is_active=True).count()
+        return counts.get(obj.id, 0)
 
     def get_progress_status(self, obj):
-        request = self.context.get('request')
-        if request and hasattr(request, 'user') and request.user.is_authenticated:
-            progress = LessonProgress.objects.filter(
-                user=request.user, lesson=obj
-            ).first()
-            if progress:
-                return progress.status
-        return 'not_started'
+        progress = batching.lesson_progress_map(self.context)
+        if progress is None:
+            request = self.context.get('request')
+            if request and hasattr(request, 'user') and request.user.is_authenticated:
+                row = LessonProgress.objects.filter(
+                    user=request.user, lesson=obj
+                ).first()
+                if row:
+                    return row.status
+            return 'not_started'
+        return progress.get(obj.id, 'not_started')
 
 
 class LessonDetailSerializer(TextbookReferenceMixin, serializers.ModelSerializer):
@@ -331,21 +405,27 @@ class LessonDetailSerializer(TextbookReferenceMixin, serializers.ModelSerializer
         ]
 
     def get_exercise_count(self, obj):
-        return obj.exercises.filter(is_active=True).count()
+        counts = batching.exercise_counts_by_lesson(self.context)
+        if counts is None:
+            return obj.exercises.filter(is_active=True).count()
+        return counts.get(obj.id, 0)
 
     def get_exercises(self, obj):
         exercises = obj.exercises.filter(is_active=True)
         return ExerciseListSerializer(exercises, many=True, context=self.context).data
 
     def get_progress_status(self, obj):
-        request = self.context.get('request')
-        if request and hasattr(request, 'user') and request.user.is_authenticated:
-            progress = LessonProgress.objects.filter(
-                user=request.user, lesson=obj
-            ).first()
-            if progress:
-                return progress.status
-        return 'not_started'
+        progress = batching.lesson_progress_map(self.context)
+        if progress is None:
+            request = self.context.get('request')
+            if request and hasattr(request, 'user') and request.user.is_authenticated:
+                row = LessonProgress.objects.filter(
+                    user=request.user, lesson=obj
+                ).first()
+                if row:
+                    return row.status
+            return 'not_started'
+        return progress.get(obj.id, 'not_started')
 
     def _sibling(self, obj, direction):
         """Previous/next lesson across the whole course, by content order."""
@@ -390,32 +470,50 @@ class ChapterListSerializer(TextbookReferenceMixin, serializers.ModelSerializer)
             'textbook_reference',
         ]
 
+    def _active_lessons(self, obj):
+        """Active lessons for the chapter, served from the view's prefetch
+        cache when one was set up (keeps the course map at one query total)."""
+        cache = getattr(obj, '_prefetched_objects_cache', None)
+        if cache and 'lessons' in cache:
+            return list(cache['lessons'])
+        return list(obj.lessons.filter(is_active=True))
+
     def get_lessons(self, obj):
-        lessons = obj.lessons.filter(is_active=True)
+        lessons = self._active_lessons(obj)
         return LessonListSerializer(lessons, many=True, context=self.context).data
 
     def get_is_final_assessment(self, obj):
-        return Exercise.objects.filter(
-            lesson__chapter=obj,
-            lesson__is_active=True,
-            is_final_assessment=True,
-            is_active=True,
-        ).exists()
+        final_ids = batching.final_assessment_chapter_ids(self.context)
+        if final_ids is None:
+            return Exercise.objects.filter(
+                lesson__chapter=obj,
+                lesson__is_active=True,
+                is_final_assessment=True,
+                is_active=True,
+            ).exists()
+        return obj.id in final_ids
 
     def get_progress_percentage(self, obj):
-        lessons = obj.lessons.filter(is_active=True)
-        total = lessons.count()
+        lessons = self._active_lessons(obj)
+        total = len(lessons)
         if total == 0:
             return 0
-        request = self.context.get('request')
-        if request and hasattr(request, 'user') and request.user.is_authenticated:
-            completed = LessonProgress.objects.filter(
-                user=request.user,
-                lesson__in=lessons,
-                status__in=['completed', 'mastered']
-            ).count()
-            return round((completed / total) * 100)
-        return 0
+        progress = batching.lesson_progress_map(self.context)
+        if progress is None:
+            request = self.context.get('request')
+            if request and hasattr(request, 'user') and request.user.is_authenticated:
+                completed = LessonProgress.objects.filter(
+                    user=request.user,
+                    lesson__in=lessons,
+                    status__in=['completed', 'mastered']
+                ).count()
+                return round((completed / total) * 100)
+            return 0
+        completed = sum(
+            1 for lesson in lessons
+            if progress.get(lesson.id) in ('completed', 'mastered')
+        )
+        return round((completed / total) * 100)
 
 
 class ChapterDetailSerializer(serializers.ModelSerializer):
@@ -489,13 +587,13 @@ def _course_user_state(context, user, courses):
 
 class CourseListSerializer(serializers.ModelSerializer):
     track_title = serializers.CharField(source='track.title', read_only=True)
-    chapter_count = serializers.IntegerField(read_only=True, default=0)
+    chapter_count = serializers.SerializerMethodField()
     lesson_count = serializers.SerializerMethodField()
     exercise_count = serializers.SerializerMethodField()
     enrolled = serializers.SerializerMethodField()
     progress_percentage = serializers.SerializerMethodField()
-    estimated_hours = serializers.IntegerField(read_only=True)
-    total_xp = serializers.IntegerField(read_only=True)
+    estimated_hours = serializers.SerializerMethodField()
+    total_xp = serializers.SerializerMethodField()
 
     class Meta:
         model = Course
@@ -506,38 +604,46 @@ class CourseListSerializer(serializers.ModelSerializer):
             'exercise_count', 'is_free', 'enrolled', 'progress_percentage',
         ]
 
+    def _stats(self, obj):
+        """Batched course counters from the shared request context; None
+        when the serializer runs outside a request (scripts, tests)."""
+        stats = batching.course_stats(self.context)
+        if stats is None:
+            return None
+        return stats.get(obj.id) or {}
+
+    def get_chapter_count(self, obj):
+        stats = self._stats(obj)
+        return obj.chapter_count if stats is None else stats.get('chapters', 0)
+
     def get_lesson_count(self, obj):
-        return obj.lesson_count
+        stats = self._stats(obj)
+        return obj.lesson_count if stats is None else stats.get('lessons', 0)
 
     def get_exercise_count(self, obj):
-        return obj.exercise_count
+        stats = self._stats(obj)
+        return obj.exercise_count if stats is None else stats.get('exercises', 0)
+
+    def get_total_xp(self, obj):
+        stats = self._stats(obj)
+        return obj.total_xp if stats is None else stats.get('xp', 0)
+
+    def get_estimated_hours(self, obj):
+        if obj.manual_estimated_hours:
+            return obj.manual_estimated_hours
+        stats = self._stats(obj)
+        if stats is None:
+            return obj.estimated_hours
+        return max(1, round((stats.get('minutes') or 0) / 60))
 
     def _user(self, request):
         return getattr(getattr(request, 'user', None), 'is_authenticated', False) and request.user
 
-    def _batch(self, obj):
-        """Every course being serialized alongside ``obj`` (``many=True``),
-        so the per-user lookup can be made once for all of them."""
-        parent = self.parent
-        if isinstance(parent, serializers.ListSerializer):
-            instance = parent.instance
-            if isinstance(instance, (list, tuple)):
-                return instance
-            # A queryset already iterated by the list serializer; reusing its
-            # populated result cache costs no query.
-            if getattr(instance, '_result_cache', None) is not None:
-                return instance
-        return [obj]
-
-    def _state(self, obj):
-        user = self._user(self.context.get('request'))
-        if not user:
-            return None
-        return _course_user_state(self.context, user, self._batch(obj))[obj.id]
-
     def get_enrolled(self, obj):
-        state = self._state(obj)
-        return bool(state and state['status'] is not None)
+        user = self._user(self.context.get('request'))
+        if user:
+            return Enrollment.objects.filter(user=user, course=obj).exists()
+        return False
 
     def get_progress_percentage(self, obj):
         """Lessons completed by the requester, same rule as the course
@@ -545,7 +651,22 @@ class CourseListSerializer(serializers.ModelSerializer):
         state = self._state(obj)
         if not state or not state['total']:
             return 0
-        return round((state['completed'] / state['total']) * 100)
+        cache = self.context.setdefault('_course_progress_cache', {})
+        if obj.id not in cache:
+            total = Lesson.objects.filter(
+                chapter__course=obj, chapter__is_active=True, is_active=True
+            ).count()
+            if total == 0:
+                cache[obj.id] = 0
+            else:
+                completed = LessonProgress.objects.filter(
+                    user=user,
+                    lesson__chapter__course=obj,
+                    lesson__is_active=True,
+                    status__in=['completed', 'mastered'],
+                ).count()
+                cache[obj.id] = round((completed / total) * 100)
+        return cache[obj.id]
 
 
 class CourseDetailSerializer(serializers.ModelSerializer):
@@ -559,8 +680,8 @@ class CourseDetailSerializer(serializers.ModelSerializer):
     enrollment_id = serializers.SerializerMethodField()
     resume_lesson = serializers.SerializerMethodField()
     progress_percentage = serializers.SerializerMethodField()
-    estimated_hours = serializers.IntegerField(read_only=True)
-    total_xp = serializers.IntegerField(read_only=True)
+    estimated_hours = serializers.SerializerMethodField()
+    total_xp = serializers.SerializerMethodField()
 
     class Meta:
         model = Course
@@ -575,33 +696,68 @@ class CourseDetailSerializer(serializers.ModelSerializer):
 
     def get_chapters(self, obj):
         # Sorted by content order so chapters follow the intended path and
-        # the final assessment always comes last.
-        chapters = obj.chapters.filter(is_active=True).order_by('order', 'id')
+        # the final assessment always comes last. Lessons arrive through one
+        # prefetch so the course map costs a single query, not one per chapter.
+        chapters = Chapter.objects.filter(
+            course=obj, is_active=True,
+        ).order_by('order', 'id').prefetch_related(
+            Prefetch(
+                'lessons',
+                queryset=Lesson.objects.filter(is_active=True).order_by(
+                    'chapter_id', 'order'
+                ),
+            ),
+        )
         return ChapterListSerializer(chapters, many=True, context=self.context).data
 
+    def _stats(self, obj):
+        stats = batching.course_stats(self.context)
+        if stats is None:
+            return None
+        return stats.get(obj.id) or {}
+
     def get_lesson_count(self, obj):
-        return obj.lesson_count
+        stats = self._stats(obj)
+        return obj.lesson_count if stats is None else stats.get('lessons', 0)
 
     def get_exercise_count(self, obj):
-        return obj.exercise_count
+        stats = self._stats(obj)
+        return obj.exercise_count if stats is None else stats.get('exercises', 0)
+
+    def get_total_xp(self, obj):
+        stats = self._stats(obj)
+        return obj.total_xp if stats is None else stats.get('xp', 0)
+
+    def get_estimated_hours(self, obj):
+        if obj.manual_estimated_hours:
+            return obj.manual_estimated_hours
+        stats = self._stats(obj)
+        if stats is None:
+            return obj.estimated_hours
+        return max(1, round((stats.get('minutes') or 0) / 60))
+
+    def _enrollment(self, obj):
+        enrollments = batching.enrollment_map(self.context)
+        if enrollments is None:
+            request = self.context.get('request')
+            if request and hasattr(request, 'user') and request.user.is_authenticated:
+                return Enrollment.objects.filter(
+                    user=request.user, course=obj
+                ).select_related('last_lesson').first()
+            return None
+        return enrollments.get(obj.id)
 
     def get_enrolled(self, obj):
-        request = self.context.get('request')
-        if request and hasattr(request, 'user') and request.user.is_authenticated:
-            return Enrollment.objects.filter(user=request.user, course=obj).exists()
-        return False
+        return self._enrollment(obj) is not None
 
     def get_enrollment_id(self, obj):
-        request = self.context.get('request')
-        if request and hasattr(request, 'user') and request.user.is_authenticated:
-            enrollment = Enrollment.objects.filter(user=request.user, course=obj).first()
-            return enrollment.id if enrollment else None
-        return None
+        enrollment = self._enrollment(obj)
+        return enrollment.id if enrollment else None
 
     def get_resume_lesson(self, obj):
         request = self.context.get('request')
         if request and hasattr(request, 'user') and request.user.is_authenticated:
-            enrollment = Enrollment.objects.filter(user=request.user, course=obj).first()
+            enrollment = self._enrollment(obj)
             if enrollment and enrollment.last_lesson:
                 return LessonListSerializer(enrollment.last_lesson, context=self.context).data
             # Find first incomplete lesson
@@ -618,7 +774,12 @@ class CourseDetailSerializer(serializers.ModelSerializer):
 
     def get_progress_percentage(self, obj):
         request = self.context.get('request')
-        if request and hasattr(request, 'user') and request.user.is_authenticated:
+        user = getattr(getattr(request, 'user', None), 'is_authenticated', False) and request.user
+        if not user:
+            return 0
+        stats = self._stats(obj)
+        completed_map = batching.completed_by_course_any(self.context)
+        if stats is None or completed_map is None:
             total = Lesson.objects.filter(chapter__course=obj).count()
             if total == 0:
                 return 0
@@ -628,7 +789,10 @@ class CourseDetailSerializer(serializers.ModelSerializer):
                 status__in=['completed', 'mastered']
             ).count()
             return round((completed / total) * 100)
-        return 0
+        total = stats.get('lessons_all', 0)
+        if total == 0:
+            return 0
+        return round((completed_map.get(obj.id, 0) / total) * 100)
 
 
 class CareerTrackSerializer(serializers.ModelSerializer):
@@ -677,35 +841,39 @@ class CareerTrackSerializer(serializers.ModelSerializer):
     def get_course_count(self, obj):
         # Only count what a learner can actually open — unpublished draft
         # courses (e.g. Class XI/XII shells) must not inflate the number.
-        return len(self._courses(obj))
+        return obj.courses.filter(is_active=True, is_published=True).count()
 
     def get_total_xp(self, obj):
-        return sum(c.total_xp for c in self._courses(obj))
+        return sum(c.total_xp for c in obj.published_courses)
 
     def get_cover_url(self, obj):
         return _media_url(self.context.get('request'), obj.cover_image)
 
     def _progress_rows(self, obj):
-        """(lessons_total, lessons_completed, courses, enrollment_status_by_course)
+        """(lessons_total, lessons_completed, courses, enrollments_by_course)
         for the requesting user; shared by the progress fields."""
-        cache = self.context.setdefault('_track_progress_rows', {})
-        if obj.id in cache:
-            return cache[obj.id]
         request = self.context.get('request')
         user = getattr(getattr(request, 'user', None), 'is_authenticated', False) and request.user
-        courses = self._courses(obj)
-        lessons_total = sum(c.lesson_count for c in courses)
+        courses = list(obj.published_courses)
+        lessons_total = 0
         lessons_completed = 0
         enrollments = {}
-        if courses and user:
-            state = _course_user_state(self.context, user, courses)
-            lessons_completed = sum(state[c.id]['completed'] for c in courses)
-            enrollments = {
-                c.id: state[c.id]['status']
-                for c in courses if state[c.id]['status'] is not None
-            }
-        cache[obj.id] = (lessons_total, lessons_completed, courses, enrollments)
-        return cache[obj.id]
+        if courses:
+            lessons_total = Lesson.objects.filter(
+                chapter__course__in=courses, chapter__is_active=True, is_active=True
+            ).count()
+            if user:
+                lessons_completed = LessonProgress.objects.filter(
+                    user=user,
+                    lesson__chapter__course__in=courses,
+                    lesson__is_active=True,
+                    status__in=['completed', 'mastered'],
+                ).count()
+                enrollments = {
+                    e.course_id: e
+                    for e in Enrollment.objects.filter(user=user, course__in=courses)
+                }
+        return lessons_total, lessons_completed, courses, enrollments
 
     def get_enrolled_course_count(self, obj):
         _, _, _, enrollments = self._progress_rows(obj)
@@ -729,11 +897,22 @@ class CareerTrackSerializer(serializers.ModelSerializer):
         courses = self._courses(obj)
         state = _course_user_state(self.context, user, courses)
         best_slug, best_progress = None, -1.0
-        for course in courses:
-            rows = state[course.id]
-            if rows['status'] is None or rows['status'] in ('completed', 'dropped'):
+        for course in obj.published_courses:
+            enrollment = course.enrollments.filter(user=user).first()
+            if enrollment is None or enrollment.status in ('completed', 'dropped'):
                 continue
-            progress = rows['completed'] / rows['total'] if rows['total'] else 0.0
+            total = Lesson.objects.filter(
+                chapter__course=course, chapter__is_active=True, is_active=True
+            ).count()
+            if total == 0:
+                progress = 0.0
+            else:
+                done = LessonProgress.objects.filter(
+                    user=user, lesson__chapter__course=course,
+                    lesson__is_active=True,
+                    status__in=['completed', 'mastered'],
+                ).count()
+                progress = done / total
             if progress > best_progress:
                 best_progress, best_slug = progress, course.slug
         return best_slug
@@ -758,15 +937,26 @@ class CareerTrackListSerializer(serializers.ModelSerializer):
 
     def get_course_count(self, obj):
         # Matches the course list endpoint, which only serves published courses.
-        return obj.courses.filter(is_active=True, is_published=True).count()
+        if hasattr(obj, 'published_course_count'):
+            return obj.published_course_count
+        ids = batching.published_courses_by_track(self.context)
+        if ids is None:
+            return obj.courses.filter(is_active=True, is_published=True).count()
+        return len(ids.get(obj.id, []))
 
     def get_total_xp(self, obj):
-        cache = self.context.setdefault('_track_xp_cache', {})
-        if obj.id not in cache:
-            cache[obj.id] = sum(
-                c.total_xp for c in obj.courses.filter(is_active=True, is_published=True)
-            )
-        return cache[obj.id]
+        if hasattr(obj, 'published_lesson_xp'):
+            return obj.published_lesson_xp + obj.published_exercise_xp
+        ids = batching.published_courses_by_track(self.context)
+        stats = batching.course_stats(self.context)
+        if ids is None or stats is None:
+            cache = self.context.setdefault('_track_xp_cache', {})
+            if obj.id not in cache:
+                cache[obj.id] = sum(
+                    c.total_xp for c in obj.courses.filter(is_active=True, is_published=True)
+                )
+            return cache[obj.id]
+        return sum(stats.get(cid, {}).get('xp', 0) for cid in ids.get(obj.id, []))
 
     def get_cover_url(self, obj):
         return _media_url(self.context.get('request'), obj.cover_image)
@@ -778,21 +968,41 @@ class CareerTrackListSerializer(serializers.ModelSerializer):
         if not user:
             return None
         if obj.id not in cache:
-            courses = list(obj.courses.filter(is_active=True, is_published=True))
-            enrollments = list(
-                Enrollment.objects.filter(user=user, course__in=courses)
-            ) if courses else []
-            total = Lesson.objects.filter(
-                chapter__course__in=courses, chapter__is_active=True, is_active=True
-            ).count() if courses else 0
-            completed = LessonProgress.objects.filter(
-                user=user,
-                lesson__chapter__course__in=courses,
-                lesson__is_active=True,
-                status__in=['completed', 'mastered'],
-            ).count() if courses else 0
+            ids = batching.published_courses_by_track(self.context)
+            completed_map = batching.completed_lessons_by_course(self.context)
+            enrollments_all = batching.enrollment_map(self.context)
+            if ids is not None and hasattr(obj, 'published_lesson_count'):
+                course_ids = ids.get(obj.id, [])
+                if enrollments_all is not None and course_ids:
+                    enrolled = any(cid in enrollments_all for cid in course_ids)
+                elif course_ids:
+                    enrolled = Enrollment.objects.filter(
+                        user=user, course_id__in=course_ids
+                    ).exists()
+                else:
+                    enrolled = False
+                total = obj.published_lesson_count
+                completed = (
+                    sum(completed_map.get(cid, 0) for cid in course_ids)
+                    if completed_map is not None else 0
+                )
+            else:
+                courses = list(obj.courses.filter(is_active=True, is_published=True))
+                enrollments = list(
+                    Enrollment.objects.filter(user=user, course__in=courses)
+                ) if courses else []
+                enrolled = bool(enrollments)
+                total = Lesson.objects.filter(
+                    chapter__course__in=courses, chapter__is_active=True, is_active=True
+                ).count() if courses else 0
+                completed = LessonProgress.objects.filter(
+                    user=user,
+                    lesson__chapter__course__in=courses,
+                    lesson__is_active=True,
+                    status__in=['completed', 'mastered'],
+                ).count() if courses else 0
             cache[obj.id] = {
-                'enrolled': bool(enrollments),
+                'enrolled': enrolled,
                 'progress': round((completed / total) * 100) if total else 0,
             }
         return cache[obj.id]
@@ -876,7 +1086,7 @@ class ChallengeDetailSerializer(serializers.ModelSerializer):
             'id', 'slug', 'title', 'description', 'difficulty', 'topic',
             'estimated_minutes', 'xp_reward', 'languages',
             'starter_code', 'starter_code_cpp',
-            'problem_statement', 'requirements', 'input_description',
+            'problem_statement', 'learning_objective', 'requirements', 'input_description',
             'output_description', 'constraints', 'examples', 'hints',
             'time_complexity', 'space_complexity',
             'sample_tests', 'solved', 'attempts',
@@ -916,7 +1126,7 @@ class ChallengeSubmitSerializer(serializers.Serializer):
 class EnrollmentSerializer(serializers.ModelSerializer):
     course_title = serializers.CharField(source='course.title', read_only=True)
     track_title = serializers.CharField(source='course.track.title', read_only=True)
-    progress_percentage = serializers.IntegerField(read_only=True)
+    progress_percentage = serializers.SerializerMethodField()
     course_slug = serializers.CharField(source='course.slug', read_only=True)
 
     class Meta:
@@ -927,6 +1137,18 @@ class EnrollmentSerializer(serializers.ModelSerializer):
             'status', 'progress_percentage',
         ]
         read_only_fields = ['enrolled_at', 'completed_at', 'last_activity_at']
+
+    def get_progress_percentage(self, obj):
+        # Same arithmetic as Enrollment.progress_percentage, answered from
+        # two grouped queries instead of two queries per enrollment row.
+        stats = batching.course_stats(self.context)
+        done = batching.enrollment_completed_by_course(self.context)
+        if stats is None or done is None:
+            return obj.progress_percentage
+        total = (stats.get(obj.course_id) or {}).get('lessons_all', 0)
+        if total == 0:
+            return 0
+        return round((done.get(obj.course_id, 0) / total) * 100)
 
 
 class LessonProgressSerializer(serializers.ModelSerializer):
@@ -999,6 +1221,9 @@ class AchievementSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not (request and hasattr(request, 'user') and request.user.is_authenticated):
             return None
+        earned_map = self.context.get('_earned_achievement_map')
+        if earned_map is not None:
+            return earned_map.get(obj.pk)
         cache = self._earned_cache()
         if obj.pk not in cache:
             from .models import UserAchievement
@@ -1024,6 +1249,9 @@ class AchievementSerializer(serializers.ModelSerializer):
         """Server-derived (current, target); hidden detail once earned."""
         request = self.context.get('request')
         if not (request and hasattr(request, 'user') and request.user.is_authenticated):
+            return None
+        row = self._user_achievement(obj)
+        if row and row.status == 'active':
             return None
         from .services.achievements import measure_progress
         current, target = measure_progress(request.user, obj)
@@ -1066,7 +1294,10 @@ class UserNotificationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UserNotification
-        fields = ['id', 'type', 'title', 'body', 'link', 'unread', 'created_at']
+        fields = [
+            'id', 'type', 'category', 'title', 'body', 'link', 'unread',
+            'created_at',
+        ]
         read_only_fields = fields
 
     def get_unread(self, obj):
@@ -1074,13 +1305,32 @@ class UserNotificationSerializer(serializers.ModelSerializer):
 
 
 class NotificationPreferenceSerializer(serializers.Serializer):
-    """Validates the fixed set of account-level notification toggles."""
+    """Validates the fixed set of account-level notification preferences.
+
+    In-app toggles gate the notifications stored for the user; the ``email_*``
+    toggles gate the transactional mail sent alongside them. Security email
+    (verification, resets, password changes) intentionally has no key — it is
+    never optional. ``email_digest`` folds in-app notifications the user has
+    not already been emailed individually into a daily or weekly email.
+    """
 
     achievements = serializers.BooleanField(required=False)
     learning_reminders = serializers.BooleanField(required=False)
     streak_reminders = serializers.BooleanField(required=False)
     community = serializers.BooleanField(required=False)
     announcements = serializers.BooleanField(required=False)
+    competitions = serializers.BooleanField(required=False)
+
+    email_learning = serializers.BooleanField(required=False)
+    email_competitions = serializers.BooleanField(required=False)
+    email_achievements = serializers.BooleanField(required=False)
+    email_certificates = serializers.BooleanField(required=False)
+    email_announcements = serializers.BooleanField(required=False)
+
+    email_digest = serializers.ChoiceField(
+        choices=['none', 'daily', 'weekly'],
+        required=False,
+    )
 
 
 class AvatarUploadSerializer(serializers.Serializer):
@@ -1181,3 +1431,421 @@ class ExerciseSubmitSerializer(serializers.Serializer):
     )
     # NOTE: any client-suggested 'xp_earned' / 'xp' is deliberately ignored —
     # the backend is the only authority on XP.
+
+
+# ─── Portfolio Serializers ─────────────────────────────────────────────────
+
+MAX_PROJECT_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MB
+ALLOWED_PROJECT_IMAGE_TYPES = {'image/jpeg', 'image/png', 'image/webp'}
+MAX_FEATURED_PROJECTS = 3
+
+
+def _validate_project_image(image, field_name):
+    """Enforce type + size on an uploaded project image."""
+    if image is None:
+        return image
+    content_type = getattr(image, 'content_type', None)
+    if content_type and content_type not in ALLOWED_PROJECT_IMAGE_TYPES:
+        raise serializers.ValidationError({
+            field_name: 'Unsupported image type. Use JPEG, PNG or WebP.'
+        })
+    size = getattr(image, 'size', None)
+    if size is not None and size > MAX_PROJECT_IMAGE_BYTES:
+        raise serializers.ValidationError({
+            field_name: 'Image is too large. Maximum size is 5 MB.'
+        })
+    return image
+
+
+class ProjectImageSerializer(serializers.ModelSerializer):
+    image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProjectImage
+        fields = ['id', 'image', 'image_url', 'alt_text', 'display_order', 'created_at']
+        read_only_fields = ['created_at', 'image_url']
+
+    def get_image_url(self, obj):
+        request = self.context.get('request')
+        if not obj.image:
+            return ''
+        url = obj.image.url
+        if request is not None and url.startswith('/'):
+            return request.build_absolute_uri(url)
+        return url
+
+    def validate_image(self, value):
+        return _validate_project_image(value, 'image')
+
+
+class StudentProjectSerializer(serializers.ModelSerializer):
+    """Owner-facing read/write serializer for a portfolio project."""
+    images = ProjectImageSerializer(many=True, read_only=True)
+    category_label = serializers.CharField(source='get_category_display', read_only=True)
+    status_label = serializers.CharField(source='get_status_display', read_only=True)
+    cover_image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StudentProject
+        fields = [
+            'id', 'title', 'slug', 'short_description', 'overview',
+            'category', 'category_label', 'status', 'status_label',
+            'cover_image', 'cover_image_url', 'github_url', 'live_demo_url', 'docs_url',
+            'problem_statement', 'solution', 'technical_details',
+            'challenges', 'lessons_learned', 'contributions',
+            'technologies', 'start_date', 'completion_date',
+            'featured', 'display_order', 'visibility',
+            'images', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'slug', 'created_at', 'updated_at', 'display_order']
+
+    def get_cover_image_url(self, obj):
+        request = self.context.get('request')
+        if not obj.cover_image:
+            return ''
+        url = obj.cover_image.url
+        if request is not None and url.startswith('/'):
+            return request.build_absolute_uri(url)
+        return url
+
+    def validate_cover_image(self, value):
+        return _validate_project_image(value, 'cover_image')
+
+    def validate_technologies(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError('Technologies must be a list.')
+        cleaned = [str(v).strip() for v in value if str(v).strip()]
+        return cleaned[:40]
+
+    def _unique_slug(self, title, instance=None):
+        from django.utils.text import slugify
+        base = slugify(title) or 'project'
+        qs = StudentProject.objects.filter(user=self.context['request'].user)
+        if instance is not None:
+            qs = qs.exclude(pk=instance.pk)
+        slug = base
+        counter = 2
+        while qs.filter(slug=slug).exists():
+            slug = f'{base}-{counter}'
+            counter += 1
+        return slug
+
+    def validate(self, attrs):
+        title = attrs.get('title') or (self.instance.title if self.instance else '')
+        if self.instance is None:
+            attrs['slug'] = self._unique_slug(title)
+        elif 'title' in attrs and attrs['title'] != self.instance.title:
+            attrs['slug'] = self._unique_slug(attrs['title'], self.instance)
+
+        # Enforce the featured cap without double-counting the edited row.
+        if attrs.get('featured'):
+            user = self.context['request'].user
+            featured_qs = StudentProject.objects.filter(user=user, featured=True)
+            if self.instance is not None:
+                featured_qs = featured_qs.exclude(pk=self.instance.pk)
+            if featured_qs.count() >= MAX_FEATURED_PROJECTS:
+                raise serializers.ValidationError({
+                    'featured': f'You can feature at most {MAX_FEATURED_PROJECTS} projects.'
+                })
+        return attrs
+
+
+class StudentProjectPublicSerializer(serializers.ModelSerializer):
+    """Safe projection served through public endpoints (owner-filtered)."""
+    images = ProjectImageSerializer(many=True, read_only=True)
+    category_label = serializers.CharField(source='get_category_display', read_only=True)
+    status_label = serializers.CharField(source='get_status_display', read_only=True)
+    cover_image_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StudentProject
+        fields = [
+            'id', 'title', 'slug', 'short_description', 'overview',
+            'category', 'category_label', 'status', 'status_label',
+            'cover_image_url', 'github_url', 'live_demo_url', 'docs_url',
+            'problem_statement', 'solution', 'technical_details',
+            'challenges', 'lessons_learned', 'contributions',
+            'technologies', 'start_date', 'completion_date',
+            'featured', 'images',
+        ]
+
+    def get_cover_image_url(self, obj):
+        request = self.context.get('request')
+        if not obj.cover_image:
+            return ''
+        url = obj.cover_image.url
+        if request is not None and url.startswith('/'):
+            return request.build_absolute_uri(url)
+        return url
+
+
+class ProjectReorderSerializer(serializers.Serializer):
+    """Validated list of {id, display_order} belonging to the requesting user."""
+    items = serializers.ListField(
+        child=serializers.DictField(child=serializers.IntegerField()),
+        allow_empty=False,
+    )
+
+    def validate_items(self, value):
+        user = self.context['request'].user
+        ids = [int(item['id']) for item in value]
+        owned = set(
+            StudentProject.objects.filter(user=user, id__in=ids).values_list('id', flat=True)
+        )
+        missing = [i for i in ids if i not in owned]
+        if missing:
+            raise serializers.ValidationError(
+                f'Unknown project ids for this user: {missing}'
+            )
+        return value
+
+
+class PortfolioSerializer(serializers.ModelSerializer):
+    """Owner-facing portfolio settings + identity pulled from ``UserProfile``."""
+    full_name = serializers.SerializerMethodField()
+    username = serializers.SerializerMethodField()
+    avatar_url = serializers.SerializerMethodField()
+    location = serializers.SerializerMethodField()
+    github_url = serializers.SerializerMethodField()
+    linkedin_url = serializers.SerializerMethodField()
+    website_url = serializers.SerializerMethodField()
+    is_profile_public = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Portfolio
+        fields = [
+            'id', 'headline', 'about', 'interests', 'currently_learning',
+            'enjoys_building', 'is_published', 'show_skills', 'show_achievements',
+            'show_learning_progress', 'show_social_links', 'show_location',
+            'show_contact', 'created_at', 'updated_at',
+            'full_name', 'username', 'avatar_url', 'location',
+            'github_url', 'linkedin_url', 'website_url',
+            'is_profile_public',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def _profile(self, obj):
+        return getattr(obj.user, 'profile', None)
+
+    def get_full_name(self, obj):
+        return obj.user.get_full_name().strip() or obj.user.username
+
+    def get_username(self, obj):
+        return obj.user.username
+
+    def get_avatar_url(self, obj):
+        profile = self._profile(obj)
+        return profile.avatar_url() if profile else ''
+
+    def get_location(self, obj):
+        profile = self._profile(obj)
+        return profile.location if profile else ''
+
+    def get_github_url(self, obj):
+        profile = self._profile(obj)
+        return profile.github_url if profile else ''
+
+    def get_linkedin_url(self, obj):
+        profile = self._profile(obj)
+        return profile.linkedin_url if profile else ''
+
+    def get_website_url(self, obj):
+        profile = self._profile(obj)
+        return profile.website_url if profile else ''
+
+    def get_is_profile_public(self, obj):
+        profile = self._profile(obj)
+        return bool(profile and profile.is_profile_public)
+
+
+class PublicPortfolioSerializer(serializers.ModelSerializer):
+    """Privacy-filtered public portfolio payload.
+
+    The view only reaches this serializer once the owner has published the
+    portfolio and keeps their account public, so it never needs to decide
+    whether the whole page is visible. Each section is still independently
+    gated by the owner's toggles, and skills/achievements/journey are derived
+    from real platform records - nothing here is fabricated or auto-written.
+    """
+    display_name = serializers.SerializerMethodField()
+    username = serializers.SerializerMethodField()
+    avatar = serializers.SerializerMethodField()
+    location = serializers.SerializerMethodField()
+    social_links = serializers.SerializerMethodField()
+    contact_enabled = serializers.SerializerMethodField()
+    about = serializers.SerializerMethodField()
+    projects = serializers.SerializerMethodField()
+    skills = serializers.SerializerMethodField()
+    achievements = serializers.SerializerMethodField()
+    learning_journey = serializers.SerializerMethodField()
+    followers_count = serializers.SerializerMethodField()
+    following_count = serializers.SerializerMethodField()
+    is_following = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Portfolio
+        fields = [
+            'username', 'display_name', 'avatar', 'headline', 'location',
+            'social_links', 'contact_enabled', 'about', 'projects', 'skills',
+            'achievements', 'learning_journey', 'followers_count',
+            'following_count', 'is_following',
+        ]
+
+    def _profile(self, obj):
+        return getattr(obj.user, 'profile', None)
+
+    def get_display_name(self, obj):
+        return obj.user.get_full_name().strip() or obj.user.username
+
+    def get_username(self, obj):
+        return obj.user.username
+
+    def get_avatar(self, obj):
+        profile = self._profile(obj)
+        return profile.avatar_url() if profile else ''
+
+    def get_location(self, obj):
+        profile = self._profile(obj)
+        if self.show_location and profile:
+            return profile.location
+        return ''
+
+    @property
+    def show_location(self):
+        return self.instance.show_location if self.instance else False
+
+    def get_social_links(self, obj):
+        profile = self._profile(obj)
+        if not obj.show_social_links or profile is None:
+            return {}
+        links = {}
+        for key in ('github_url', 'linkedin_url', 'website_url'):
+            value = getattr(profile, key, '')
+            if value:
+                links[key] = value
+        return links
+
+    def get_contact_enabled(self, obj):
+        return bool(obj.show_contact)
+
+    def get_followers_count(self, obj):
+        return obj.user.follower_relationships.count()
+
+    def get_following_count(self, obj):
+        return obj.user.following_relationships.count()
+
+    def get_is_following(self, obj):
+        request = self.context.get('request')
+        return bool(
+            request and request.user.is_authenticated
+            and Follow.objects.filter(
+                follower=request.user, following=obj.user,
+            ).exists()
+        )
+
+    def get_about(self, obj):
+        return {
+            'text': obj.about,
+            'interests': obj.interests or [],
+            'currently_learning': obj.currently_learning,
+            'enjoys_building': obj.enjoys_building,
+        }
+
+    def get_projects(self, obj):
+        public_projects = (
+            StudentProject.objects
+            .filter(user=obj.user, visibility='public')
+            .prefetch_related('images')
+            .order_by('-featured', 'display_order', '-updated_at')
+        )
+        return StudentProjectPublicSerializer(
+            public_projects, many=True, context=self.context,
+        ).data
+
+    def _demonstrated_skill_names(self, obj):
+        """Skills backed by an actual completed course on the platform."""
+        names = set()
+        completed = Enrollment.objects.filter(
+            user=obj.user, status='completed'
+        ).select_related('course')
+        for enrollment in completed:
+            course = enrollment.course
+            if course.language:
+                names.add(course.language.lower())
+        return names
+
+    def get_skills(self, obj):
+        if not obj.show_skills:
+            return {'visible': False, 'groups': []}
+        profile_rows = UserSkill.objects.filter(
+            user=obj.user,
+        ).select_related('skill')
+        demonstrated = self._demonstrated_skill_names(obj)
+        proficiency_labels = dict(UserSkill.PROFICIENCY_CHOICES)
+        groups = {}
+        for row in profile_rows:
+            category = row.skill.category or 'Other'
+            groups.setdefault(category, []).append({
+                'name': row.skill.name,
+                'proficiency': row.proficiency,
+                'proficiency_label': proficiency_labels.get(row.proficiency, ''),
+                # Self-reported unless a completed Code Yaar course evidences it.
+                'demonstrated': row.skill.name.lower() in demonstrated,
+            })
+        return {
+            'visible': True,
+            'groups': [
+                {'category': category, 'items': items}
+                for category, items in sorted(groups.items())
+            ],
+        }
+
+    def get_achievements(self, obj):
+        profile = self._profile(obj)
+        show_badges = getattr(profile, 'show_badges', True) if profile else True
+        if not obj.show_achievements or not show_badges:
+            return {'visible': False, 'items': []}
+        earned = UserAchievement.objects.filter(
+            user=obj.user, status='active', achievement__is_active=True,
+        ).select_related('achievement').order_by('-earned_at')
+        items = [{
+            'slug': ua.achievement.slug,
+            'title': ua.achievement.title,
+            'description': ua.achievement.description,
+            'icon': ua.achievement.icon,
+            'category': ua.achievement.category,
+            'difficulty': ua.achievement.difficulty,
+            'earned_at': ua.earned_at.isoformat(),
+            'verification_url': ua.verification_url(),
+        } for ua in earned]
+        return {'visible': True, 'items': items}
+
+    def get_learning_journey(self, obj):
+        if not obj.show_learning_progress:
+            return {'visible': False, 'tracks_completed': [], 'courses_completed': []}
+        profile = self._profile(obj)
+        show_courses = getattr(profile, 'show_courses', True) if profile else True
+        tracks_completed, courses_completed = [], []
+        if show_courses:
+            completed = Enrollment.objects.filter(
+                user=obj.user, status='completed',
+            ).select_related('course', 'course__track')
+            seen_tracks = set()
+            for enrollment in completed:
+                course = enrollment.course
+                courses_completed.append({
+                    'title': course.title,
+                    'track': course.track.title,
+                    'completed_at': enrollment.completed_at.isoformat()
+                    if enrollment.completed_at else None,
+                })
+                if course.track.pk not in seen_tracks:
+                    seen_tracks.add(course.track.pk)
+                    tracks_completed.append({
+                        'slug': course.track.slug, 'title': course.track.title,
+                    })
+        return {
+            'visible': True,
+            'tracks_completed': tracks_completed,
+            'courses_completed': courses_completed,
+        }

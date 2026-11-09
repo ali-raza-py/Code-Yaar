@@ -66,7 +66,7 @@ export default function ProjectDetailPage() {
         <Link href="/projects" className="mb-8 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> Back to Projects
         </Link>
-        <div className="rounded-xl border border-dashed border-[var(--color-section-border)] px-6 py-16 text-center">
+        <div className="rounded-xl border border-dashed border-border px-6 py-16 text-center">
           <SearchX className="mx-auto h-8 w-8 text-muted-foreground" />
           <h1 className="mt-4 text-xl font-bold">Project not found</h1>
           <p className="mt-2 text-sm text-muted-foreground">This project doesn&apos;t exist or has been removed.</p>

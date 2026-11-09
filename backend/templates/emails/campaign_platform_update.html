@@ -1,0 +1,8 @@
+{% extends "emails/campaign_general.html" %}
+{% comment %}
+Platform-update campaign mail (emails/campaign_platform_update.html): the general
+campaign layout, the changelog category in the header pill and a pointer to the
+public updates page under the button.
+{% endcomment %}
+{% block eyebrow %}{{ eyebrow|default:"Platform update" }}{% endblock %}
+{% block footer_note %}{% include "emails/_small.html" with text="Every release stays published on the Code Yaar updates page, so you can catch up on anything you missed." %}{% endblock %}

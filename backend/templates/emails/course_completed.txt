@@ -1,0 +1,12 @@
+{% extends "emails/base.txt" %}
+{% block heading %}Course completed — congratulations{% endblock %}
+{% block body %}You completed {{ course_title }} and earned the XP that comes with it.
+
+{% if certification_note %}{{ certification_note }}
+
+{% endif %}Keep the momentum — the next course in your track is a good place to aim.
+
+{% endblock %}
+{% block cta_label %}Review the course{% endblock %}
+{% block footer_note %}You are receiving learning updates because they are enabled in your notification settings.
+{% endblock %}

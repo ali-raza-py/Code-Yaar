@@ -234,6 +234,7 @@ dashboard including a "Claim my certificate" flow.
 cd backend
 python manage.py migrate
 python manage.py seed_academy        # idempotent — safe to re-run
+python manage.py seed_badges         # idempotent — 19-badge registry, 0 duplicates on re-run
 python manage.py test                # 125 tests
 python manage.py runserver           # API on :8000, admin at /admin/
 

@@ -27,12 +27,14 @@ class AuthUserSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
     role = serializers.SerializerMethodField()
     email_verified = serializers.SerializerMethodField()
+    is_super_admin = serializers.BooleanField(source='is_superuser', read_only=True)
 
     class Meta:
         model = User
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name',
             'full_name', 'date_joined', 'role', 'email_verified',
+            'is_super_admin',
         ]
         read_only_fields = fields
 

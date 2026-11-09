@@ -1,0 +1,4 @@
+{% extends "emails/base.txt" %}
+{% block cta_label %}{{ cta_label|default:"View competition" }}{% endblock %}
+{% block footer_note %}You receive competition emails while they are enabled in your notification settings.
+{% endblock %}

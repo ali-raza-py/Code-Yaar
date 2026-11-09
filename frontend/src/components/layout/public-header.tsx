@@ -10,11 +10,15 @@ import Image from "next/image";
 
 const MotionLink = motion.create(Link);
 
+// Visitor navigation uses discovery nouns; the student shell (/dashboard,
+// /learn…) never appears here — signed-in users get a single way back in.
 const navItems = [
-  { href: "/learn", label: "Learn" },
-  { href: "/projects", label: "Projects" },
-  { href: "/challenges", label: "Challenges" },
+  { href: "/tracks", label: "Learning Tracks" },
+  { href: "/courses", label: "Explore Courses" },
+  { href: "/competitions", label: "Hackathons" },
   { href: "/leaderboard", label: "Leaderboard" },
+  { href: "/updates", label: "Updates" },
+  { href: "/about", label: "About" },
 ];
 
 export function PublicHeader() {
@@ -33,8 +37,8 @@ export function PublicHeader() {
       className={cn(
         "sticky top-0 z-50 w-full transition-all duration-300",
         scrolled
-          ? "border-b border-[var(--color-section-border)] bg-white/95 backdrop-blur-sm shadow-sm"
-          : "bg-white"
+          ? "border-b border-[var(--color-section-border)] bg-background/95 backdrop-blur-sm shadow-sm"
+          : "bg-background"
       )}
     >
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6 lg:px-8">
@@ -49,6 +53,7 @@ export function PublicHeader() {
               src="/logo-light.png"
               alt=""
               fill
+              sizes="28px"
               className="object-contain"
               priority
             />
@@ -108,7 +113,7 @@ export function PublicHeader() {
           <div className="hidden items-center gap-2 md:flex">
             {user ? (
               <Link href="/dashboard" className="rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90">
-                Dashboard
+                Open Dashboard
               </Link>
             ) : (
               <>
@@ -150,7 +155,7 @@ export function PublicHeader() {
               <div className="mt-3 flex flex-col gap-2 border-t border-[var(--color-section-border)] pt-3">
                 {user ? (
                   <Link href="/dashboard" className="dc-btn-primary w-full justify-center">
-                    Dashboard
+                    Open Dashboard
                   </Link>
                 ) : (
                   <>

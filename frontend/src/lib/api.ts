@@ -1,11 +1,4 @@
 import type { Challenge, ChallengeDetail, ChallengeRunResult, ChallengeSubmitResult, Chapter, Course, Enrollment, ExerciseDetail, ExerciseResult, LessonDetail, Project, PracticalAdmin, PracticalClass, PracticalClassAdmin, PracticalDetail, PracticalSubject, PracticalSubjectAdmin, PracticalSummary } from "@/types";
-import {
-  cachedRequest,
-  clearCache,
-  getCacheMetrics,
-  invalidateCache,
-  type CachePolicy,
-} from "@/lib/cache";
 
 /**
  * API client for Code-Yaar learning platform.
@@ -43,24 +36,13 @@ const NO_REFRESH = new Set([
 // ─── Token storage (memory only) ────────────────────────────────────────────
 
 let accessToken: string | null = null;
-let currentUserId: number | null = null;
-
-function setCurrentUser(userId: number | null): void {
-  currentUserId = userId;
-}
-
-function cacheScope(withAuth: boolean): string | null {
-  if (withAuth && accessToken) {
-    return currentUserId === null ? null : `user:${currentUserId}`;
-  }
-  return 'public';
-}
 
 export function getAccessToken(): string | null {
   return accessToken;
 }
 
 export function setAccessToken(token: string) {
+  if (accessToken !== token) clearResponseCache();
   accessToken = token;
 }
 
@@ -92,6 +74,7 @@ function clearSessionHint() {
 /** Forget the session locally. The refresh cookie is only cleared server-side. */
 export function clearToken() {
   clearAccessToken();
+  clearResponseCache();
   clearSessionHint();
   clearCache();
 }
@@ -232,7 +215,7 @@ export const MAIL_REFUSED_MESSAGE =
 // DRF paginates list endpoints globally (PageNumberPagination): they return
 // { count, next, previous, results } rather than a bare array. Normalize so
 // callers always get a plain array.
-type Paginated<T> = T[] | { results: T[]; count: number; next: string | null; previous: string | null };
+export type Paginated<T> = T[] | { results: T[]; count: number; next: string | null; previous: string | null };
 
 function unwrapList<T>(data: Paginated<T>): T[] {
   return Array.isArray(data) ? data : data.results;
@@ -376,28 +359,40 @@ async function send(
   });
 }
 
-async function requestUncached<T>(
+async function request<T>(
   endpoint: string,
   options: ApiRequestOptions = {}
 ): Promise<T> {
-  const { cachePolicy: ignoredCachePolicy, ...requestOptions } = options;
-  void ignoredCachePolicy;
-  const { withAuth = true, retryOnUnauthorized = true, ...init } = requestOptions;
+  const { withAuth = true, retryOnUnauthorized = true, ...init } = options;
 
   let res = await send(endpoint, init, withAuth);
 
-  if (res.status === 401 && withAuth && retryOnUnauthorized && !NO_REFRESH.has(endpoint)) {
-    const refreshed = await refreshAccessToken();
-    if (refreshed) res = await send(endpoint, init, withAuth);
+    if (res.status === 401 && withAuth && retryOnUnauthorized && !NO_REFRESH.has(endpoint)) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) res = await send(endpoint, init, withAuth);
+    }
+
+    if (!res.ok) throw await readError(res);
+
+    // Handle 204 No Content
+    if (res.status === 204) return {} as T;
+
+    const text = await res.text();
+    const value = (text ? JSON.parse(text) : {}) as T;
+    if (cacheable && ttl > 0) {
+      responseCache.set(cacheKey, { expiresAt: Date.now() + ttl, value });
+    }
+    return value;
+  };
+
+  if (!cacheable) {
+    clearResponseCache();
+    return execute();
   }
 
-  if (!res.ok) throw await readError(res);
-
-  // Handle 204 No Content
-  if (res.status === 204) return {} as T;
-
-  const text = await res.text();
-  return (text ? JSON.parse(text) : {}) as T;
+  const pending = execute().finally(() => inFlightRequests.delete(cacheKey));
+  inFlightRequests.set(cacheKey, pending);
+  return pending;
 }
 
 async function request<T>(
@@ -441,6 +436,7 @@ export interface AuthUser {
   date_joined: string;
   role: UserRole;
   email_verified: boolean;
+  is_super_admin: boolean;
 }
 
 export interface ProfileFields {
@@ -712,12 +708,13 @@ export async function restoreSession(): Promise<MePayload | null> {
 // ─── Course Endpoints ───────────────────────────────────────────────────────
 
 export const courses = {
-  list: async (params?: { track?: string; difficulty?: string; language?: string; search?: string }): Promise<Course[]> => {
+  list: async (params?: { track?: string; difficulty?: string; language?: string; search?: string; page_size?: number }): Promise<Course[]> => {
     const query = new URLSearchParams();
     if (params?.track) query.set('track', params.track);
     if (params?.difficulty) query.set('difficulty', params.difficulty);
     if (params?.language) query.set('language', params.language);
     if (params?.search) query.set('search', params.search);
+    query.set('page_size', String(params?.page_size ?? 200));
     const qs = query.toString();
     const data = await request<Paginated<Course>>(`/courses/${qs ? `?${qs}` : ''}`, {
       cachePolicy: 'courses',
@@ -760,10 +757,7 @@ export const courses = {
       xp_awarded: number;
       exercises_remaining: number;
       message: string;
-    }>(`/lessons/${lessonId}/complete/`, { method: 'POST' });
-    invalidateCache('courses:', 'tracks:', 'profileStats:', 'progress:', 'leaderboard:');
-    return result;
-  },
+    }>(`/lessons/${lessonId}/complete/`, { method: 'POST' }),
 };
 
 // ─── Practicals Endpoints ──────────────────────────────────────────────────
@@ -1021,6 +1015,9 @@ export interface LeaderboardEntry {
   streak_days: number;
   courses_completed: number;
   challenges_solved: number;
+  full_name: string;
+  avatar: string;
+  followers_count: number;
 }
 
 // ─── Projects & Challenges ──────────────────────────────────────────────────
@@ -1048,8 +1045,7 @@ export const challenges = {
     if (params?.difficulty) query.set('difficulty', params.difficulty);
     const qs = query.toString();
     const data = await request<Paginated<Challenge>>(
-      `/challenges/${qs ? `?${qs}` : ''}`,
-      { cachePolicy: 'questions' },
+      `/challenges/${qs ? `?${qs}` : ''}`
     );
     return unwrapList(data);
   },
@@ -1069,6 +1065,124 @@ export const challenges = {
     invalidateCache('questions:', 'leaderboard:', 'profileStats:', 'progress:');
     return result;
   },
+};
+
+export const competitions = {
+  list: async (params?: {
+    status?: string; category?: string; difficulty?: string; format?: string;
+    delivery_mode?: string; search?: string; ordering?: string;
+  }): Promise<Competition[]> => {
+    const query = new URLSearchParams();
+    Object.entries(params || {}).forEach(([key, value]) => {
+      if (value) query.set(key, value);
+    });
+    const qs = query.toString();
+    const data = await request<Paginated<Competition>>(`/competitions/${qs ? `?${qs}` : ''}`, { withAuth: false });
+    return unwrapList(data);
+  },
+  detail: (slug: string) => request<CompetitionDetail>(`/competitions/${slug}/`, { withAuth: false }),
+  mine: async () => {
+    const data = await request<Paginated<Competition>>('/competitions/mine/');
+    return unwrapList(data);
+  },
+  register: (slug: string, data: {
+    rules_accepted: boolean;
+    registration_data?: Record<string, unknown>;
+    team?: number;
+    team_name?: string;
+  }) =>
+    request<CompetitionRegistration>(`/competitions/${slug}/register/`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  registrationForm: (slug: string) =>
+    request<RegistrationFormFieldPublic[]>(`/competitions/${slug}/registration-form/`, { withAuth: false }),
+  submission: (slug: string) => request<CompetitionSubmission>(`/competitions/${slug}/submission/`),
+  saveSubmission: (slug: string, data: Partial<CompetitionSubmission> & { submit?: boolean }) =>
+    request<CompetitionSubmission>(`/competitions/${slug}/submission/`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  leaderboard: (slug: string) => request<CompetitionResult[]>(`/competitions/${slug}/leaderboard/`, { withAuth: false }),
+};
+
+// ─── Public announcements, updates & registration form types ─────────────
+
+export interface PublicAnnouncement {
+  id: number;
+  slug: string | null;
+  title: string;
+  short_description: string;
+  body: string;
+  category: string;
+  category_label: string;
+  priority: 'normal' | 'important' | 'urgent';
+  priority_label: string;
+  target_audience: string;
+  cover_image: string | null;
+  scheduled_at: string | null;
+  published_at: string | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export interface PublicPlatformUpdate {
+  id: number;
+  slug: string | null;
+  title: string;
+  version: string;
+  category: string;
+  category_label: string;
+  summary: string;
+  content: string;
+  change_list: string[];
+  cover_image: string | null;
+  target_audience: string;
+  published_at: string | null;
+  created_at: string;
+}
+
+export type RegistrationFieldType =
+  | 'short_text' | 'long_text' | 'email' | 'phone' | 'number'
+  | 'dropdown' | 'multiple_choice' | 'checkboxes' | 'url' | 'date';
+
+export interface RegistrationFormFieldPublic {
+  id: number;
+  label: string;
+  field_key: string;
+  field_type: RegistrationFieldType;
+  description: string;
+  placeholder: string;
+  required: boolean;
+  options: Array<string | number>;
+  validation: Record<string, number>;
+  order: number;
+}
+
+export const announcements = {
+  list: async (params?: { category?: string }): Promise<PublicAnnouncement[]> => {
+    const query = new URLSearchParams();
+    Object.entries(params || {}).forEach(([key, value]) => {
+      if (value) query.set(key, value);
+    });
+    const qs = query.toString();
+    const data = await request<Paginated<PublicAnnouncement>>(`/announcements/${qs ? `?${qs}` : ''}`, { withAuth: false });
+    return unwrapList(data);
+  },
+  detail: (slug: string) => request<PublicAnnouncement>(`/announcements/${slug}/`, { withAuth: false }),
+};
+
+export const platformUpdates = {
+  list: async (params?: { category?: string }): Promise<PublicPlatformUpdate[]> => {
+    const query = new URLSearchParams();
+    Object.entries(params || {}).forEach(([key, value]) => {
+      if (value) query.set(key, value);
+    });
+    const qs = query.toString();
+    const data = await request<Paginated<PublicPlatformUpdate>>(`/platform-updates/${qs ? `?${qs}` : ''}`, { withAuth: false });
+    return unwrapList(data);
+  },
+  detail: (slug: string) => request<PublicPlatformUpdate>(`/platform-updates/${slug}/`, { withAuth: false }),
 };
 
 // ─── Profile Stats ────────────────────────────────────────────────────────
@@ -1511,4 +1625,413 @@ export const badges = {
     if (!res.ok) throw await readError(res);
     triggerBlobDownload(await res.blob(), `code-yaar-${identifier}-share-${preset}.png`);
   },
+};
+
+// ─── Achievement catalogue (earned + locked, with progress) ────────────────
+
+export const achievements = {
+  /** Full badge grid from `GET /api/achievements/`: difficulty, progress, etc. */
+  list: async (): Promise<AchievementDefinition[]> => {
+    const data = await request<Paginated<AchievementDefinition>>('/achievements/');
+    return unwrapList(data);
+  },
+};
+
+// ─── In-app notifications ──────────────────────────────────────────────────
+
+export interface NotificationListResult {
+  results: AppNotification[];
+  unread_count: number;
+  next: boolean;
+  previous: boolean;
+}
+
+export const notifications = {
+  list: (params?: { page?: number; page_size?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.page) query.set('page', String(params.page));
+    if (params?.page_size) query.set('page_size', String(params.page_size));
+    const qs = query.toString();
+    return request<NotificationListResult>(`/notifications/${qs ? `?${qs}` : ''}`);
+  },
+
+  markRead: (id: number) =>
+    request<{ id: number; unread: boolean }>(`/notifications/${id}/read/`, { method: 'POST' }),
+
+  markAllRead: () =>
+    request<{ marked_read: number }>('/notifications/read-all/', { method: 'POST' }),
+};
+
+// ─── Avatar upload / removal (multipart) ───────────────────────────────────
+
+/**
+ * Multipart POST/DELETE that keeps the token-refresh-on-401 behaviour of
+ * `authorizedFetch` but lets the browser set the `multipart/form-data`
+ * boundary (the JSON content type in `send` would break the encoding).
+ */
+async function multipartRequest<T>(endpoint: string, init: RequestInit): Promise<T> {
+  const build = (): Promise<Response> => {
+    const headers: Record<string, string> = {};
+    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+    return fetchOrThrow(`${API_BASE}${endpoint}`, { ...init, headers, credentials: 'include' });
+  };
+  let res = await build();
+  if (res.status === 401) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) res = await build();
+  }
+  if (!res.ok) throw await readError(res);
+  const text = await res.text();
+  return (text ? JSON.parse(text) : {}) as T;
+}
+
+export const avatar = {
+  /** Upload a cropped avatar; returns the authoritative stored URL. */
+  upload: (blob: Blob) => {
+    const form = new FormData();
+    form.append('file', blob, 'avatar.jpg');
+    return multipartRequest<{ avatar: string }>('/profile/avatar/', {
+      method: 'POST',
+      body: form,
+    });
+  },
+
+  /** Remove the picture, restoring the default initials avatar. */
+  remove: () =>
+    multipartRequest<{ avatar: string; detail: string }>('/profile/avatar/', {
+      method: 'DELETE',
+    }),
+};
+
+// ─── Account-level notification preferences ────────────────────────────────
+
+export const preferences = {
+  patch: (data: Partial<NotificationPreferences>) =>
+    request<{ notification_preferences: NotificationPreferences }>('/profile/preferences/', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+};
+
+// ─── Public (shareable) profile ────────────────────────────────────────────
+
+export interface PublicProfileData {
+  username: string;
+  display_name: string;
+  avatar: string;
+  bio: string;
+  location: string;
+  joined_at: string;
+  github_url: string;
+  linkedin_url: string;
+  website_url: string;
+  stats: {
+    level: number;
+    xp_points: number;
+    streak_days: number;
+    longest_streak: number;
+    courses_completed: number;
+    badges_earned: number;
+  };
+  show_badges: boolean;
+  show_courses: boolean;
+  show_activity: boolean;
+  badges: Array<{
+    slug: string;
+    title: string;
+    description: string;
+    icon: string;
+    category: string;
+    difficulty: string;
+    earned_at: string;
+    verification_url: string;
+  }>;
+  tracks_completed: Array<{ slug: string; title: string }>;
+  recent_activity: Array<{
+    amount: number;
+    action: string;
+    description: string;
+    created_at: string;
+  }>;
+}
+
+export const users = {
+  /** Unauthenticated public profile; 404 when private or unknown. */
+  publicProfile: (username: string) =>
+    request<PublicProfileData>(`/users/${encodeURIComponent(username)}/`),
+};
+
+// ─── Account deletion request (recorded, never executed inline) ────────────
+
+export const account = {
+  requestDeletion: () =>
+    request<{ detail: string; requested_at: string }>('/account/deletion-request/', {
+      method: 'POST',
+    }),
+};
+
+// ─── Developer Portfolio ──────────────────────────────────────────────────
+
+export type ProjectCategory =
+  | 'web_development' | 'ai' | 'machine_learning' | 'backend' | 'frontend'
+  | 'mobile' | 'developer_tools' | 'automation' | 'data_science' | 'other';
+
+export type ProjectStatus = 'in_progress' | 'completed' | 'archived';
+export type ProjectVisibility = 'public' | 'private';
+
+export const PROJECT_CATEGORY_LABELS: Record<ProjectCategory, string> = {
+  web_development: 'Web Development',
+  ai: 'Artificial Intelligence',
+  machine_learning: 'Machine Learning',
+  backend: 'Backend Development',
+  frontend: 'Frontend Development',
+  mobile: 'Mobile Applications',
+  developer_tools: 'Developer Tools',
+  automation: 'Automation',
+  data_science: 'Data Science',
+  other: 'Other',
+};
+
+export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
+  in_progress: 'In progress',
+  completed: 'Completed',
+  archived: 'Archived',
+};
+
+export interface ProjectImage {
+  id: number;
+  image_url: string;
+  alt_text: string;
+  display_order: number;
+}
+
+/** Owner-facing project (includes visibility + ordering fields). */
+export interface StudentProject {
+  id: number;
+  title: string;
+  slug: string;
+  short_description: string;
+  overview: string;
+  category: ProjectCategory;
+  category_label: string;
+  status: ProjectStatus;
+  status_label: string;
+  cover_image: string | null;
+  cover_image_url: string;
+  github_url: string;
+  live_demo_url: string;
+  docs_url: string;
+  problem_statement: string;
+  solution: string;
+  technical_details: string;
+  challenges: string;
+  lessons_learned: string;
+  contributions: string;
+  technologies: string[];
+  start_date: string | null;
+  completion_date: string | null;
+  featured: boolean;
+  display_order: number;
+  visibility: ProjectVisibility;
+  images: ProjectImage[];
+  created_at: string;
+  updated_at: string;
+}
+
+/** Public projection omits owner-only fields. */
+export type PublicProject = Omit<StudentProject, 'visibility' | 'display_order' | 'created_at' | 'updated_at'>;
+
+export interface StudentProjectInput {
+  title: string;
+  short_description: string;
+  overview?: string;
+  category: ProjectCategory;
+  status?: ProjectStatus;
+  github_url?: string;
+  live_demo_url?: string;
+  docs_url?: string;
+  problem_statement?: string;
+  solution?: string;
+  technical_details?: string;
+  challenges?: string;
+  lessons_learned?: string;
+  contributions?: string;
+  technologies?: string[];
+  start_date?: string | null;
+  completion_date?: string | null;
+  featured?: boolean;
+  visibility?: ProjectVisibility;
+}
+
+export interface PortfolioData {
+  id: number;
+  headline: string;
+  about: string;
+  interests: string[];
+  currently_learning: string;
+  enjoys_building: string;
+  is_published: boolean;
+  show_skills: boolean;
+  show_achievements: boolean;
+  show_learning_progress: boolean;
+  show_social_links: boolean;
+  show_location: boolean;
+  show_contact: boolean;
+  created_at: string;
+  updated_at: string;
+  full_name: string;
+  username: string;
+  avatar_url: string;
+  location: string;
+  github_url: string;
+  linkedin_url: string;
+  website_url: string;
+  is_profile_public: boolean;
+}
+
+export type PortfolioPatch = Partial<
+  Pick<
+    PortfolioData,
+    | 'headline' | 'about' | 'interests' | 'currently_learning' | 'enjoys_building'
+    | 'show_skills' | 'show_achievements' | 'show_learning_progress'
+    | 'show_social_links' | 'show_location' | 'show_contact'
+  >
+>;
+
+export interface PublicSkillItem {
+  name: string;
+  proficiency: number;
+  proficiency_label: string;
+  demonstrated: boolean;
+}
+
+export interface PublicPortfolioData {
+  username: string;
+  display_name: string;
+  avatar: string;
+  headline: string;
+  location: string;
+  social_links: Partial<Record<'github_url' | 'linkedin_url' | 'website_url', string>>;
+  contact_enabled: boolean;
+  about: { text: string; interests: string[]; currently_learning: string; enjoys_building: string };
+  projects: PublicProject[];
+  skills: { visible: boolean; groups: Array<{ category: string; items: PublicSkillItem[] }> };
+  achievements: {
+    visible: boolean;
+    items: Array<{
+      slug: string; title: string; description: string; icon: string;
+      category: string; difficulty: string; earned_at: string; verification_url: string;
+    }>;
+  };
+  learning_journey: {
+    visible: boolean;
+    tracks_completed: Array<{ slug: string; title: string }>;
+    courses_completed: Array<{ title: string; track: string; completed_at: string | null }>;
+  };
+  followers_count: number;
+  following_count: number;
+  is_following: boolean;
+}
+
+export interface FollowSummary {
+  username: string;
+  display_name: string;
+  avatar: string;
+  headline: string;
+}
+
+export interface FollowList {
+  count: number;
+  results: FollowSummary[];
+}
+
+export const social = {
+  follow: (username: string) =>
+    request<{ following: boolean; followers_count: number; following_count: number }>(
+      `/users/${encodeURIComponent(username)}/follow/`,
+      { method: 'POST' },
+    ),
+  unfollow: (username: string) =>
+    request<{ following: boolean; followers_count: number; following_count: number }>(
+      `/users/${encodeURIComponent(username)}/follow/`,
+      { method: 'DELETE' },
+    ),
+  followers: (username: string) =>
+    request<FollowList>(`/users/${encodeURIComponent(username)}/followers/`, { withAuth: false }),
+  following: (username: string) =>
+    request<FollowList>(`/users/${encodeURIComponent(username)}/following/`, { withAuth: false }),
+};
+
+/**
+ * Encode a project payload as multipart form data. `technologies` (a JSON
+ * list) and dates are serialized the way DRF's FormParser expects; the cover
+ * image, when present, is appended as a file.
+ */
+function projectToFormData(payload: StudentProjectInput, cover?: File | null): FormData {
+  const form = new FormData();
+  const add = (key: keyof StudentProjectInput) => {
+    const value = payload[key];
+    if (value === undefined || value === null) return;
+    if (Array.isArray(value)) form.append(key, JSON.stringify(value));
+    else if (typeof value === 'boolean') form.append(key, value ? 'true' : 'false');
+    else form.append(key, String(value));
+  };
+  (Object.keys(payload) as Array<keyof StudentProjectInput>).forEach(add);
+  if (cover) form.append('cover_image', cover, cover.name || 'cover.jpg');
+  return form;
+}
+
+export const portfolio = {
+  getMy: () => request<PortfolioData>('/portfolio/me/'),
+  patchMy: (data: PortfolioPatch) =>
+    request<PortfolioData>('/portfolio/me/', { method: 'PATCH', body: JSON.stringify(data) }),
+  publish: () => request<PortfolioData>('/portfolio/publish/', { method: 'POST' }),
+  unpublish: () => request<PortfolioData>('/portfolio/unpublish/', { method: 'POST' }),
+  getPublic: (username: string) =>
+    request<PublicPortfolioData>(`/portfolio/${encodeURIComponent(username)}/`, { withAuth: false }),
+};
+
+export const studentProjects = {
+  list: async (params?: { category?: string; visibility?: string; featured?: boolean }): Promise<StudentProject[]> => {
+    const query = new URLSearchParams();
+    if (params?.category) query.set('category', params.category);
+    if (params?.visibility) query.set('visibility', params.visibility);
+    if (params?.featured !== undefined) query.set('featured', String(params.featured));
+    const qs = query.toString();
+    const data = await request<Paginated<StudentProject>>(`/portfolio/projects/${qs ? `?${qs}` : ''}`);
+    return unwrapList(data);
+  },
+  get: (id: number) => request<StudentProject>(`/portfolio/projects/${id}/`),
+  create: (payload: StudentProjectInput, cover?: File | null) =>
+    multipartRequest<StudentProject>('/portfolio/projects/', {
+      method: 'POST',
+      body: projectToFormData(payload, cover),
+    }),
+  update: (id: number, payload: StudentProjectInput, cover?: File | null) =>
+    multipartRequest<StudentProject>(`/portfolio/projects/${id}/`, {
+      method: 'PATCH',
+      body: projectToFormData(payload, cover),
+    }),
+  remove: (id: number) => request(`/portfolio/projects/${id}/`, { method: 'DELETE' }),
+  reorder: (items: Array<{ id: number; display_order: number }>) =>
+    request<StudentProject[]>('/portfolio/projects/reorder/', {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    }),
+  addImage: (id: number, file: File, altText = '') => {
+    const form = new FormData();
+    form.append('image', file, file.name || 'image.jpg');
+    form.append('alt_text', altText);
+    return multipartRequest<ProjectImage>(`/portfolio/projects/${id}/images/`, {
+      method: 'POST',
+      body: form,
+    });
+  },
+  removeImage: (id: number, imageId: number) =>
+    request(`/portfolio/projects/${id}/images/${imageId}/`, { method: 'DELETE' }),
+  getPublicProject: (username: string, slug: string) =>
+    request<PublicProject>(
+      `/portfolio/${encodeURIComponent(username)}/projects/${encodeURIComponent(slug)}/`,
+      { withAuth: false },
+    ),
 };

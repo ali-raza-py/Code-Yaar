@@ -1,17 +1,12 @@
 import Link from "next/link";
 import { ArrowUpRight, Circle, CheckCircle2, Clock3 } from "lucide-react";
 import type { Challenge } from "@/types";
+import { DifficultyPill } from "@/components/ui/difficulty-pill";
 
 interface ChallengeCardProps {
   challenge: Challenge;
   solved?: boolean;
 }
-
-const difficultyStyles = {
-  beginner: "bg-difficulty-easy-soft text-difficulty-easy",
-  intermediate: "bg-difficulty-medium-soft text-difficulty-medium",
-  advanced: "bg-difficulty-hard-soft text-difficulty-hard",
-};
 
 export function ChallengeCard({ challenge, solved: solvedProp }: ChallengeCardProps) {
   const solved = solvedProp ?? Boolean(challenge.solved);
@@ -21,9 +16,7 @@ export function ChallengeCard({ challenge, solved: solvedProp }: ChallengeCardPr
   return (
     <article className="group flex min-h-[220px] flex-col rounded-[var(--radius-card)] border border-[var(--challenge-border)] bg-[var(--challenge-surface)] p-5 shadow-[var(--challenge-shadow)] transition-all duration-200 ease-out hover:-translate-y-0.5 hover:border-[var(--challenge-accent)]/45 hover:shadow-[var(--challenge-shadow-hover)]">
       <div className="flex items-center justify-between gap-3">
-        <span className={`rounded-pill px-2.5 py-1 text-[11px] font-bold capitalize ${difficultyStyles[challenge.difficulty]}`}>
-          {challenge.difficulty}
-        </span>
+        <DifficultyPill difficulty={challenge.difficulty} size="sm" />
         <span className="inline-flex items-center gap-1.5 text-xs text-[var(--challenge-muted)]">
           {solved ? <CheckCircle2 aria-label="Solved" className="h-4 w-4 text-success" /> : <Circle aria-label="Unsolved" className="h-4 w-4" />}
           {solved ? "Completed" : inProgress ? "In progress" : "Open"}

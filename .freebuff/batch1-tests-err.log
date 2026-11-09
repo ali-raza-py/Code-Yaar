@@ -1,0 +1,7 @@
+Creating test database for alias 'default'...
+Got an error creating the test database: database "test_postgres" already exists
+
+Destroying old test database for alias 'default'...
+Got an error recreating the test database: database "test_postgres" is being accessed by other users
+DETAIL:  There is 1 other session using the database.
+

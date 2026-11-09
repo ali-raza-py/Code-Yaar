@@ -21,6 +21,7 @@ that simulates execution. In production, replace with actual sandbox
 (Docker containers, AWS Lambda, or similar).
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -28,6 +29,9 @@ import sys
 import tempfile
 import time
 import logging
+import urllib.error
+import urllib.parse
+import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
@@ -273,7 +277,13 @@ class SubprocessSandbox(SandboxService):
     def _clean_env(self) -> dict:
         env = dict(os.environ)
         for key in list(env):
-            if key.startswith(('DJANGO_', 'AWS_', 'DATABASE', 'SECRET', 'GIT')):
+            if (
+                key.startswith((
+                    'DJANGO_', 'AWS_', 'DATABASE', 'DB_', 'EMAIL_', 'SECRET',
+                    'GIT', 'SUPABASE_', 'SANDBOX_',
+                ))
+                or key.endswith(('_PASSWORD', '_TOKEN', '_SECRET', '_API_KEY'))
+            ):
                 env.pop(key, None)
         env['PYTHONIOENCODING'] = 'utf-8'
         return env
@@ -505,22 +515,108 @@ def _format_cpp_compile_error(raw: str, cwd: str = '') -> str:
 
 
 class DockerSandbox(SandboxService):
-    """
-    Production Docker-based sandbox (stub).
+    """Client for the separately hosted, container-isolated execution service."""
 
-    Implementation requires:
-    1. Docker daemon running
-    2. Pre-built language images (python:3.11-slim, node:18-slim, etc.)
-    3. Resource limits via Docker API
-    4. Network isolation
-    5. Temporary filesystem mounts
-    6. Automatic container cleanup
+    def __init__(
+        self,
+        runner_url: str,
+        token: str,
+        config: Optional[SandboxConfig] = None,
+    ):
+        parsed_url = urllib.parse.urlsplit(runner_url)
+        loopback_http = (
+            parsed_url.scheme == 'http'
+            and parsed_url.hostname == '127.0.0.1'
+        )
+        remote_https = parsed_url.scheme == 'https' and bool(parsed_url.hostname)
+        if (
+            not (loopback_http or remote_https)
+            or parsed_url.username
+            or parsed_url.password
+            or parsed_url.path not in ('', '/')
+            or parsed_url.query
+            or parsed_url.fragment
+        ):
+            raise ValueError(
+                'Sandbox runner URL must use HTTP on loopback or HTTPS on a remote host.'
+            )
+        try:
+            port = parsed_url.port
+        except ValueError:
+            raise ValueError('Sandbox runner URL has an invalid port.') from None
+        if port is None and remote_https:
+            port = 443
+        if port is None:
+            raise ValueError('Sandbox runner URL must include its port.')
+        if not 1 <= port <= 65535:
+            raise ValueError('Sandbox runner URL has an invalid port.')
+        if len(token) < 32:
+            raise ValueError('Sandbox runner token must contain at least 32 characters.')
+        self.runner_url = runner_url.rstrip('/')
+        self.token = token
+        self.config = config or SandboxConfig()
+        self.request_timeout = max(15.0, self.config.timeout_seconds + 5.0)
 
-    TODO: Implement when deploying to production.
-    """
+    def _request(self, method: str, path: str, payload: Optional[dict] = None) -> dict:
+        body = json.dumps(payload).encode('utf-8') if payload is not None else None
+        request = urllib.request.Request(
+            f'{self.runner_url}{path}',
+            data=body,
+            headers={
+                'Authorization': f'Bearer {self.token}',
+                'Accept': 'application/json',
+                **({'Content-Type': 'application/json'} if body is not None else {}),
+            },
+            method=method,
+        )
+        try:
+            opener = urllib.request.build_opener(
+                urllib.request.ProxyHandler({}),
+                _NoRedirectHandler(),
+            )
+            with opener.open(request, timeout=self.request_timeout) as response:
+                response_limit = self.config.max_output_bytes * 12 + 4096
+                raw = response.read(response_limit + 1)
+                if len(raw) > response_limit:
+                    raise SandboxUnavailable('Execution service returned an oversized response.')
+        except urllib.error.HTTPError as exc:
+            raise SandboxUnavailable(
+                f'Execution service returned HTTP {exc.code}.'
+            ) from None
+        except (urllib.error.URLError, TimeoutError, OSError):
+            raise SandboxUnavailable('Execution service is unavailable.') from None
 
-    def __init__(self, docker_host: str = 'unix:///var/run/docker.sock'):
-        self.docker_host = docker_host
+        try:
+            result = json.loads(raw.decode('utf-8'))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise SandboxUnavailable('Execution service returned an invalid response.') from None
+        if not isinstance(result, dict):
+            raise SandboxUnavailable('Execution service returned an invalid response.')
+        return result
+
+    @staticmethod
+    def _execution_result(data: dict) -> ExecutionResult:
+        status_value = data.get('status')
+        if status_value not in {'success', 'error', 'timeout'}:
+            raise SandboxUnavailable('Execution service returned an invalid result.')
+        output = data.get('output', '')
+        error = data.get('error', '')
+        return_code = data.get('return_code', 0)
+        execution_time_ms = data.get('execution_time_ms', 0)
+        if (
+            not isinstance(output, str)
+            or not isinstance(error, str)
+            or not isinstance(return_code, int)
+            or not isinstance(execution_time_ms, int)
+        ):
+            raise SandboxUnavailable('Execution service returned an invalid result.')
+        return ExecutionResult(
+            status=status_value,
+            output=output,
+            error=error,
+            return_code=return_code,
+            execution_time_ms=execution_time_ms,
+        )
 
     def execute(
         self,
@@ -529,10 +625,32 @@ class DockerSandbox(SandboxService):
         config: Optional[SandboxConfig] = None,
         stdin: str = '',
     ) -> ExecutionResult:
-        raise NotImplementedError(
-            'DockerSandbox is not yet implemented. '
-            'Use DevelopmentSandbox for local development.'
-        )
+        if language not in ('python', 'cpp'):
+            return ExecutionResult(
+                status='error',
+                error=(
+                    'Server-side execution currently supports Python and C++ '
+                    f'only (got {language!r}).'
+                ),
+            )
+        if not code.strip():
+            return ExecutionResult(status='error', error='No code provided.')
+
+        limits = config or self.config
+        try:
+            response = self._request('POST', '/v1/execute', {
+                'code': code,
+                'language': language,
+                'stdin': stdin,
+                'timeout_seconds': limits.timeout_seconds,
+                'max_output_bytes': limits.max_output_bytes,
+            })
+        except SandboxUnavailable as exc:
+            return ExecutionResult(status='error', error=str(exc))
+        try:
+            return self._execution_result(response)
+        except SandboxUnavailable as exc:
+            return ExecutionResult(status='error', error=str(exc))
 
     def run_tests(
         self,
@@ -541,14 +659,47 @@ class DockerSandbox(SandboxService):
         test_cases: list[dict],
         config: Optional[SandboxConfig] = None,
     ) -> list[TestResult]:
-        raise NotImplementedError(
-            'DockerSandbox is not yet implemented. '
-            'Use DevelopmentSandbox for local development.'
-        )
+        if language == 'cpp' and not test_cases:
+            test_cases = [{'input': '', 'expected_output': ''}]
+
+        results = []
+        for index, test in enumerate(test_cases):
+            run = self.execute(
+                code=code,
+                language=language,
+                config=config,
+                stdin=_test_stdin(test),
+            )
+            if run.status == 'error' and run.error.startswith('Execution service '):
+                results.extend(
+                    TestResult(
+                        test_number=remaining + 1,
+                        status='error',
+                        expected=str(item.get('expected_output', '')).strip(),
+                        actual=run.error,
+                        message=run.error,
+                    )
+                    for remaining, item in enumerate(test_cases[index:], start=index)
+                )
+                break
+            results.append(SubprocessSandbox._grade(run, index, test))
+        return results
 
     def health_check(self) -> bool:
-        # TODO: Check Docker daemon availability
-        return False
+        try:
+            response = self._request('GET', '/health')
+        except SandboxUnavailable:
+            return False
+        return response.get('status') == 'ok'
+
+
+class SandboxUnavailable(RuntimeError):
+    """The isolated runner could not provide a valid execution result."""
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, new_url):
+        return None
 
 
 # ─── Service Registry ────────────────────────────────────────────────────────
@@ -560,16 +711,27 @@ def get_sandbox() -> SandboxService:
     """
     Get the configured sandbox service.
 
-    Resolution order:
-    - SANDBOX_SERVICE setting ('django.conf.settings.DEV_SANDBOX_ENABLED=False
-      forces the simulated DevelopmentSandbox).
-    - By default a real SubprocessSandbox (isolated process, timeout, output
-      caps) so that Run/Submit genuinely execute and grade code.
+    Production selects the remote Docker runner explicitly. Local development
+    retains the existing subprocess implementation unless configured otherwise.
     """
     global _sandbox
     if _sandbox is None:
         from django.conf import settings
-        if getattr(settings, 'DEV_SANDBOX_ENABLED', True):
+        backend = getattr(settings, 'SANDBOX_BACKEND', None)
+        if backend == 'remote':
+            _sandbox = DockerSandbox(
+                runner_url=settings.SANDBOX_RUNNER_URL,
+                token=settings.SANDBOX_RUNNER_TOKEN,
+                config=SandboxConfig(
+                    timeout_seconds=getattr(settings, 'SANDBOX_TIMEOUT_SECONDS', 10.0),
+                    max_output_bytes=getattr(settings, 'SANDBOX_MAX_OUTPUT_BYTES', 100_000),
+                ),
+            )
+        elif backend == 'development' or (
+            backend is None and not getattr(settings, 'DEV_SANDBOX_ENABLED', True)
+        ):
+            _sandbox = DevelopmentSandbox()
+        elif backend in (None, 'subprocess'):
             _sandbox = SubprocessSandbox(
                 python_exe=getattr(settings, 'SANDBOX_PYTHON_EXE', None) or sys.executable,
                 cpp_exe=getattr(settings, 'SANDBOX_CPP_EXE', None),
@@ -579,7 +741,7 @@ def get_sandbox() -> SandboxService:
                 ),
             )
         else:
-            _sandbox = DevelopmentSandbox()
+            raise ValueError(f'Unsupported SANDBOX_BACKEND: {backend!r}')
     return _sandbox
 
 

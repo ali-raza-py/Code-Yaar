@@ -1,0 +1,26 @@
+api.codeyaar.tech {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+
+	handle_path /static/* {
+		root * /opt/codeyaar/backend/staticfiles
+		header Cache-Control "public, max-age=3600"
+		file_server
+	}
+
+	@public_media path /media/avatars/* /media/track-covers/* /media/course-covers/* /media/announcement-covers/* /media/update-covers/* /media/campaign-banners/* /media/portfolio-covers/* /media/portfolio-project-images/* /media/competition-banners/*
+	handle @public_media {
+		uri strip_prefix /media
+		root * /srv/codeyaar/media
+		file_server
+	}
+
+	@other_media path /media/*
+	handle @other_media {
+		respond 404
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:8000
+	}
+}

@@ -109,7 +109,7 @@ export default function LegacyVerificationResolver() {
             Code Yaar home
           </Link>
           <Link
-            href="/learn?view=courses"
+            href="/courses"
             className="focus-ring inline-flex min-h-10 items-center rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-muted"
           >
             Explore courses

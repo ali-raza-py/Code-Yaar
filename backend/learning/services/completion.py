@@ -11,13 +11,14 @@ Requirements evaluated (all gated by the course's own configuration):
   ``certification_passing_score`` (when ``require_final_assessment`` is set).
 """
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
 from ..models import (
     Course, Enrollment, Exercise, Lesson, LessonProgress,
 )
-from .notifications import create_notification
+from .notifications import notify
 from .progress import record_learning_activity
 
 
@@ -90,13 +91,36 @@ def evaluate_course_completion(user, course: Course):
         if is_course_complete(user, course):
             enrollment.status = 'completed'
             enrollment.completed_at = timezone.now()
-            enrollment.save(update_fields=['status', 'completed_at'])
-            create_notification(
+            # Course completion is one of the platform's biggest moments: the
+            # fact is committed here, and the notification plus its optional
+            # email are scheduled (with the email only actually sent after
+            # this transaction commits).
+            notify(
                 user,
                 type='track_complete',
                 title=f'Course complete: {course.title}',
                 body='You finished every requirement for this course.',
                 link=f'/learn/{course.slug}',
+                related_object_type='course',
+                related_object_id=course.slug,
+                dedupe_key=f'course-complete:{user.pk}:{course.slug}',
+                email_context={
+                    'preheader': f'{course.title} is complete.',
+                    'heading': 'Course completed — congratulations',
+                    'message': (
+                        f'You completed {course.title} and earned the XP '
+                        'that comes with it.'
+                    ),
+                    'certification_note': (
+                        'This course issues a verifiable certificate — '
+                        'claim it from your certificates page.'
+                        if course.certification_enabled else ''
+                    ),
+                    'cta_url': f'{settings.FRONTEND_URL}/learn/{course.slug}',
+                    'cta_label': 'Review the course',
+                    'info_rows': [['Course', course.title]],
+                },
+                email_key=f'course-complete:{user.pk}:{course.slug}',
             )
             record_learning_activity(
                 user, 'course_completed', f'Completed {course.title}',

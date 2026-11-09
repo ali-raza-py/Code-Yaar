@@ -1,0 +1,142 @@
+{% comment %}
+Shared Code Yaar email layout. Event templates extend this file and override:
+  preheader   — invisible inbox-preview line
+  eyebrow     — category pill in the brand band (falls back to `eyebrow`)
+  heading     — the email's headline
+  salutation  — greeting line
+  body        — event copy (defaults to one paragraph from `message`)
+  extra       — free-form content after the body
+  note        — advisory callout (defaults to `note` + `note_tone`, see _note.html)
+  cta_label   — the button caption (the link itself always comes from `cta_url`)
+  footer_note — the small-print paragraph above the footer links
+
+Context every event passes through learning.services.email_service:
+cta_url / cta_label / eyebrow, info_rows [[label, value], ...], plus the brand
+links (dashboard_url, preferences_url) and `unsubscribe_url` for campaign mail.
+
+Layout is table-based with inline styles so Gmail, Outlook and mobile clients
+render it identically; `color-scheme` is pinned to light because this palette is
+built for a white card on a light canvas and client dark-mode inversions would
+break it. User-generated content reaches these templates through Django's
+autoescaping, so it is always safe.
+{% endcomment %}<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="color-scheme" content="light only" />
+  <meta name="supported-color-schemes" content="light" />
+  <title>{{ subject|default:brand_name }}</title>
+  <style type="text/css">
+    html, body { margin: 0; padding: 0; width: 100% !important; }
+    body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+    table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; border-collapse: collapse !important; }
+    img { -ms-interpolation-mode: bicubic; border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; }
+    a { text-decoration: none; }
+    a.cy-btn:hover { background-color: #047857 !important; }
+    @media only screen and (max-width: 640px) {
+      .cy-container { width: 100% !important; border-radius: 0 !important; }
+      .cy-pad { padding-left: 22px !important; padding-right: 22px !important; }
+      .cy-pad-y { padding-top: 26px !important; padding-bottom: 24px !important; }
+      .cy-btn { display: block !important; width: 100% !important; }
+      .cy-label { padding-bottom: 2px !important; white-space: normal !important; }
+    }
+  </style>
+  <!--[if mso]>
+  <style type="text/css">body, table, td, a, p { font-family: 'Segoe UI', Helvetica, Arial, sans-serif !important; }</style>
+  <![endif]-->
+</head>
+<body style="margin: 0; padding: 0; background-color: #eef2f7;">
+  <div style="display: none; max-height: 0; overflow: hidden; mso-hide: all; font-size: 1px; line-height: 1px; color: #eef2f7;">{% block preheader %}{{ preheader }}{% endblock %}&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #eef2f7;">
+    <tr>
+      <td align="center" style="padding: 32px 12px;">
+        <!--[if mso]><table role="presentation" width="620" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+        <table role="presentation" class="cy-container" width="620" cellpadding="0" cellspacing="0" border="0" style="width: 620px; max-width: 620px; background-color: #ffffff; border: 1px solid #e3e9f0; border-radius: 14px; overflow: hidden;">
+          <tr>
+            <td style="height: 4px; line-height: 4px; font-size: 4px; background-color: #059669;">&nbsp;</td>
+          </tr>
+          <tr>
+            <td style="background-color: #0f1d32; padding: 22px 32px;" class="cy-pad">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td valign="middle" width="55%">
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                      <tr>
+                        <td valign="middle" width="38" style="font-size: 0; line-height: 0;">
+                          <img src="{{ logo_url }}" width="38" height="38" alt="{{ brand_name }}" style="display: block; border: 0;" />
+                        </td>
+                        <td valign="middle" style="padding-left: 12px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 17px; font-weight: 700; color: #ffffff; letter-spacing: 0.2px;">
+                          {{ brand_name }}
+                          <span style="display: block; padding-top: 3px; font-size: 9px; font-weight: 600; color: #7f98ba; letter-spacing: 0.18em;">THINK. BUILD. EVOLVE.</span>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                  <td valign="middle" align="right" width="45%">
+                    <span style="display: inline-block; background-color: #17293f; border: 1px solid #26405c; border-radius: 20px; padding: 5px 12px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 10px; font-weight: 700; color: #6ee7b7; letter-spacing: 0.12em; mso-padding-alt: 0;">{% block eyebrow %}{{ eyebrow|upper|default:"CODE YAAR" }}{% endblock %}</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #ffffff; padding: 34px 36px 28px;" class="cy-pad cy-pad-y">
+              <h1 style="margin: 0; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 22px; line-height: 1.3; font-weight: 700; color: #0f1d32; letter-spacing: -0.2px;">{% block heading %}{{ heading }}{% endblock %}</h1>
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 14px 0 20px;">
+                <tr><td style="width: 44px; height: 3px; line-height: 3px; font-size: 3px; background-color: #059669;">&nbsp;</td></tr>
+              </table>
+              <p style="margin: 0 0 12px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.6; color: #475569;">{% block salutation %}{% if first_name %}Hi {{ first_name }},{% else %}Hello,{% endif %}{% endblock %}</p>
+              {% block body %}{% if message %}{% include "emails/_p.html" with text=message %}{% endif %}{% endblock %}
+              {% block extra %}{% endblock %}
+              {% block note %}{% if note %}{% include "emails/_note.html" with tone=note_tone text=note %}{% endif %}{% endblock %}
+              {% if info_rows %}
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 22px 0 4px; background-color: #f8fafc; border: 1px solid #e8edf3; border-radius: 10px;">
+                {% for row in info_rows %}
+                <tr>
+                  <td class="cy-label" width="40%" valign="top" style="padding: 11px 16px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 11px; font-weight: 700; color: #64748b; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap;">{{ row.0 }}</td>
+                  <td valign="top" style="padding: 11px 16px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 14px; line-height: 1.55; font-weight: 600; color: #0f1d32;">{{ row.1 }}</td>
+                </tr>
+                {% if not forloop.last %}
+                <tr><td colspan="2" style="height: 1px; line-height: 1px; font-size: 1px; background-color: #e8edf3;">&nbsp;</td></tr>
+                {% endif %}
+                {% endfor %}
+              </table>
+              {% endif %}
+              {% if cta_url %}
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 26px 0 12px;">
+                <tr>
+                  <td align="center" bgcolor="#059669" style="border-radius: 8px; mso-padding-alt: 13px 30px;">
+                    <a class="cy-btn" href="{{ cta_url }}" style="display: inline-block; padding: 13px 30px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 15px; font-weight: 600; color: #ffffff; background-color: #059669; border-radius: 8px; text-decoration: none;">{% block cta_label %}{{ cta_label|default:"Open Code Yaar" }}{% endblock %}</a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin: 0; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 12px; line-height: 1.6; color: #94a3b8;">Button not working? Copy this link into your browser:<br /><span style="color: #059669; word-break: break-all;">{{ cta_url }}</span></p>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #f8fafc; border-top: 1px solid #e8edf3; padding: 22px 36px 26px;" class="cy-pad">
+              {% block footer_note %}{% if footer_note %}{% include "emails/_small.html" with text=footer_note %}{% endif %}{% endblock %}
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 0 0 12px;">
+                <tr><td style="height: 1px; line-height: 1px; font-size: 1px; width: 40px; background-color: #cbd5e1;">&nbsp;</td></tr>
+              </table>
+              <p style="margin: 0 0 8px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 12px; line-height: 1.8; color: #64748b;">
+                <a href="{{ dashboard_url }}" style="color: #0f1d32; font-weight: 600; text-decoration: none;">Dashboard</a>
+                &nbsp;·&nbsp;
+                <a href="{{ preferences_url }}" style="color: #0f1d32; font-weight: 600; text-decoration: none;">Email preferences</a>
+                {% if unsubscribe_url %}&nbsp;·&nbsp;
+                <a href="{{ unsubscribe_url }}" style="color: #0f1d32; font-weight: 600; text-decoration: none;">Unsubscribe</a>
+                {% endif %}
+              </p>
+              <p style="margin: 0; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 11px; line-height: 1.7; color: #94a3b8;">© {{ current_year }} {{ brand_name }} · {{ brand_tagline }}{% if recipient_email %} · Sent to {{ recipient_email }}{% endif %}</p>
+            </td>
+          </tr>
+        </table>
+        <!--[if mso]></td></tr></table><![endif]-->
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

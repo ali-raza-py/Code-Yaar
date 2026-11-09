@@ -1,0 +1,7 @@
+{% extends "emails/campaign_general.html" %}
+{% comment %}
+New-course campaign mail (emails/campaign_new_course.html): the general campaign
+layout with a "New course" pill in the header, so the category reads before the
+copy does. `eyebrow` normally arrives from learning.services.email_campaigns.
+{% endcomment %}
+{% block eyebrow %}{{ eyebrow|default:"New course" }}{% endblock %}

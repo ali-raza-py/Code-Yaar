@@ -1,0 +1,10 @@
+{% extends "emails/base.html" %}
+{% block preheader %}Confirm your email to activate your Code Yaar account.{% endblock %}
+{% block heading %}Confirm your email address{% endblock %}
+{% block body %}
+<p style="margin: 0 0 14px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.7; color: #334155;">Welcome to <strong>Code Yaar</strong>. Confirm this email address to finish setting up your account — courses, practice, competitions and credentials unlock right after.</p>
+<p style="margin: 0 0 14px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.7; color: #334155;">The button below opens a single-use confirmation link that expires in <strong>{{ ttl_hours }} hours</strong>.</p>
+{% endblock %}
+{% block note %}{% include "emails/_note.html" with tone="secure" text="Keep this link private: opening it confirms the address and signs the holder in to your account. Code Yaar staff will never ask you for it." %}{% endblock %}
+{% block cta_label %}Verify my email{% endblock %}
+{% block footer_note %}{% include "emails/_small.html" with text="If you did not create a Code Yaar account, you can ignore this email — nothing happens until the link is opened. Security mail like this is always sent and cannot be turned off." %}{% endblock %}

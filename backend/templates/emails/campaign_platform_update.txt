@@ -1,0 +1,6 @@
+{% extends "emails/base.txt" %}
+{% block body %}{% for paragraph in paragraphs %}{{ paragraph }}
+
+{% endfor %}{% endblock %}
+{% block footer_note %}Every release is archived on the Code Yaar updates page.
+{% endblock %}

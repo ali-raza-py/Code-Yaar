@@ -20,11 +20,11 @@ function LearnContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
-  // Tracks now live on their own pages; legacy bookmarks are redirected so
-  // old ?view=tracks / ?track= links keep working.
+  // Tracks now live on the public discovery pages; legacy bookmarks are
+  // redirected so old ?view=tracks / ?track= links keep working.
   useEffect(() => {
-    if (viewParam === "tracks") router.replace("/learn/tracks");
-    else if (trackParam) router.replace(`/learn/tracks/${trackParam}`);
+    if (viewParam === "tracks") router.replace("/tracks");
+    else if (trackParam) router.replace(`/tracks/${trackParam}`);
   }, [viewParam, trackParam, router]);
 
   const onTrackRedirect = viewParam === "tracks" || Boolean(trackParam);
@@ -68,12 +68,12 @@ function LearnContent() {
       <div className="mb-6 overflow-hidden rounded-xl bg-[#0f1d32] p-8 text-white sm:p-10">
         <div className="max-w-2xl">
           <nav className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-white/60">
-            <Link href="/learn/tracks" className="hover:text-white">Tracks</Link>
+            <Link href="/tracks" className="hover:text-white">Tracks</Link>
             <span>/</span>
             <span className="text-[#2dbe52]">All courses</span>
           </nav>
           <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-bold sm:text-4xl">Courses</h1>
+            <h1 className="text-3xl font-bold sm:text-4xl">Explore Courses</h1>
             <span className="inline-flex items-center gap-1.5 rounded-full bg-[#2dbe52] px-3 py-1 text-xs font-bold"><BookOpen className="h-3.5 w-3.5" />Hands-on learning</span>
           </div>
           <p className="mt-3 text-white/70">Follow a structured path, practice the concept immediately, and build the confidence to use it in a real project.</p>

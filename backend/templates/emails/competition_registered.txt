@@ -1,0 +1,10 @@
+{% extends "emails/base.txt" %}
+{% block heading %}Competition registration confirmed{% endblock %}
+{% block body %}Your registration for {{ competition_title }} is confirmed.
+
+Mark the dates below — submissions only count if they arrive before the deadline.
+
+{% endblock %}
+{% block cta_label %}View competition{% endblock %}
+{% block footer_note %}You receive competition emails while they are enabled in your notification settings.
+{% endblock %}

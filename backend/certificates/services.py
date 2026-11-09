@@ -6,6 +6,7 @@ certificate by editing a request. Issuance is transactional and duplicate-safe.
 
 from dataclasses import dataclass, field
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
@@ -17,7 +18,9 @@ from learning.models import (
     LessonProgress,
     Certification as LearningCertification,
     UserCertification,
+    UserNotification,
 )
+from learning.services.notifications import notify
 
 from .models import Certificate, CertificateEvent
 
@@ -203,13 +206,16 @@ def issue_certificate(user, course: Course, *, issued_by=None,
         user.get_full_name().strip()
         or user.username
     )
+    # The issued record and the certificate email both name the course, so the
+    # title is bound once here instead of re-reading `course` in three places.
+    course_title = course.title
 
     certificate = Certificate.objects.create(
         user=user,
         course=course,
         enrollment=enrollment,
         student_name=student_name,
-        course_title=course.title,
+        course_title=course_title,
         completion_verified_at=timezone.now(),
         final_score=result.final_score,
         policy_version=course.policy_version if hasattr(course, 'policy_version') else 1,
@@ -225,6 +231,43 @@ def issue_certificate(user, course: Course, *, issued_by=None,
         snapshot=_snapshot(certificate),
     )
     _sync_profile_certification(user, course, certificate)
+
+    # Announce the credential in-app (and by optional email): the fact is
+    # committed inside this same transaction, and the notification service
+    # schedules its mail only after that commit, so a mail outage can never
+    # un-issue the certificate it reports on.
+    notify(
+        user,
+        type=UserNotification.Type.CERTIFICATE_ISSUED,
+        title=f'Certificate issued: {course.title}',
+        body=(
+            'Your verifiable Certificate of Completion is ready and carries '
+            f'credential ID {certificate.credential_id}.'
+        ),
+        link=f'/certificates/{certificate.credential_id}',
+        related_object_type='certificate',
+        related_object_id=certificate.credential_id,
+        dedupe_key=f'certificate-issued:{certificate.pk}',
+        email_subject=f'Your certificate for {course.title} is ready',
+        email_context={
+            'preheader': f'{course_title} — certificate ready.',
+            'heading': 'Your certificate is ready',
+            'message': (
+                f'Your Certificate of Completion for {course_title} has been '
+                'issued. It is publicly verifiable and carries the '
+                'credential ID below.'
+            ),
+            'cta_url': (
+                f'{settings.FRONTEND_URL}/certificates/{certificate.credential_id}'
+            ),
+            'cta_label': 'View your certificate',
+            'info_rows': [
+                ['Credential ID', certificate.credential_id],
+                ['Course', course_title],
+            ],
+        },
+        email_key=f'certificate-issued:{certificate.pk}',
+    )
 
     # Generate the PDF (best effort — a rendering failure must not un-issue
     # the record, which remains verifiable from the database regardless).

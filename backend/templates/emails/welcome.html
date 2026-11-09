@@ -1,0 +1,16 @@
+{% extends "emails/base.html" %}
+{% block preheader %}Welcome to Code Yaar — your account is ready.{% endblock %}
+{% block heading %}Welcome to Code Yaar{% endblock %}
+{% block body %}
+<p style="margin: 0 0 14px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.7; color: #334155;">Your new <strong>Code Yaar</strong> account is created. You are joining a learning platform built for students in Pakistan: structured tracks, hands-on coding practice, competitions and verifiable credentials.</p>
+<p style="margin: 0 0 14px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.7; color: #334155;">A good first step is picking a learning track — you can also jump straight into daily practice challenges.</p>
+{% endblock %}
+{% block note %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin: 20px 0 4px;">
+  <tr>
+    <td style="border-left: 3px solid #0ea5e9; background-color: #f0f9ff; border-radius: 0 8px 8px 0; padding: 13px 16px; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 13px; line-height: 1.65; color: #334155;">Your email address is not verified yet. Verify it from <a href="{{ dashboard_url }}" style="color: #0369a1; font-weight: 600; text-decoration: underline;">your dashboard</a> to keep the account secure and unlock competitions.</td>
+  </tr>
+</table>
+{% endblock %}
+{% block cta_label %}Start learning{% endblock %}
+{% block footer_note %}{% include "emails/_small.html" with text="You are receiving this email because a Code Yaar account was recently registered with this address." %}{% endblock %}

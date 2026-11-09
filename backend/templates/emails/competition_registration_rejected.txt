@@ -1,0 +1,10 @@
+{% extends "emails/base.txt" %}
+{% block heading %}Registration not approved{% endblock %}
+{% block body %}Your registration for {{ competition_title }} was not approved by the organizers{% if registration_reason %} ({{ registration_reason }}){% endif %}.
+
+Your other competitions and learning progress are unaffected — new competitions open regularly.
+
+{% endblock %}
+{% block cta_label %}Browse competitions{% endblock %}
+{% block footer_note %}You receive competition emails while they are enabled in your notification settings.
+{% endblock %}
