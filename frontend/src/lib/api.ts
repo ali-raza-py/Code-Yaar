@@ -1,4 +1,4 @@
-import type { Challenge, ChallengeDetail, ChallengeRunResult, ChallengeSubmitResult, Chapter, Course, Enrollment, ExerciseDetail, ExerciseResult, LessonDetail, Project, PracticalAdmin, PracticalClass, PracticalClassAdmin, PracticalDetail, PracticalSubject, PracticalSubjectAdmin, PracticalSummary } from "@/types";
+import type { Challenge, ChallengeDetail, ChallengeRunResult, ChallengeSubmitResult, Chapter, Competition, CompetitionDetail, CompetitionRegistration, CompetitionResult, CompetitionSubmission, Course, Enrollment, ExerciseDetail, ExerciseResult, LessonDetail, Project, PracticalAdmin, PracticalClass, PracticalClassAdmin, PracticalDetail, PracticalSubject, PracticalSubjectAdmin, PracticalSummary } from "@/types";
 
 /**
  * API client for Code-Yaar learning platform.
@@ -36,6 +36,7 @@ const NO_REFRESH = new Set([
 // ─── Token storage (memory only) ────────────────────────────────────────────
 
 let accessToken: string | null = null;
+let currentUserId: string | null = null;
 
 export function getAccessToken(): string | null {
   return accessToken;
@@ -332,6 +333,8 @@ export function refreshAccessToken(): Promise<string | null> {
 
 // ─── Request core ───────────────────────────────────────────────────────────
 
+type CachePolicy = string;
+
 interface ApiRequestOptions extends RequestInit {
   /** Attach the in-memory access token. Defaults to true. */
   withAuth?: boolean;
@@ -359,43 +362,108 @@ async function send(
   });
 }
 
-async function request<T>(
+// Response cache for GET requests. Keys are cache-scope:policy:endpoint strings.
+// In-flight deduplication prevents duplicate requests for the same key while a
+// request is already pending.
+const responseCache = new Map<string, { expiresAt: number; value: unknown }>();
+const inFlightRequests = new Map<string, Promise<unknown>>();
+
+function clearResponseCache(): void {
+  responseCache.clear();
+}
+
+function clearCache(): void {
+  clearResponseCache();
+  inFlightRequests.clear();
+}
+
+function getCacheMetrics() {
+  return { cached: responseCache.size, inFlight: inFlightRequests.size };
+}
+
+export function setCurrentUser(userId: number | string | null): void {
+  currentUserId = userId == null ? null : String(userId);
+}
+
+export function getCurrentUserId(): string | null {
+  return currentUserId;
+}
+
+function invalidateCache(...prefixes: string[]): void {
+  if (prefixes.length === 0) {
+    clearResponseCache();
+    return;
+  }
+  for (const prefix of prefixes) {
+    for (const key of responseCache.keys()) {
+      if (key.startsWith(prefix)) responseCache.delete(key);
+    }
+  }
+}
+
+function cacheScope(withAuth: boolean): string | null {
+  return withAuth ? 'auth' : 'anon';
+}
+
+async function requestUncached<T>(
   endpoint: string,
   options: ApiRequestOptions = {}
 ): Promise<T> {
-  const { withAuth = true, retryOnUnauthorized = true, ...init } = options;
+  const { withAuth = true, retryOnUnauthorized = true, cachePolicy, ...init } = options;
 
   let res = await send(endpoint, init, withAuth);
 
-    if (res.status === 401 && withAuth && retryOnUnauthorized && !NO_REFRESH.has(endpoint)) {
-      const refreshed = await refreshAccessToken();
-      if (refreshed) res = await send(endpoint, init, withAuth);
-    }
-
-    if (!res.ok) throw await readError(res);
-
-    // Handle 204 No Content
-    if (res.status === 204) return {} as T;
-
-    const text = await res.text();
-    const value = (text ? JSON.parse(text) : {}) as T;
-    if (cacheable && ttl > 0) {
-      responseCache.set(cacheKey, { expiresAt: Date.now() + ttl, value });
-    }
-    return value;
-  };
-
-  if (!cacheable) {
-    clearResponseCache();
-    return execute();
+  if (res.status === 401 && withAuth && retryOnUnauthorized && !NO_REFRESH.has(endpoint)) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) res = await send(endpoint, init, withAuth);
   }
+
+  if (!res.ok) throw await readError(res);
+
+  // Handle 204 No Content
+  if (res.status === 204) return {} as T;
+
+  const text = await res.text();
+  return (text ? JSON.parse(text) : {}) as T;
+}
+
+function ttlForPolicy(cachePolicy: string): number {
+  const ms = {
+    leaderboard: 30_000,
+    progress: 15_000,
+    analytics: 60_000,
+    profile: 60_000,
+    courses: 300_000,
+    tracks: 300_000,
+    practicals: 60_000,
+    projects: 60_000,
+  }[cachePolicy];
+  return ms ?? 60_000;
+}
+
+async function cachedRequest<T>(
+  cacheKey: string,
+  ttl: number,
+  execute: () => Promise<T>
+): Promise<T> {
+  const now = Date.now();
+  const cached = responseCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) return cached.value as T;
+
+  const inFlight = inFlightRequests.get(cacheKey);
+  if (inFlight) return inFlight as Promise<T>;
 
   const pending = execute().finally(() => inFlightRequests.delete(cacheKey));
   inFlightRequests.set(cacheKey, pending);
-  return pending;
+
+  const value = await pending;
+  if (ttl > 0) {
+    responseCache.set(cacheKey, { expiresAt: now + ttl, value });
+  }
+  return value;
 }
 
-async function request<T>(
+export async function request<T>(
   endpoint: string,
   options: ApiRequestOptions = {}
 ): Promise<T> {
@@ -407,7 +475,7 @@ async function request<T>(
   if (!scope) return requestUncached<T>(endpoint, options);
   return cachedRequest(
     `${scope}:${cachePolicy}:${endpoint}`,
-    cachePolicy,
+    ttlForPolicy(cachePolicy),
     () => requestUncached<T>(endpoint, options),
   );
 }
@@ -757,7 +825,10 @@ export const courses = {
       xp_awarded: number;
       exercises_remaining: number;
       message: string;
-    }>(`/lessons/${lessonId}/complete/`, { method: 'POST' }),
+      awarded_badges?: BadgeUnlock[];
+    }>(`/lessons/${lessonId}/complete/`, { method: 'POST' });
+    return result;
+  },
 };
 
 // ─── Practicals Endpoints ──────────────────────────────────────────────────

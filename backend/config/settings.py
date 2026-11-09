@@ -87,6 +87,9 @@ if DEBUG:
 # silk redacts sensitive keys (password/token/secret/...) from recorded
 # payloads. Stored history is bounded so the local database cannot grow forever.
 if SILK_ENABLED:
+    # Health probes must stay fast and must not generate profiler database
+    # writes; the dev launcher gives the liveness probe a short timeout.
+    SILKY_IGNORE_PATHS = ['/api/health/', '/api/health/ready/']
     SILKY_AUTHENTICATION = True
     SILKY_AUTHORISATION = True
     SILKY_MAX_RECORDED_REQUESTS = 500
@@ -446,5 +449,4 @@ REST_FRAMEWORK = {
         'email_campaign_send': os.getenv('THROTTLE_EMAIL_CAMPAIGN_SEND', '60/hour'),
     },
 }
-
 
