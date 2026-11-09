@@ -9,7 +9,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import F, Sum, Count, Q, Avg, Case, When, Value, IntegerField, OuterRef, Subquery
+from django.db.models import Exists, F, Sum, Count, Q, Avg, Case, When, Value, IntegerField, OuterRef, Subquery
 from django.db.models.functions import Coalesce
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404
