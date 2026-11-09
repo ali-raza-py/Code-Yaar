@@ -1,4 +1,10 @@
-# Backend Deployment — OCI Always Free Pilot
+# Historical Backend Deployment Preparation — OCI Always Free Pilot
+
+> **Current target:** Cloudflare Python Workers was selected after this OCI
+> preparation. This file records the earlier OCI pilot only; see
+> [CLOUDFLARE_BACKEND_IMPLEMENTATION.md](./CLOUDFLARE_BACKEND_IMPLEMENTATION.md)
+> for the current isolated proof of concept. The existing Oracle deployment
+> files are retained unchanged and are not the active target.
 
 ## Status
 
@@ -23,7 +29,7 @@ Expected OCI infrastructure cost is **$0/month only while all resources remain w
 | PythonAnywhere Free | One web app and two consoles, but outbound internet is restricted to specific HTTP(S) sites. | Not selected: the backend needs PostgreSQL connectivity to Supabase over the database protocol/port, not just HTTP(S) allowlisted access. |
 | Render Free | Free web services sleep after 15 idle minutes, can take about a minute to wake, and have ephemeral filesystems; free services cannot attach persistent disks. Render says not to use free instances for production. | Useful for previews, not suitable for this always-on API, local media, and code runner. |
 | Railway Free | $0 subscription with $1/month free usage credit; per-service defaults include 0.5 GB RAM, 1 vCPU and 0.5 GB volume. Usage beyond the credit is billed. | Better CPython compatibility than Workers, but the small usage credit and resource envelope do not make a dependable $0 production guarantee for Django plus isolated code execution. |
-| Cloudflare Python Workers | The repository-specific compatibility findings are documented in [CLOUDFLARE_WORKERS_AUDIT.md](./CLOUDFLARE_WORKERS_AUDIT.md). | Not selected: the current Django/PostgreSQL/psycopg and subprocess code-runner architecture is not a drop-in Python Worker deployment. |
+| Cloudflare Python Workers | Selected target; see [CLOUDFLARE_BACKEND_IMPLEMENTATION.md](./CLOUDFLARE_BACKEND_IMPLEMENTATION.md) for the isolated POC and blockers. | Django WSGI and Hyperdrive/psycopg are documented, but Pyodide package/runtime and external service tests remain gating items. |
 
 Official references:
 

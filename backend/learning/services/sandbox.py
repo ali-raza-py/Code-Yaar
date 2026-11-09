@@ -524,20 +524,28 @@ class DockerSandbox(SandboxService):
         config: Optional[SandboxConfig] = None,
     ):
         parsed_url = urllib.parse.urlsplit(runner_url)
+        loopback_http = (
+            parsed_url.scheme == 'http'
+            and parsed_url.hostname == '127.0.0.1'
+        )
+        remote_https = parsed_url.scheme == 'https' and bool(parsed_url.hostname)
         if (
-            parsed_url.scheme != 'http'
-            or parsed_url.hostname != '127.0.0.1'
+            not (loopback_http or remote_https)
             or parsed_url.username
             or parsed_url.password
             or parsed_url.path not in ('', '/')
             or parsed_url.query
             or parsed_url.fragment
         ):
-            raise ValueError('Sandbox runner URL must use HTTP on 127.0.0.1.')
+            raise ValueError(
+                'Sandbox runner URL must use HTTP on loopback or HTTPS on a remote host.'
+            )
         try:
             port = parsed_url.port
         except ValueError:
             raise ValueError('Sandbox runner URL has an invalid port.') from None
+        if port is None and remote_https:
+            port = 443
         if port is None:
             raise ValueError('Sandbox runner URL must include its port.')
         if not 1 <= port <= 65535:

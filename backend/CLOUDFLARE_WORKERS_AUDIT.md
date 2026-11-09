@@ -1,10 +1,18 @@
 # Code Yaar backend deployment audit
 
-**Status: do not deploy the existing Django backend to Cloudflare Python Workers.**
-This repository does not currently have a Worker configuration or Django Worker
-adapter. The blockers below affect the production database path and existing
-product behavior; adding a Wrangler file alone would not make this application
-deployable or reliable.
+> **Superseded compatibility notes:** This audit predates Cloudflare's
+> first-party Django WSGI adapter and Python Hyperdrive documentation for
+> `psycopg`. Its claims that Django WSGI and psycopg/Hyperdrive are unsupported,
+> and its "do not deploy" decision, are stale. The current isolated PoC and
+> remaining verified blockers are in
+> [CLOUDFLARE_BACKEND_IMPLEMENTATION.md](./CLOUDFLARE_BACKEND_IMPLEMENTATION.md).
+
+**Archived status:** this audit originally recommended against Cloudflare based
+on the adapter and database-driver documentation available at that time. The
+adapter and driver claims were superseded by Cloudflare's documented Django
+WSGI and Python Hyperdrive support. The remaining assessment and live blockers
+are recorded in
+[CLOUDFLARE_BACKEND_IMPLEMENTATION.md](./CLOUDFLARE_BACKEND_IMPLEMENTATION.md).
 
 ## What is in this repository
 

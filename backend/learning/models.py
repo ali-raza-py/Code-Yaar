@@ -2,7 +2,9 @@ import hashlib
 import uuid
 
 from django.core.exceptions import ValidationError
-from django.db import models, IntegrityError
+from django.db import models
+from django.db.models import Count, OuterRef, Subquery, Sum
+from django.db.models.functions import Coalesce
 from django.conf import settings
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.contrib.contenttypes.models import ContentType
@@ -113,6 +115,8 @@ class UserProfile(models.Model):
         text = getattr(value, 'name', '') or str(value)
         if text.startswith(('http://', 'https://')):
             return text
+        if getattr(settings, 'CLOUD_STORAGE_ENABLED', False):
+            return value.url
         # Frontend and API commonly run on different origins. Keep legacy
         # root-relative values usable by pointing them at the configured API.
         path = text if text.startswith('/') else f'/{text}'
@@ -194,9 +198,8 @@ class CourseCategory(models.Model):
 
     Categories are data, not code: the Course Creation Studio offers these as a
     dropdown and an administrator can add or retire one without a deploy.
-    Deliberately a real model rather than choices on ``Course`` so the student
-    catalogue can group by it and stay consistent as the list grows.
     """
+
     slug = models.SlugField(max_length=80, unique=True)
     title = models.CharField(max_length=120)
     order = models.PositiveIntegerField(default=0)
@@ -208,6 +211,54 @@ class CourseCategory(models.Model):
     class Meta:
         ordering = ['order', 'title']
         verbose_name_plural = 'course categories'
+
+
+class CourseQuerySet(models.QuerySet):
+    """Course listings with content aggregates in a single query."""
+
+    def with_catalogue_stats(self):
+        def scalar(queryset, group_by, expression):
+            inner = (
+                queryset.order_by()
+                .values(group_by)
+                .annotate(value=expression)
+                .values('value')[:1]
+            )
+            return Coalesce(
+                Subquery(inner),
+                0,
+                output_field=models.IntegerField(),
+            )
+
+        active_chapters = Chapter.objects.filter(
+            course=OuterRef('pk'),
+            is_active=True,
+        )
+        active_lessons = Lesson.objects.filter(
+            chapter__course=OuterRef('pk'),
+            chapter__is_active=True,
+            is_active=True,
+        )
+        active_exercises = Exercise.objects.filter(
+            lesson__chapter__course=OuterRef('pk'),
+            lesson__chapter__is_active=True,
+            lesson__is_active=True,
+            is_active=True,
+        )
+        return self.annotate(
+            chapter_count_agg=scalar(active_chapters, 'course', Count('pk')),
+            lesson_count_agg=scalar(active_lessons, 'chapter__course', Count('pk')),
+            exercise_count_agg=scalar(
+                active_exercises, 'lesson__chapter__course', Count('pk')
+            ),
+            lesson_xp_agg=scalar(active_lessons, 'chapter__course', Sum('xp_reward')),
+            exercise_xp_agg=scalar(
+                active_exercises, 'lesson__chapter__course', Sum('xp_reward')
+            ),
+            lesson_minutes_agg=scalar(
+                active_lessons, 'chapter__course', Sum('duration_minutes')
+            ),
+        )
 
 
 class Course(models.Model):
@@ -325,21 +376,37 @@ class Course(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = CourseQuerySet.as_manager()
+
     def __str__(self):
         return self.title
 
+    def _agg(self, name):
+        """Annotation from ``CourseQuerySet.with_catalogue_stats``, or None
+        when this instance was loaded without it."""
+        return self.__dict__.get(name)
+
     @property
     def chapter_count(self):
+        agg = self._agg('chapter_count_agg')
+        if agg is not None:
+            return agg
         return self.chapters.filter(is_active=True).count()
 
     @property
     def lesson_count(self):
+        agg = self._agg('lesson_count_agg')
+        if agg is not None:
+            return agg
         return Lesson.objects.filter(
             chapter__course=self, chapter__is_active=True, is_active=True
         ).count()
 
     @property
     def exercise_count(self):
+        agg = self._agg('exercise_count_agg')
+        if agg is not None:
+            return agg
         return Exercise.objects.filter(
             lesson__chapter__course=self,
             lesson__chapter__is_active=True,
@@ -350,6 +417,10 @@ class Course(models.Model):
     @property
     def total_xp(self):
         """Derived from published content, never stored/fabricated."""
+        lesson_xp = self._agg('lesson_xp_agg')
+        exercise_xp = self._agg('exercise_xp_agg')
+        if lesson_xp is not None and exercise_xp is not None:
+            return lesson_xp + exercise_xp
         lesson_xp = Lesson.objects.filter(
             chapter__course=self, chapter__is_active=True, is_active=True
         ).aggregate(s=models.Sum('xp_reward'))['s'] or 0
@@ -363,12 +434,12 @@ class Course(models.Model):
 
     @property
     def estimated_hours(self):
-        """Admin override when set, otherwise derived from lesson durations."""
-        if self.manual_estimated_hours:
-            return self.manual_estimated_hours
-        minutes = Lesson.objects.filter(
-            chapter__course=self, chapter__is_active=True, is_active=True
-        ).aggregate(s=models.Sum('duration_minutes'))['s'] or 0
+        """Derived from actual lesson durations."""
+        minutes = self._agg('lesson_minutes_agg')
+        if minutes is None:
+            minutes = Lesson.objects.filter(
+                chapter__course=self, chapter__is_active=True, is_active=True
+            ).aggregate(s=models.Sum('duration_minutes'))['s'] or 0
         return max(1, round(minutes / 60))
 
     @property
