@@ -1,4 +1,4 @@
-import type { Challenge, ChallengeDetail, ChallengeRunResult, ChallengeSubmitResult, Chapter, Course, Enrollment, ExerciseDetail, ExerciseResult, LessonDetail, Project, PracticalAdmin, PracticalClass, PracticalClassAdmin, PracticalDetail, PracticalSubject, PracticalSubjectAdmin, PracticalSummary, Competition, CompetitionDetail, CompetitionRegistration, CompetitionSubmission, CompetitionResult } from "@/types";
+import type { Challenge, ChallengeDetail, ChallengeRunResult, ChallengeSubmitResult, Chapter, Course, Enrollment, ExerciseDetail, ExerciseResult, LessonDetail, Project, PracticalAdmin, PracticalClass, PracticalClassAdmin, PracticalDetail, PracticalSubject, PracticalSubjectAdmin, PracticalSummary } from "@/types";
 
 /**
  * API client for Code-Yaar learning platform.
@@ -37,29 +37,6 @@ const NO_REFRESH = new Set([
 
 let accessToken: string | null = null;
 
-type CachedResponse = { expiresAt: number; value: unknown };
-const responseCache = new Map<string, CachedResponse>();
-const inFlightRequests = new Map<string, Promise<unknown>>();
-
-const CACHE_TTLS: Array<[string, number]> = [
-  ['/profile/stats/', 2 * 60_000],
-  ['/progress/', 60_000],
-  ['/leaderboard/', 60_000],
-  ['/notifications/', 30_000],
-  ['/admin/dashboard/', 60_000],
-  ['/admin/audit-logs/', 60_000],
-  ['/tracks/', 5 * 60_000],
-  ['/courses/', 5 * 60_000],
-];
-
-function cacheTtl(endpoint: string): number {
-  return CACHE_TTLS.find(([prefix]) => endpoint.startsWith(prefix))?.[1] ?? 0;
-}
-
-function clearResponseCache() {
-  responseCache.clear();
-}
-
 export function getAccessToken(): string | null {
   return accessToken;
 }
@@ -71,6 +48,7 @@ export function setAccessToken(token: string) {
 
 export function clearAccessToken() {
   accessToken = null;
+  currentUserId = null;
 }
 
 // Legacy aliases: several modules still import these names.
@@ -98,7 +76,10 @@ export function clearToken() {
   clearAccessToken();
   clearResponseCache();
   clearSessionHint();
+  clearCache();
 }
+
+export { getCacheMetrics };
 
 // ─── Errors ─────────────────────────────────────────────────────────────────
 
@@ -249,13 +230,25 @@ function unwrapList<T>(data: Paginated<T>): T[] {
  * `status: 0` marks it as a transport failure rather than an HTTP status.
  */
 async function fetchOrThrow(url: string, init: RequestInit = {}): Promise<Response> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, 15000);
   try {
-    return await fetch(url, init);
-  } catch {
+    return await fetch(url, { ...init, signal: init.signal ?? controller.signal });
+  } catch (caught) {
+    if (timedOut && caught instanceof DOMException && caught.name === 'AbortError') {
+      throw new ApiError(0, `The API request timed out after 15 seconds. Check the server and try again.`);
+    }
+    if (caught instanceof DOMException && caught.name === 'AbortError') throw caught;
     throw new ApiError(
       0,
       `Can't reach the API at ${API_BASE}. Is the Django server running? (start both with scripts/dev.ps1)`
     );
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -344,6 +337,7 @@ interface ApiRequestOptions extends RequestInit {
   withAuth?: boolean;
   /** Disable the automatic refresh-and-retry on 401. */
   retryOnUnauthorized?: boolean;
+  cachePolicy?: CachePolicy;
 }
 
 async function send(
@@ -365,25 +359,13 @@ async function send(
   });
 }
 
-export async function request<T>(
+async function request<T>(
   endpoint: string,
   options: ApiRequestOptions = {}
 ): Promise<T> {
   const { withAuth = true, retryOnUnauthorized = true, ...init } = options;
-  const method = (init.method || 'GET').toUpperCase();
-  const cacheable = method === 'GET';
-  const cacheKey = `${withAuth ? accessToken || 'session' : 'public'}:${endpoint}`;
-  const ttl = cacheable ? cacheTtl(endpoint) : 0;
 
-  if (cacheable) {
-    const cached = responseCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) return cached.value as T;
-    const pending = inFlightRequests.get(cacheKey);
-    if (pending) return pending as Promise<T>;
-  }
-
-  const execute = async (): Promise<T> => {
-    let res = await send(endpoint, init, withAuth);
+  let res = await send(endpoint, init, withAuth);
 
     if (res.status === 401 && withAuth && retryOnUnauthorized && !NO_REFRESH.has(endpoint)) {
       const refreshed = await refreshAccessToken();
@@ -411,6 +393,23 @@ export async function request<T>(
   const pending = execute().finally(() => inFlightRequests.delete(cacheKey));
   inFlightRequests.set(cacheKey, pending);
   return pending;
+}
+
+async function request<T>(
+  endpoint: string,
+  options: ApiRequestOptions = {}
+): Promise<T> {
+  const { withAuth = true, cachePolicy, method = 'GET' } = options;
+  if (!cachePolicy || method.toUpperCase() !== 'GET') {
+    return requestUncached<T>(endpoint, options);
+  }
+  const scope = cacheScope(withAuth);
+  if (!scope) return requestUncached<T>(endpoint, options);
+  return cachedRequest(
+    `${scope}:${cachePolicy}:${endpoint}`,
+    cachePolicy,
+    () => requestUncached<T>(endpoint, options),
+  );
 }
 
 /** Raw fetch on a protected endpoint with the same refresh-and-retry policy. */
@@ -549,7 +548,9 @@ export const auth = {
       retryOnUnauthorized: false,
     });
     if (session.access) {
+      clearCache();
       setAccessToken(session.access);
+      setCurrentUser(session.user.id);
       markSessionHint();
     }
     return session;
@@ -563,7 +564,9 @@ export const auth = {
       withAuth: false,
       retryOnUnauthorized: false,
     });
+    clearCache();
     setAccessToken(session.access);
+    setCurrentUser(session.user.id);
     markSessionHint();
     return session;
   },
@@ -583,10 +586,21 @@ export const auth = {
     }
   },
 
-  me: () => request<MePayload>('/auth/me/'),
+  me: async () => {
+    const me = await request<MePayload>('/auth/me/', { cachePolicy: 'profile' });
+    setCurrentUser(me.user.id);
+    return me;
+  },
 
-  updateMe: (data: UpdateProfilePayload) =>
-    request<MePayload>('/auth/me/', { method: 'PATCH', body: JSON.stringify(data) }),
+  updateMe: async (data: UpdateProfilePayload) => {
+    const me = await request<MePayload>('/auth/me/', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+    setCurrentUser(me.user.id);
+    invalidateCache('profile:', 'profileStats:');
+    return me;
+  },
 
   changePassword: async (data: {
     current_password: string;
@@ -599,6 +613,7 @@ export const auth = {
     );
     // The server revoked every other session and issued this one a new pair.
     setAccessToken(result.access);
+    invalidateCache();
     markSessionHint();
     return result;
   },
@@ -639,9 +654,8 @@ export const auth = {
     }),
 
   // Aliases kept for the pages that still speak the old profile vocabulary.
-  getProfile: () => request<MePayload>('/auth/me/'),
-  updateProfile: (data: Record<string, unknown>) =>
-    request<MePayload>('/auth/me/', { method: 'PATCH', body: JSON.stringify(data) }),
+  getProfile: () => auth.me(),
+  updateProfile: (data: Record<string, unknown>) => auth.updateMe(data),
 };
 
 export type ResendOutcome = { sent: true } | { sent: false; reason: string };
@@ -702,37 +716,47 @@ export const courses = {
     if (params?.search) query.set('search', params.search);
     query.set('page_size', String(params?.page_size ?? 200));
     const qs = query.toString();
-    const data = await request<Paginated<Course>>(`/courses/${qs ? `?${qs}` : ''}`);
+    const data = await request<Paginated<Course>>(`/courses/${qs ? `?${qs}` : ''}`, {
+      cachePolicy: 'courses',
+    });
     return unwrapList(data);
   },
 
   detail: (slug: string) =>
-    request<Course>(`/courses/${slug}/`),
+    request<Course>(`/courses/${slug}/`, { cachePolicy: 'courses' }),
 
-  enroll: (slug: string) =>
-    request<Enrollment>(`/courses/${slug}/enroll/`, { method: 'POST' }),
+  enroll: async (slug: string) => {
+    const enrollment = await request<Enrollment>(`/courses/${slug}/enroll/`, { method: 'POST' });
+    invalidateCache('courses:', 'tracks:', 'profileStats:', 'progress:');
+    return enrollment;
+  },
 
   chapters: async (courseSlug: string): Promise<Chapter[]> => {
-    const data = await request<Paginated<Chapter>>(`/courses/${courseSlug}/chapters/`);
+    const data = await request<Paginated<Chapter>>(`/courses/${courseSlug}/chapters/`, {
+      cachePolicy: 'courses',
+    });
     return unwrapList(data);
   },
 
   lessons: (courseSlug: string) =>
-    request<Paginated<LessonDetail>>(`/courses/${courseSlug}/lessons/`),
+    request<Paginated<LessonDetail>>(`/courses/${courseSlug}/lessons/`, {
+      cachePolicy: 'courses',
+    }),
 
   lessonDetail: (courseSlug: string, lessonSlug: string) =>
-    request<LessonDetail>(`/courses/${courseSlug}/lessons/${lessonSlug}/`),
+    request<LessonDetail>(`/courses/${courseSlug}/lessons/${lessonSlug}/`, {
+      cachePolicy: 'courses',
+    }),
 
   // Mark a lesson complete. Server-side rule: lessons with exercises only
   // complete when every active exercise is solved; reading lessons are
   // self-reported. Returns the honest status, never a fabricated one.
-  completeLesson: (lessonId: number) =>
-    request<{
+  completeLesson: async (lessonId: number) => {
+    const result = await request<{
       status: string;
       xp_awarded: number;
       exercises_remaining: number;
       message: string;
-      awarded_badges: BadgeUnlock[];
     }>(`/lessons/${lessonId}/complete/`, { method: 'POST' }),
 };
 
@@ -740,12 +764,15 @@ export const courses = {
 
 export const practicals = {
   classes: async (): Promise<PracticalClass[]> => {
-    const data = await request<Paginated<PracticalClass>>('/practical-classes/');
+    const data = await request<Paginated<PracticalClass>>('/practical-classes/', {
+      cachePolicy: 'practicals',
+    });
     return unwrapList(data);
   },
   subjects: async (classSlug: string): Promise<PracticalSubject[]> => {
     const data = await request<Paginated<PracticalSubject>>(
-      `/practical-subjects/?class=${encodeURIComponent(classSlug)}`
+      `/practical-subjects/?class=${encodeURIComponent(classSlug)}`,
+      { cachePolicy: 'practicals' },
     );
     return unwrapList(data);
   },
@@ -755,14 +782,28 @@ export const practicals = {
       subject: params.subjectSlug,
     });
     if (params.search) query.set('search', params.search);
-    const data = await request<Paginated<PracticalSummary>>(`/practicals/?${query.toString()}`);
+    const data = await request<Paginated<PracticalSummary>>(`/practicals/?${query.toString()}`, {
+      cachePolicy: 'practicals',
+    });
     return unwrapList(data);
   },
-  detail: (slug: string) => request<PracticalDetail>(`/practicals/${slug}/`),
-  complete: (slug: string, completed: boolean) =>
-    request(`/practicals/${slug}/complete/`, { method: completed ? 'POST' : 'DELETE' }),
-  bookmark: (slug: string, bookmarked: boolean) =>
-    request(`/practicals/${slug}/bookmark/`, { method: bookmarked ? 'POST' : 'DELETE' }),
+  detail: (slug: string) => request<PracticalDetail>(`/practicals/${slug}/`, {
+    cachePolicy: 'practicals',
+  }),
+  complete: async (slug: string, completed: boolean) => {
+    const result = await request(`/practicals/${slug}/complete/`, {
+      method: completed ? 'POST' : 'DELETE',
+    });
+    invalidateCache('practicals:', 'progress:', 'profileStats:', 'leaderboard:');
+    return result;
+  },
+  bookmark: async (slug: string, bookmarked: boolean) => {
+    const result = await request(`/practicals/${slug}/bookmark/`, {
+      method: bookmarked ? 'POST' : 'DELETE',
+    });
+    invalidateCache('practicals:');
+    return result;
+  },
 };
 
 export const practicalAdmin = {
@@ -854,9 +895,15 @@ export const exercises = {
 
 export const progress = {
   lessonProgress: {
-    list: () => request('/lesson-progress/'),
-    update: (id: number, data: { status?: string; time_spent_seconds?: number }) =>
-      request(`/lesson-progress/${id}/`, { method: 'PATCH', body: JSON.stringify(data) }),
+    list: () => request('/lesson-progress/', { cachePolicy: 'progress' }),
+    update: async (id: number, data: { status?: string; time_spent_seconds?: number }) => {
+      const result = await request(`/lesson-progress/${id}/`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      });
+      invalidateCache('progress:', 'courses:', 'profileStats:', 'leaderboard:');
+      return result;
+    },
   },
 
   attempts: {
@@ -929,12 +976,19 @@ export const tracks = {
     if (params?.category) query.set('category', params.category);
     if (params?.search) query.set('search', params.search);
     const qs = query.toString();
-    const data = await request<Paginated<TrackSummary>>(`/tracks/${qs ? `?${qs}` : ''}`);
+    const data = await request<Paginated<TrackSummary>>(`/tracks/${qs ? `?${qs}` : ''}`, {
+      cachePolicy: 'tracks',
+    });
     return unwrapList(data);
   },
-  detail: (slug: string) => request<TrackDetail>(`/tracks/${slug}/`),
-  enroll: (slug: string) =>
-    request<Enrollment[]>(`/tracks/${slug}/enroll/`, { method: 'POST' }),
+  detail: (slug: string) => request<TrackDetail>(`/tracks/${slug}/`, {
+    cachePolicy: 'tracks',
+  }),
+  enroll: async (slug: string) => {
+    const result = await request<Enrollment[]>(`/tracks/${slug}/enroll/`, { method: 'POST' });
+    invalidateCache('tracks:', 'courses:', 'profileStats:', 'progress:');
+    return result;
+  },
 };
 
 // ─── Leaderboard ────────────────────────────────────────────────────────────
@@ -946,7 +1000,8 @@ export const leaderboard = {
     if (params?.offset) query.set('offset', String(params.offset));
     const qs = query.toString();
     return request<{ total: number; limit: number; offset: number; entries: LeaderboardEntry[] }>(
-      `/leaderboard/${qs ? `?${qs}` : ''}`
+      `/leaderboard/${qs ? `?${qs}` : ''}`,
+      { cachePolicy: 'leaderboard' },
     );
   },
 };
@@ -973,10 +1028,14 @@ export const projects = {
     if (params?.track) query.set('track', params.track);
     if (params?.difficulty) query.set('difficulty', params.difficulty);
     const qs = query.toString();
-    const data = await request<Paginated<Project>>(`/projects/${qs ? `?${qs}` : ''}`);
+    const data = await request<Paginated<Project>>(`/projects/${qs ? `?${qs}` : ''}`, {
+      cachePolicy: 'projects',
+    });
     return unwrapList(data);
   },
-  detail: (slug: string) => request<Project>(`/projects/${slug}/`),
+  detail: (slug: string) => request<Project>(`/projects/${slug}/`, {
+    cachePolicy: 'projects',
+  }),
 };
 
 export const challenges = {
@@ -984,27 +1043,28 @@ export const challenges = {
     const query = new URLSearchParams();
     if (params?.topic) query.set('topic', params.topic);
     if (params?.difficulty) query.set('difficulty', params.difficulty);
-    const challenges: Challenge[] = [];
-    let page = 1;
-    while (true) {
-      query.set('page', String(page));
-      const data = await request<Paginated<Challenge>>(`/challenges/?${query.toString()}`);
-      challenges.push(...unwrapList(data));
-      if (Array.isArray(data) || !data.next) return challenges;
-      page += 1;
-    }
+    const qs = query.toString();
+    const data = await request<Paginated<Challenge>>(
+      `/challenges/${qs ? `?${qs}` : ''}`
+    );
+    return unwrapList(data);
   },
-  detail: (slug: string) => request<ChallengeDetail>(`/challenges/${slug}/`),
+  detail: (slug: string) => request<ChallengeDetail>(`/challenges/${slug}/`, {
+    cachePolicy: 'questions',
+  }),
   run: (slug: string, data: { code: string; language: string }) =>
     request<ChallengeRunResult>(`/challenges/${slug}/run/`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  submit: (slug: string, data: { code: string; language: string; submission_id?: string; time_spent_seconds?: number }) =>
-    request<ChallengeSubmitResult>(`/challenges/${slug}/submit/`, {
+  submit: async (slug: string, data: { code: string; language: string; submission_id?: string; time_spent_seconds?: number }) => {
+    const result = await request<ChallengeSubmitResult>(`/challenges/${slug}/submit/`, {
       method: 'POST',
       body: JSON.stringify(data),
-    }),
+    });
+    invalidateCache('questions:', 'leaderboard:', 'profileStats:', 'progress:');
+    return result;
+  },
 };
 
 export const competitions = {
@@ -1128,7 +1188,7 @@ export const platformUpdates = {
 // ─── Profile Stats ────────────────────────────────────────────────────────
 
 export const profileStats = {
-  get: () => request<ProfileStatsData>('/profile/stats/'),
+  get: () => request<ProfileStatsData>('/profile/stats/', { cachePolicy: 'analytics' }),
 };
 
 export interface ProgressDashboardData {
@@ -1208,7 +1268,7 @@ export const progressDashboard = {
     if (params?.from) query.set('from', params.from);
     if (params?.to) query.set('to', params.to);
     const suffix = query.toString() ? `?${query.toString()}` : '';
-    return request<ProgressDashboardData>(`/progress/${suffix}`);
+    return request<ProgressDashboardData>(`/progress/${suffix}`, { cachePolicy: 'analytics' });
   },
 };
 
