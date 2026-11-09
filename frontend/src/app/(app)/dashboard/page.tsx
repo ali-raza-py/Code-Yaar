@@ -7,10 +7,14 @@ import {
   Award,
   BookOpen,
   Check,
+  Code2,
   Dumbbell,
   Flame,
   FolderGit2,
   Megaphone,
+  Rocket,
+  Sparkles,
+  Terminal,
   Trophy,
   Zap,
 } from "lucide-react";
@@ -31,6 +35,13 @@ function timeAgo(iso: string): string {
   if (days < 7) return `${days}d ago`;
   return new Date(iso).toLocaleDateString();
 }
+
+const developerBadges = [
+  { label: "Programmer in progress", Icon: Code2 },
+  { label: "Hello, world!", Icon: Terminal },
+  { label: "Dev in the making", Icon: Sparkles },
+  { label: "Future tech leader", Icon: Rocket },
+];
 
 export default function DashboardPage() {
   const { user, loading: authLoading } = useAuth();
@@ -137,15 +148,26 @@ export default function DashboardPage() {
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
       <header className="mb-8 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary">
+          <p className="text-sm font-medium text-primary">
             Your learning dashboard
           </p>
-          <h1 className="mt-2 break-words font-display text-3xl font-semibold leading-tight tracking-tight text-foreground sm:text-4xl">
+          <h1 className="mt-1 break-words text-2xl font-semibold leading-tight tracking-tight text-foreground sm:text-3xl">
             Welcome back, {displayName}
           </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
+          <p className="mt-1.5 text-sm text-muted-foreground">
             Pick up where you left off and see how far you&apos;ve come.
           </p>
+          <ul aria-label="Developer milestones" className="mt-4 flex flex-wrap gap-2">
+            {developerBadges.map(({ label, Icon }) => (
+              <li
+                key={label}
+                className="inline-flex items-center gap-1.5 rounded-full border border-primary/15 bg-primary/5 px-2.5 py-1 text-xs font-medium text-foreground"
+              >
+                <Icon aria-hidden="true" className="h-3.5 w-3.5 text-primary" />
+                {label}
+              </li>
+            ))}
+          </ul>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <span className="inline-flex items-center rounded-full border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground">
@@ -164,22 +186,22 @@ export default function DashboardPage() {
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(18rem,0.9fr)] xl:gap-8">
         <div className="min-w-0 space-y-5">
           {/* Continue Learning card */}
-          <section aria-labelledby="continue-learning-title" className="rounded-xl bg-hero-navy p-6 text-white sm:p-8">
-            <div className="grid gap-6 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+          <section aria-labelledby="continue-learning-title" className="rounded-xl bg-hero-navy p-5 text-white sm:p-6">
+            <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
               <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/65">
+                <p className="text-xs font-medium tracking-wide text-white/70">
                   {enrollment ? 'Continue where you left off' : 'Your learning'}
                 </p>
-                <h2 id="continue-learning-title" className="mt-2 break-words font-display text-2xl font-semibold leading-tight sm:text-3xl">
+                <h2 id="continue-learning-title" className="mt-1.5 max-w-2xl break-words text-xl font-semibold leading-snug tracking-tight sm:text-2xl">
                   {enrollment ? enrollment.course_title : 'No active courses yet'}
                 </h2>
-                <p className="mt-2 text-sm leading-6 text-white/70">
+                <p className="mt-1.5 text-sm leading-5 text-white/70">
                   {enrollment
                     ? `Part of the ${enrollment.track_title} track`
                     : 'Choose a course to start your structured learning path.'}
                 </p>
                 {enrollment && (
-                  <div className="mt-5 max-w-xl">
+                  <div className="mt-4 max-w-xl">
                     <div className="mb-2 flex items-center justify-between gap-4 text-xs">
                       <span className="text-white/75">Course progress</span>
                       <span className="font-semibold tabular-nums text-white">{courseProgress}%</span>
@@ -202,7 +224,7 @@ export default function DashboardPage() {
               </div>
               <Link
                 href={enrollment ? `/learn/${enrollment.course_slug}` : '/learn'}
-                className="inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-cta px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-cta-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-hero-navy"
+                className="inline-flex min-h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-cta px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-cta-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-hero-navy"
               >
                 {enrollment ? 'Continue learning' : 'Browse courses'}
                 <ArrowRight aria-hidden="true" className="h-4 w-4" />
