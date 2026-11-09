@@ -26,3 +26,11 @@ if settings.DEBUG:
         path('__debug__/', include(debug_toolbar.urls)),
         *urlpatterns,
     ]
+
+# Profiler UI; gated separately from DEBUG because silk is excluded from test
+# runs (see SILK_ENABLED in settings).
+if getattr(settings, 'SILK_ENABLED', False):
+    urlpatterns = [
+        path('silk/', include('silk.urls', namespace='silk')),
+        *urlpatterns,
+    ]

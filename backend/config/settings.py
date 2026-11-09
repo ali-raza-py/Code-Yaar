@@ -3,6 +3,7 @@ Django settings for config project.
 """
 
 import os
+import sys
 from datetime import timedelta
 from pathlib import Path
 
@@ -21,6 +22,13 @@ SECRET_KEY = os.getenv('SECRET_KEY') or 'django-insecure-dev-key-change-in-produ
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
+
+# django-silk writes every SQL statement it records back to the database, so it
+# must stay out of the test run: it would slow the suite and inflate the
+# query-count assertions in learning/tests_performance.py. The test runner only
+# flips settings.DEBUG off after this module is imported, hence the argv check.
+_RUNNING_TESTS = len(sys.argv) > 1 and sys.argv[1] == 'test'
+SILK_ENABLED = DEBUG and not _RUNNING_TESTS
 
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
@@ -41,6 +49,8 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     *(['debug_toolbar'] if DEBUG else []),
+    # Dev-only request/SQL profiler (django-silk); never installed when DEBUG is off.
+    *(['silk'] if SILK_ENABLED else []),
     # Local
     'learning',
     'certificates',
@@ -48,6 +58,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # Dev-only profiler; placed high so it times the full request. DEBUG-gated.
+    *(['silk.middleware.SilkyMiddleware'] if SILK_ENABLED else []),
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -66,6 +78,18 @@ if DEBUG:
         for address in os.getenv('INTERNAL_IPS', '127.0.0.1,::1').split(',')
         if address.strip()
     ]
+
+# ─── django-silk (development request/SQL profiler) ───
+# A local debugging aid only: installed and configured solely while DEBUG is on,
+# so it is never active in production. Its UI at /silk/ requires an
+# authenticated *staff* login (SILKY_PERMISSIONS defaults to user.is_staff) and
+# silk redacts sensitive keys (password/token/secret/...) from recorded
+# payloads. Stored history is bounded so the local database cannot grow forever.
+if SILK_ENABLED:
+    SILKY_AUTHENTICATION = True
+    SILKY_AUTHORISATION = True
+    SILKY_MAX_RECORDED_REQUESTS = 500
+    SILKY_PYTHON_PROFILER = False
 
 # Reverse-proxy awareness (set behind nginx/traefik in production so
 # is_secure() honours the client-facing scheme).

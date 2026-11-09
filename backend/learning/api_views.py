@@ -8,7 +8,11 @@ from rest_framework.throttling import ScopedRateThrottle
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import F, Sum, Count, Q, Avg, Case, When, Value, IntegerField
+from django.db.models import (
+    F, Sum, Count, Q, Avg, Case, When, Value, IntegerField, Exists, OuterRef,
+    Subquery,
+)
+from django.db.models.functions import Coalesce
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -228,7 +232,10 @@ class CourseViewSet(viewsets.ReadOnlyModelViewSet):
         return CourseListSerializer
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        # Track title and the content aggregates (chapter/lesson/exercise
+        # counts, XP, hours) are read for every card, so load them with the
+        # courses instead of one query per field per row.
+        qs = super().get_queryset().select_related('track').with_catalogue_stats()
         track = self.request.query_params.get('track')
         difficulty = self.request.query_params.get('difficulty')
         language = self.request.query_params.get('language')
@@ -1126,6 +1133,15 @@ class PracticalClassViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.AllowAny]
     lookup_field = 'slug'
 
+    def get_queryset(self):
+        return super().get_queryset().annotate(
+            active_subject_count=Count(
+                'subjects',
+                filter=Q(subjects__is_active=True),
+                distinct=True,
+            )
+        ).order_by('order', 'title')
+
 
 class PracticalSubjectViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = PracticalSubjectSerializer
@@ -1137,16 +1153,52 @@ class PracticalSubjectViewSet(viewsets.ReadOnlyModelViewSet):
             practical_class__is_active=True,
             practical_class__is_published=True,
             is_active=True,
-        ).select_related('practical_class')
+        ).select_related('practical_class').annotate(
+            published_practical_count=Count(
+                'practicals',
+                filter=Q(
+                    practicals__is_active=True,
+                    practicals__is_published=True,
+                ),
+                distinct=True,
+            )
+        )
         class_slug = self.request.query_params.get('class')
         if class_slug:
             qs = qs.filter(practical_class__slug=class_slug)
-        return qs
+        return qs.order_by('practical_class_id', 'order', 'title')
 
 
 class PracticalViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.AllowAny]
     lookup_field = 'slug'
+
+    def get_queryset(self):
+        qs = Practical.objects.filter(
+            practical_class__is_active=True,
+            practical_class__is_published=True,
+            subject__is_active=True,
+            is_active=True,
+            is_published=True,
+        ).select_related('practical_class', 'subject')
+        user = self.request.user
+        if user.is_authenticated:
+            qs = qs.annotate(
+                is_completed_for_user=Exists(
+                    PracticalProgress.objects.filter(
+                        user=user,
+                        practical_id=OuterRef('pk'),
+                        completed_at__isnull=False,
+                    )
+                ),
+                is_bookmarked_for_user=Exists(
+                    PracticalBookmark.objects.filter(
+                        user=user,
+                        practical_id=OuterRef('pk'),
+                    )
+                ),
+            )
+        return qs
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['title', 'chapter_topic', 'subject__title']
     ordering_fields = ['title', 'practical_number', 'order']
@@ -1528,17 +1580,26 @@ def leaderboard_view(request):
 
     profiles = UserProfile.objects.select_related('user').order_by('-xp_points')
     total = profiles.count()
-    page = profiles[offset:offset + limit]
+
+    # Per-user aggregates as correlated subqueries: one statement for the
+    # whole page rather than two extra queries per ranked learner.
+    def per_user_count(qs, expression):
+        inner = qs.order_by().values('user').annotate(n=expression).values('n')[:1]
+        return Coalesce(Subquery(inner), 0, output_field=IntegerField())
+
+    page = profiles.annotate(
+        courses_completed=per_user_count(
+            Enrollment.objects.filter(user=OuterRef('user_id'), status='completed'),
+            Count('pk'),
+        ),
+        challenges_solved=per_user_count(
+            ExerciseAttempt.objects.filter(user=OuterRef('user_id'), status='correct'),
+            Count('exercise', distinct=True),
+        ),
+    )[offset:offset + limit]
 
     entries = []
     for rank, profile in enumerate(page, start=offset + 1):
-        courses_completed = Enrollment.objects.filter(
-            user=profile.user, status='completed'
-        ).count()
-        challenges_solved = ExerciseAttempt.objects.filter(
-            user=profile.user, status='correct'
-        ).values('exercise').distinct().count()
-
         entries.append({
             'rank': rank,
             'user_id': profile.user.id,
@@ -1546,8 +1607,8 @@ def leaderboard_view(request):
             'xp_points': profile.xp_points,
             'level': profile.level,
             'streak_days': profile.streak_days,
-            'courses_completed': courses_completed,
-            'challenges_solved': challenges_solved,
+            'courses_completed': profile.courses_completed,
+            'challenges_solved': profile.challenges_solved,
         })
 
     return Response({
