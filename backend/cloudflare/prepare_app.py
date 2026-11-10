@@ -37,20 +37,16 @@ def main() -> None:
     DIST_ROOT.mkdir()
     shutil.copy2(WORKER_ROOT / "worker.py", DIST_ROOT / "worker.py")
     shutil.copy2(WORKER_ROOT / "wrangler.jsonc", DIST_ROOT / "wrangler.jsonc")
+    _validate_botocore_s3_data(VENDOR_ROOT)
     shutil.copytree(
         VENDOR_ROOT,
         DIST_ROOT / "python_modules",
-        ignore=shutil.ignore_patterns(
-            "pyvenv.cfg", ".synced", "__pycache__", "*.py[cod]"
-        ),
+        ignore=_ignore_non_runtime_python_artifacts,
     )
-    modules = DIST_ROOT / "python_modules"
-    _prune_unused_aws_service_models(modules)
-    _prune_non_runtime_python_artifacts(modules)
 
 
-def _prune_unused_aws_service_models(python_modules: Path) -> None:
-    """Keep Botocore's shared data and S3 model used by django-storages."""
+def _validate_botocore_s3_data(python_modules: Path) -> None:
+    """Require the shared Botocore data and S3 model used by django-storages."""
     data_dir = python_modules / "botocore" / "data"
     if not data_dir.is_dir():
         raise FileNotFoundError(f"Botocore service data is missing: {data_dir}")
@@ -68,24 +64,23 @@ def _prune_unused_aws_service_models(python_modules: Path) -> None:
             f"Botocore S3 runtime data is incomplete: {', '.join(missing) or s3_model}"
         )
 
-    for path in data_dir.iterdir():
-        if path.is_dir() and path.name != "s3":
-            shutil.rmtree(path)
 
+def _ignore_non_runtime_python_artifacts(directory: str, names: list[str]) -> set[str]:
+    ignored = {
+        name
+        for name in names
+        if name in {"__pycache__", ".synced", "pyvenv.cfg"}
+        or name.endswith((".dist-info", ".po", ".mo", ".pyc", ".pyo", ".pyd"))
+    }
 
-def _prune_non_runtime_python_artifacts(python_modules: Path) -> None:
-    """Drop generated metadata and source artifacts not needed at runtime."""
-    for pattern in ("*.po", "*.mo", "*.pyc", "*.pyo"):
-        for path in list(python_modules.rglob(pattern)):
-            path.unlink()
+    if Path(directory) == VENDOR_ROOT / "botocore" / "data":
+        ignored.update(
+            name
+            for name in names
+            if name != "s3" and (VENDOR_ROOT / "botocore" / "data" / name).is_dir()
+        )
 
-    for path in list(python_modules.rglob("__pycache__")):
-        if path.is_dir():
-            shutil.rmtree(path)
-
-    for path in list(python_modules.rglob("*.dist-info")):
-        if path.is_dir():
-            shutil.rmtree(path)
+    return ignored
 
 
 if __name__ == "__main__":
