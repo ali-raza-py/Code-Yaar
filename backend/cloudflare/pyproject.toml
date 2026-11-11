@@ -19,6 +19,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "pyjson5>=2.0.1",
     "workers-py",
     "workers-runtime-sdk",
 ]

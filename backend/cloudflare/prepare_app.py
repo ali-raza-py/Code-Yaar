@@ -1,7 +1,10 @@
 """Stage the existing Django project alongside Pywrangler's vendored packages."""
 
 import shutil
+from uuid import UUID
 from pathlib import Path
+
+import pyjson5
 
 
 WORKER_ROOT = Path(__file__).resolve().parent
@@ -13,6 +16,9 @@ APP_FILES = ("branding.py",)
 
 
 def main() -> None:
+    source_config = WORKER_ROOT / "wrangler.jsonc"
+    source_hyperdrive_id = _validate_hyperdrive_config(source_config)
+
     for name in APP_DIRECTORIES:
         source = BACKEND_ROOT / name
         destination = VENDOR_ROOT / name
@@ -36,13 +42,50 @@ def main() -> None:
         shutil.rmtree(DIST_ROOT, ignore_errors=True)
     DIST_ROOT.mkdir()
     shutil.copy2(WORKER_ROOT / "worker.py", DIST_ROOT / "worker.py")
-    shutil.copy2(WORKER_ROOT / "wrangler.jsonc", DIST_ROOT / "wrangler.jsonc")
+    staged_config = DIST_ROOT / "wrangler.jsonc"
+    shutil.copy2(source_config, staged_config)
+    staged_hyperdrive_id = _validate_hyperdrive_config(staged_config)
+    if staged_hyperdrive_id != source_hyperdrive_id:
+        raise ValueError("Staged Hyperdrive ID does not match the source Wrangler config")
+
     _validate_botocore_s3_data(VENDOR_ROOT)
     shutil.copytree(
         VENDOR_ROOT,
         DIST_ROOT / "python_modules",
         ignore=_ignore_non_runtime_python_artifacts,
     )
+
+
+def _validate_hyperdrive_config(config_path: Path) -> str:
+    with config_path.open(encoding="utf-8") as config_file:
+        config = pyjson5.decode_io(config_file)
+
+    if not isinstance(config, dict):
+        raise ValueError(f"Wrangler config must be an object: {config_path}")
+
+    bindings = config.get("hyperdrive")
+    if not isinstance(bindings, list):
+        raise ValueError(f"Wrangler config must define a Hyperdrive binding: {config_path}")
+
+    binding_ids = [
+        binding.get("id")
+        for binding in bindings
+        if isinstance(binding, dict) and binding.get("binding") == "HYPERDRIVE"
+    ]
+    if len(binding_ids) != 1 or not isinstance(binding_ids[0], str):
+        raise ValueError(f"Wrangler config must define exactly one HYPERDRIVE ID: {config_path}")
+
+    hyperdrive_id = binding_ids[0]
+    try:
+        UUID(hyperdrive_id)
+    except ValueError as error:
+        raise ValueError(
+            f"Invalid HYPERDRIVE ID in {config_path}: {hyperdrive_id!r}; "
+            "use the ID of an existing Cloudflare Hyperdrive configuration"
+        ) from error
+
+    print(f"Validated HYPERDRIVE ID {hyperdrive_id} in {config_path}")
+    return hyperdrive_id
 
 
 def _validate_botocore_s3_data(python_modules: Path) -> None:

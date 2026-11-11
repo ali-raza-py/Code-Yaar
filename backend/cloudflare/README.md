@@ -10,8 +10,10 @@ uv run python build_worker.py
 
 The command syncs the production Python dependencies, stages the Django
 application, prunes Botocore service data to the S3 model used by R2 storage,
-and runs Wrangler's deployment dry-run against `dist`. It does not deploy.
-Use the Wrangler `Total Upload` result to check the uncompressed bundle size.
+validates that the source and staged Wrangler configs contain the same valid
+Hyperdrive ID, and runs Wrangler's deployment dry-run against `dist`. It does
+not deploy. Use the Wrangler `Total Upload` result to check the uncompressed
+bundle size.
 
 Do not use `uv run pywrangler deploy` for this staged build: PyWrangler syncs
 and deploys from the project root's unpruned `python_modules` directory. This

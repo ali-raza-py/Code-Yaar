@@ -187,6 +187,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "pyjson5" },
     { name = "workers-py" },
     { name = "workers-runtime-sdk" },
 ]
@@ -208,6 +209,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "pyjson5", specifier = ">=2.0.1" },
     { name = "workers-py" },
     { name = "workers-runtime-sdk" },
 ]
