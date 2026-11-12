@@ -433,6 +433,7 @@ function ttlForPolicy(cachePolicy: string): number {
     progress: 15_000,
     analytics: 60_000,
     profile: 60_000,
+    dashboard: 60_000,
     courses: 300_000,
     tracks: 300_000,
     practicals: 60_000,

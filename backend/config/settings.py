@@ -28,7 +28,15 @@ DEBUG = os.getenv('DEBUG', 'True') == 'True'
 # query-count assertions in learning/tests_performance.py. The test runner only
 # flips settings.DEBUG off after this module is imported, hence the argv check.
 _RUNNING_TESTS = len(sys.argv) > 1 and sys.argv[1] == 'test'
-SILK_ENABLED = DEBUG and not _RUNNING_TESTS
+# django-silk is a development-only request/SQL profiler. It is never enabled
+# automatically by DEBUG alone: an explicit SILK_ENABLED=true is required, so a
+# production deployment that forgets to set DEBUG=False cannot silently turn the
+# profiler (and its per-request database writes) on.
+SILK_ENABLED = (
+    os.getenv('SILK_ENABLED', '').strip().lower() in {'1', 'true', 'yes', 'on'}
+    and DEBUG
+    and not _RUNNING_TESTS
+)
 
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
@@ -165,7 +173,14 @@ if _database_url:
     DATABASES = {
         'default': dj_database_url.parse(
             _database_url,
-            conn_max_age=int(os.getenv('DB_CONN_MAX_AGE', '600')),
+            # Supabase Session Pooler caps client slots (15 on the plan in use).
+            # Persistent Django connections hold a pooler client slot open for
+            # the whole CONN_MAX_AGE window even when idle, so they exhaust the
+            # pool under concurrent load. Short-lived connections (CONN_MAX_AGE=0)
+            # return each slot to the pooler as soon as the request ends. Override
+            # with DB_CONN_MAX_AGE only if a transaction pooler or dedicated
+            # connection is in use.
+            conn_max_age=int(os.getenv('DB_CONN_MAX_AGE', '0')),
             conn_health_checks=True,
         )
     }
@@ -193,10 +208,14 @@ else:
             'PASSWORD': os.getenv('DB_PASSWORD', ''),
             'HOST': _db_host,
             'PORT': os.getenv('DB_PORT', '5432'),
-            # Reuse connections across requests; harmless for SQLite path.
-            # Reconnecting to hosted Postgres costs a full TCP+TLS handshake,
-            # so keep pooled connections alive for ten minutes by default.
-            'CONN_MAX_AGE': int(os.getenv('DB_CONN_MAX_AGE', '600')),
+            # Short-lived connections by default for hosted Postgres behind a
+            # session pooler: each request returns its client slot to the pooler
+            # immediately instead of holding it for CONN_MAX_AGE seconds.
+            # Reconnecting costs a TCP+TLS handshake, but that is cheaper than
+            # exhausting a 15-client pool with idle persistent connections.
+            # Override with DB_CONN_MAX_AGE only when a transaction pooler or
+            # dedicated connection makes persistent connections safe.
+            'CONN_MAX_AGE': int(os.getenv('DB_CONN_MAX_AGE', '0')),
             'OPTIONS': {
                 'sslmode': os.getenv('DB_SSLMODE', _default_sslmode),
             },
@@ -208,7 +227,7 @@ if DATABASES['default']['ENGINE'] != 'django.db.backends.sqlite3':
     # is handed to a request, and cap how long one lives so a pooler-side kill
     # can never strand a stale server-side connection.
     DATABASES['default']['CONN_HEALTH_CHECKS'] = True
-    DATABASES['default']['CONN_MAX_AGE'] = int(os.getenv('DB_CONN_MAX_AGE', '600'))
+    DATABASES['default']['CONN_MAX_AGE'] = int(os.getenv('DB_CONN_MAX_AGE', '0'))
 
 
 # Password validation

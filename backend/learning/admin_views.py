@@ -4,9 +4,11 @@ Admin REST API views for Code Yaar platform administration.
 All endpoints are guarded by IsAdministrator (or higher-privilege checks).
 They reuse the existing models, serializers, and business logic.
 """
+import logging
+
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.core.cache import cache
 from django.shortcuts import get_object_or_404
 from django.db.models import Count, Sum, Q, Avg, F
@@ -17,6 +19,8 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.throttling import ScopedRateThrottle
+
+logger = logging.getLogger(__name__)
 
 from .models import (
     UserProfile, CareerTrack, Course, Chapter, Lesson, Exercise,
@@ -58,70 +62,74 @@ def admin_dashboard_stats(request):
     cached = cache.get(cache_key)
     if cached is not None:
         return Response(cached)
-    from django.contrib.auth import get_user_model
-    User = get_user_model()
+    try:
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
 
-    student_counts = UserProfile.objects.filter(role='student').aggregate(
-        total=Count('id'),
-        active=Count(
-            'id',
-            filter=Q(last_active_at__gte=timezone.now() - timezone.timedelta(days=7)),
-        ),
-    )
-    course_counts = Course.objects.aggregate(
-        total=Count('id', filter=Q(is_active=True)),
-        published=Count('id', filter=Q(is_active=True, is_published=True)),
-        scheduled=Count('id', filter=Q(publish_at__isnull=False, is_published=False)),
-        archived=Count('id', filter=Q(archived_at__isnull=False)),
-    )
-    track_counts = CareerTrack.objects.aggregate(
-        total=Count('id'),
-        published=Count('id', filter=Q(is_published=True)),
-    )
-    enrollment_counts = Enrollment.objects.aggregate(
-        total=Count('id'),
-        active=Count('id', filter=Q(status='active')),
-        completed=Count('id', filter=Q(status='completed')),
-    )
+        student_counts = UserProfile.objects.filter(role='student').aggregate(
+            total=Count('id'),
+            active=Count(
+                'id',
+                filter=Q(last_active_at__gte=timezone.now() - timezone.timedelta(days=7)),
+            ),
+        )
+        course_counts = Course.objects.aggregate(
+            total=Count('id', filter=Q(is_active=True)),
+            published=Count('id', filter=Q(is_active=True, is_published=True)),
+            scheduled=Count('id', filter=Q(publish_at__isnull=False, is_published=False)),
+            archived=Count('id', filter=Q(archived_at__isnull=False)),
+        )
+        track_counts = CareerTrack.objects.aggregate(
+            total=Count('id'),
+            published=Count('id', filter=Q(is_published=True)),
+        )
+        enrollment_counts = Enrollment.objects.aggregate(
+            total=Count('id'),
+            active=Count('id', filter=Q(status='active')),
+            completed=Count('id', filter=Q(status='completed')),
+        )
 
-    total_assessments = Exercise.objects.filter(
-        is_final_assessment=True, is_active=True
-    ).count()
+        total_assessments = Exercise.objects.filter(
+            is_final_assessment=True, is_active=True
+        ).count()
 
-    total_challenges = Challenge.objects.filter(is_active=True).count()
+        total_challenges = Challenge.objects.filter(is_active=True).count()
 
-    # Cards the specification lists that this endpoint did not answer: how much content
-    # exists at all, how many registrations are waiting on a human, and how many courses
-    # are queued to publish themselves. Each is one COUNT, no joins beyond the table.
-    total_lessons = Lesson.objects.filter(is_active=True).count()
-    pending_registrations = CompetitionRegistration.objects.filter(
-        registration_status='pending',
-    ).count()
-    certificates_issued = UserCertification.objects.count()
+        # Cards the specification lists that this endpoint did not answer: how much content
+        # exists at all, how many registrations are waiting on a human, and how many courses
+        # are queued to publish themselves. Each is one COUNT, no joins beyond the table.
+        total_lessons = Lesson.objects.filter(is_active=True).count()
+        pending_registrations = CompetitionRegistration.objects.filter(
+            registration_status='pending',
+        ).count()
+        certificates_issued = UserCertification.objects.count()
 
-    active_competitions = Competition.objects.filter(
-        is_published=True
-    ).count()
+        active_competitions = Competition.objects.filter(
+            is_published=True
+        ).count()
 
-    payload = {
-        'totalStudents': student_counts['total'],
-        'activeStudents': student_counts['active'],
-        'totalCourses': course_counts['total'],
-        'publishedCourses': course_counts['published'],
-        'totalTracks': track_counts['total'],
-        'publishedTracks': track_counts['published'],
-        'totalEnrollments': enrollment_counts['total'],
-        'activeEnrollments': enrollment_counts['active'],
-        'completedCourses': enrollment_counts['completed'],
-        'totalAssessments': total_assessments,
-        'totalChallenges': total_challenges,
-        'totalLessons': total_lessons,
-        'pendingRegistrations': pending_registrations,
-        'scheduledCourses': course_counts['scheduled'],
-        'archivedCourses': course_counts['archived'],
-        'certificatesIssued': certificates_issued,
-        'activeCompetitions': active_competitions,
-    }
+        payload = {
+            'totalStudents': student_counts['total'],
+            'activeStudents': student_counts['active'],
+            'totalCourses': course_counts['total'],
+            'publishedCourses': course_counts['published'],
+            'totalTracks': track_counts['total'],
+            'publishedTracks': track_counts['published'],
+            'totalEnrollments': enrollment_counts['total'],
+            'activeEnrollments': enrollment_counts['active'],
+            'completedCourses': enrollment_counts['completed'],
+            'totalAssessments': total_assessments,
+            'totalChallenges': total_challenges,
+            'totalLessons': total_lessons,
+            'pendingRegistrations': pending_registrations,
+            'scheduledCourses': course_counts['scheduled'],
+            'archivedCourses': course_counts['archived'],
+            'certificatesIssued': certificates_issued,
+            'activeCompetitions': active_competitions,
+        }
+    except DatabaseError:
+        logger.exception('admin-dashboard-stats database failure')
+        return Response({'detail': 'Database temporarily unavailable.'}, status=503)
     cache.set(cache_key, payload, 15)
     return Response(payload)
 
@@ -139,18 +147,22 @@ def admin_recent_activity(request):
     if cached is not None:
         return Response(cached)
 
-    logs = AuthenticationAuditLog.objects.select_related('user').order_by('-created_at')[:limit]
+    try:
+        logs = AuthenticationAuditLog.objects.select_related('user').order_by('-created_at')[:limit]
 
-    activities = []
-    for log in logs:
-        activities.append({
-            'id': str(log.id),
-            'action': log.event,
-            'admin': log.user.username if log.user else 'System',
-            'target': log.identifier or '',
-            'timestamp': log.created_at.isoformat(),
-            'metadata': log.metadata or {},
-        })
+        activities = []
+        for log in logs:
+            activities.append({
+                'id': str(log.id),
+                'action': log.event,
+                'admin': log.user.username if log.user else 'System',
+                'target': log.identifier or '',
+                'timestamp': log.created_at.isoformat(),
+                'metadata': log.metadata or {},
+            })
+    except DatabaseError:
+        logger.exception('admin-recent-activity database failure')
+        return Response({'detail': 'Database temporarily unavailable.'}, status=503)
 
     cache.set(cache_key, activities, 15)
     return Response(activities)
@@ -169,35 +181,36 @@ def admin_top_courses(request):
     if cached is not None:
         return Response(cached)
 
-    courses = Course.objects.filter(is_active=True).select_related('track').annotate(
-        enrollment_count=Count('enrollments'),
-        completed_count=Count('enrollments', filter=Q(enrollments__status='completed')),
-        total_lessons=Count(
-            'chapters__lessons',
-            filter=Q(chapters__is_active=True, chapters__lessons__is_active=True),
-            distinct=True,
-        ),
-        completed_lessons=Count(
-            'chapters__lessons__progress_entries',
-            filter=Q(
-                chapters__is_active=True,
-                chapters__lessons__is_active=True,
-                chapters__lessons__progress_entries__status='completed',
+    try:
+        courses = Course.objects.filter(is_active=True).select_related('track').annotate(
+            enrollment_count=Count('enrollments'),
+            completed_count=Count('enrollments', filter=Q(enrollments__status='completed')),
+            total_lessons=Count(
+                'chapters__lessons',
+                filter=Q(chapters__is_active=True, chapters__lessons__is_active=True),
+                distinct=True,
             ),
-            distinct=True,
-        ),
-    ).order_by('-enrollment_count')[:limit]
+            completed_lessons=Count(
+                'chapters__lessons__progress_entries',
+                filter=Q(
+                    chapters__is_active=True,
+                    chapters__lessons__is_active=True,
+                    chapters__lessons__progress_entries__status='completed',
+                ),
+                distinct=True,
+            ),
+        ).order_by('-enrollment_count')[:limit]
 
-    result = []
-    for course in courses:
-        total_lessons = course.total_lessons
-        completed_lessons = course.completed_lessons if total_lessons > 0 else 0
-        completion_rate = round((completed_lessons / total_lessons) * 100) if total_lessons > 0 else 0
+        result = []
+        for course in courses:
+            total_lessons = course.total_lessons
+            completed_lessons = course.completed_lessons if total_lessons > 0 else 0
+            completion_rate = round((completed_lessons / total_lessons) * 100) if total_lessons > 0 else 0
 
-        result.append({
-            'id': course.id,
-            'title': course.title,
-            'track': course.track.title,
+            result.append({
+                'id': course.id,
+                'title': course.title,
+                'track': course.track.title,
             'enrollments': course.enrollment_count,
             'completionRate': completion_rate,
         })
@@ -2514,7 +2527,11 @@ def admin_settings(request):
 def public_platform_status(request):
     # The cached snapshot (invalidated on save) answers the frontend's
     # 15-second poll without a database round trip each time.
-    snapshot = MaintenanceSettings.snapshot()
+    try:
+        snapshot = MaintenanceSettings.snapshot()
+    except DatabaseError:
+        logger.exception('public-platform-status database failure')
+        return Response({'detail': 'Database temporarily unavailable.'}, status=503)
     return Response({
         'maintenance_mode': snapshot['is_enabled'],
         'maintenance_message': snapshot['message'] or

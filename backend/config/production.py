@@ -76,11 +76,23 @@ if not database.get('HOST') or not database.get('NAME') or not database.get('USE
 if database['HOST'].lower() in {'localhost', '127.0.0.1', '::1'}:
     raise ImproperlyConfigured('Production must connect to the existing remote PostgreSQL database.')
 try:
-    database['CONN_MAX_AGE'] = int(os.environ.get('DB_CONN_MAX_AGE', '60'))
+    database['CONN_MAX_AGE'] = int(os.environ.get('DB_CONN_MAX_AGE', '0'))
 except ValueError:
     raise ImproperlyConfigured('DB_CONN_MAX_AGE must be an integer.') from None
 if not 0 <= database['CONN_MAX_AGE'] <= 600:
     raise ImproperlyConfigured('DB_CONN_MAX_AGE must be between 0 and 600 seconds.')
+# With the Supabase Session Pooler (15 client slots) in use, persistent
+# connections hold pooler clients for the full CONN_MAX_AGE window. A value of
+# 0 (short-lived connections) is the safe default; only raise it when a
+# transaction pooler or dedicated connection is provisioned.
+if database['CONN_MAX_AGE'] > 0:
+    import logging
+
+    logging.getLogger(__name__).warning(
+        'DB_CONN_MAX_AGE=%s with a Supabase Session Pooler may exhaust client '
+        'slots under concurrent load; prefer DB_CONN_MAX_AGE=0.',
+        database['CONN_MAX_AGE'],
+    )
 database['CONN_HEALTH_CHECKS'] = True
 sslmode = os.environ.get('DB_SSLMODE', 'require').lower()
 if sslmode not in {'require', 'verify-ca', 'verify-full'}:

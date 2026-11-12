@@ -767,22 +767,23 @@ async function adminRequest<T>(
 }
 
 export const adminApi = {
-  // Dashboard
+  // Dashboard — cached on the frontend to avoid redundant backend hits when the
+  // admin dashboard is refreshed or revisited within the TTL window.
   getDashboardStats: () =>
-    adminRequest<AdminDashboardStats>("/dashboard/stats/"),
+    adminRequest<AdminDashboardStats>("/dashboard/stats/", { cachePolicy: 'dashboard' }),
 
   getRecentActivity: (params?: { limit?: number }) => {
     const query = new URLSearchParams();
     if (params?.limit) query.set("limit", String(params.limit));
     const qs = query.toString();
-    return adminRequest<AdminRecentActivity[]>(`/dashboard/recent-activity/${qs ? `?${qs}` : ""}`);
+    return adminRequest<AdminRecentActivity[]>(`/dashboard/recent-activity/${qs ? `?${qs}` : ""}`, { cachePolicy: 'dashboard' });
   },
 
   getTopCourses: (params?: { limit?: number }) => {
     const query = new URLSearchParams();
     if (params?.limit) query.set("limit", String(params.limit));
     const qs = query.toString();
-    return adminRequest<AdminTopCourse[]>(`/dashboard/top-courses/${qs ? `?${qs}` : ""}`);
+    return adminRequest<AdminTopCourse[]>(`/dashboard/top-courses/${qs ? `?${qs}` : ""}`, { cachePolicy: 'dashboard' });
   },
 
   // Career Tracks
