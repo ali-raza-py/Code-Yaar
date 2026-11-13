@@ -31,7 +31,17 @@ def readiness_check(request):
     return JsonResponse({'status': 'ok', 'database': 'ok'})
 
 
+def root_view(request):
+    """Root endpoint. Lightweight JSON status page — no secrets or internals."""
+    return JsonResponse({
+        'service': 'Code Yaar API',
+        'status': 'operational',
+        'message': 'Backend is running.',
+    })
+
+
 urlpatterns = [
+    path('', root_view, name='root'),
     path('admin/', admin.site.urls),
     path('api/health/', health_check, name='health-check'),
     path('api/health/ready/', readiness_check, name='readiness-check'),

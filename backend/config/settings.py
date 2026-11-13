@@ -21,7 +21,7 @@ load_dotenv(BASE_DIR / '.env')
 SECRET_KEY = os.getenv('SECRET_KEY') or 'django-insecure-dev-key-change-in-production'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG', 'True') == 'True'
+DEBUG = os.getenv('DEBUG', 'False') == 'True'
 
 # django-silk writes every SQL statement it records back to the database, so it
 # must stay out of the test run: it would slow the suite and inflate the
@@ -200,6 +200,13 @@ else:
     # require sslmode; a local server does not. Default to 'require' for any
     # remote host, '' (server preference) for localhost so local dev still works.
     _default_sslmode = '' if _db_host in ('', 'localhost', '127.0.0.1', '::1') else 'require'
+    _is_supabase_pooler = '.pooler.supabase.com' in _db_host
+    # Supabase transaction pooler (6543) multiplexes many clients onto a small
+    # pool; the session pooler (5432) caps clients (often 15) and is easily
+    # exhausted by dev server workers/migrations. Prefer transaction mode when a
+    # pooler host is configured unless the port is explicitly overridden.
+    _default_db_port = '6543' if _is_supabase_pooler else '5432'
+    _db_port = os.getenv('DB_PORT', _default_db_port)
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
@@ -207,20 +214,24 @@ else:
             'USER': os.getenv('DB_USER', 'postgres'),
             'PASSWORD': os.getenv('DB_PASSWORD', ''),
             'HOST': _db_host,
-            'PORT': os.getenv('DB_PORT', '5432'),
+            'PORT': _db_port,
             # Short-lived connections by default for hosted Postgres behind a
-            # session pooler: each request returns its client slot to the pooler
+            # pooler: each request returns its client slot to the pooler
             # immediately instead of holding it for CONN_MAX_AGE seconds.
             # Reconnecting costs a TCP+TLS handshake, but that is cheaper than
-            # exhausting a 15-client pool with idle persistent connections.
-            # Override with DB_CONN_MAX_AGE only when a transaction pooler or
-            # dedicated connection makes persistent connections safe.
+            # exhausting a small pool with idle persistent connections.
+            # Override with DB_CONN_MAX_AGE only when a dedicated connection
+            # makes persistent connections safe.
             'CONN_MAX_AGE': int(os.getenv('DB_CONN_MAX_AGE', '0')),
             'OPTIONS': {
                 'sslmode': os.getenv('DB_SSLMODE', _default_sslmode),
             },
         }
     }
+    # Transaction poolers do not support server-side cursors/prepared statement
+    # reuse across pooled backends; disabling avoids failures in pooled mode.
+    if _is_supabase_pooler or _db_port == '6543':
+        DATABASES['default']['DISABLE_SERVER_SIDE_CURSORS'] = True
 
 if DATABASES['default']['ENGINE'] != 'django.db.backends.sqlite3':
     # Pool-safety for hosted Postgres: validate a reused connection before it
