@@ -218,6 +218,37 @@ export const MAIL_REFUSED_MESSAGE =
 // callers always get a plain array.
 export type Paginated<T> = T[] | { results: T[]; count: number; next: string | null; previous: string | null };
 
+function nextEndpoint(next: string): string {
+  if (!next) return '';
+  try {
+    if (next.startsWith('http://') || next.startsWith('https://')) {
+      const base = new URL(API_BASE);
+      const u = new URL(next);
+      if (u.pathname.startsWith(base.pathname)) {
+        const path = u.pathname.slice(base.pathname.length) || '/';
+        return `${path.startsWith('/') ? path : `/${path}`}${u.search}`;
+      }
+      const path = u.pathname.replace(/^\/api(?=\/|$)/, '') || '/';
+      return `${path.startsWith('/') ? path : `/${path}`}${u.search}`;
+    }
+  } catch {
+    // fall through
+  }
+  return next;
+}
+
+async function fetchAllPages<T>(endpoint: string, options?: ApiRequestOptions): Promise<T[]> {
+  let url: string | null = endpoint;
+  const all: T[] = [];
+  while (url) {
+    const data: Paginated<T> = await request<Paginated<T>>(url, options);
+    if (Array.isArray(data)) return data;
+    all.push(...(data.results || []));
+    url = data.next ? nextEndpoint(data.next) : null;
+  }
+  return all;
+}
+
 function unwrapList<T>(data: Paginated<T>): T[] {
   return Array.isArray(data) ? data : data.results;
 }
@@ -335,7 +366,7 @@ export function refreshAccessToken(): Promise<string | null> {
 
 type CachePolicy = string;
 
-interface ApiRequestOptions extends RequestInit {
+export interface ApiRequestOptions extends RequestInit {
   /** Attach the in-memory access token. Defaults to true. */
   withAuth?: boolean;
   /** Disable the automatic refresh-and-retry on 401. */
@@ -1099,11 +1130,11 @@ export const projects = {
     const query = new URLSearchParams();
     if (params?.track) query.set('track', params.track);
     if (params?.difficulty) query.set('difficulty', params.difficulty);
+    query.set('page_size', '500');
     const qs = query.toString();
-    const data = await request<Paginated<Project>>(`/projects/${qs ? `?${qs}` : ''}`, {
+    return fetchAllPages<Project>(`/projects/${qs ? `?${qs}` : ''}`, {
       cachePolicy: 'projects',
     });
-    return unwrapList(data);
   },
   detail: (slug: string) => request<Project>(`/projects/${slug}/`, {
     cachePolicy: 'projects',
@@ -1115,11 +1146,9 @@ export const challenges = {
     const query = new URLSearchParams();
     if (params?.topic) query.set('topic', params.topic);
     if (params?.difficulty) query.set('difficulty', params.difficulty);
+    query.set('page_size', '500');
     const qs = query.toString();
-    const data = await request<Paginated<Challenge>>(
-      `/challenges/${qs ? `?${qs}` : ''}`
-    );
-    return unwrapList(data);
+    return fetchAllPages<Challenge>(`/challenges/${qs ? `?${qs}` : ''}`);
   },
   detail: (slug: string) => request<ChallengeDetail>(`/challenges/${slug}/`, {
     cachePolicy: 'questions',

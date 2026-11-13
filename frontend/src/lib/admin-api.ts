@@ -1,4 +1,4 @@
-import { request, getAccessToken, refreshAccessToken } from "@/lib/api";
+import { request, getAccessToken, refreshAccessToken, ApiRequestOptions } from "@/lib/api";
 
 export interface AdminDashboardStats {
   totalStudents: number;
@@ -761,7 +761,7 @@ export interface AnalyticsOverview {
 
 async function adminRequest<T>(
   endpoint: string,
-  options: RequestInit = {}
+  options: ApiRequestOptions = {}
 ): Promise<T> {
   return request<T>(`/admin${endpoint}`, options);
 }
