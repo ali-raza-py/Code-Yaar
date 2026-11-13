@@ -314,3 +314,101 @@ def _result_published(instance, created, **_kwargs):
 def _frontend() -> str:
     from django.conf import settings
     return settings.FRONTEND_URL
+
+
+# ─── Cache invalidation signals ────────────────────────────────────────────
+
+from django.core.cache import cache as _cache  # noqa: E402
+from django.db.models.signals import post_delete  # noqa: E402
+from .models import Course, Chapter, Lesson, Exercise  # noqa: E402
+
+_COURSE_CACHE_PREFIXES = (
+    'cy:course:list:',
+    'cy:course:detail:',
+    'cy:course:chapters:',
+    'cy:course:lessons:',
+    'cy:response:/api/courses',
+    'cy:response:/api/tracks',
+)
+
+
+def _invalidate_for_course(course):
+    """Clear every public cache entry that could serve stale data for a course."""
+    slug = getattr(course, 'slug', None)
+    keys = []
+    if slug:
+        keys.extend([
+            f'cy:course:detail:{slug}',
+            f'cy:course:chapters:{slug}',
+            f'cy:course:lessons:{slug}:all',
+        ])
+    # Response cache entries are keyed by full path+query; clear by prefix
+    # scan against the locmem/_cache mapping when available.
+    try:
+        cache_keys = list(_cache._cache.keys()) if hasattr(_cache, '_cache') else []
+    except Exception:
+        cache_keys = []
+    prefixes = _COURSE_CACHE_PREFIXES
+    if slug:
+        prefixes = _COURSE_CACHE_PREFIXES + (
+            f'cy:course:lessons:{slug}:',
+        )
+    for key in cache_keys:
+        key_str = str(key)
+        if any(key_str.startswith(p) or p in key_str for p in prefixes):
+            try:
+                _cache.delete(key_str)
+            except Exception:
+                pass
+
+
+def _course_of(instance):
+    """Resolve the parent Course from any curriculum model instance."""
+    course = getattr(instance, 'course', None)
+    if course is not None:
+        return course
+    chapter = getattr(instance, 'chapter', None)
+    if chapter is not None:
+        return getattr(chapter, 'course', None)
+    lesson = getattr(instance, 'lesson', None)
+    if lesson is not None:
+        return getattr(getattr(lesson, 'chapter', None), 'course', None)
+    return None
+
+
+@receiver(post_save, sender=Course,
+          dispatch_uid='learning.cache.course_save')
+@receiver(post_delete, sender=Course,
+          dispatch_uid='learning.cache.course_delete')
+def _course_changed(sender, instance, **_kwargs):
+    _invalidate_for_course(instance)
+
+
+@receiver(post_save, sender=Chapter,
+          dispatch_uid='learning.cache.chapter_save')
+@receiver(post_delete, sender=Chapter,
+          dispatch_uid='learning.cache.chapter_delete')
+def _chapter_changed(sender, instance, **_kwargs):
+    course = _course_of(instance)
+    if course is not None:
+        _invalidate_for_course(course)
+
+
+@receiver(post_save, sender=Lesson,
+          dispatch_uid='learning.cache.lesson_save')
+@receiver(post_delete, sender=Lesson,
+          dispatch_uid='learning.cache.lesson_delete')
+def _lesson_changed(sender, instance, **_kwargs):
+    course = _course_of(instance)
+    if course is not None:
+        _invalidate_for_course(course)
+
+
+@receiver(post_save, sender=Exercise,
+          dispatch_uid='learning.cache.exercise_save')
+@receiver(post_delete, sender=Exercise,
+          dispatch_uid='learning.cache.exercise_delete')
+def _exercise_changed(sender, instance, **_kwargs):
+    course = _course_of(instance)
+    if course is not None:
+        _invalidate_for_course(course)

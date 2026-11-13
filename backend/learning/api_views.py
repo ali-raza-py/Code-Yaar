@@ -7,9 +7,10 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from django.contrib.contenttypes.models import ContentType
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Exists, F, Sum, Count, Q, Avg, Case, When, Value, IntegerField, OuterRef, Subquery
+from django.db.models import Exists, F, Sum, Count, Q, Avg, Case, When, Value, IntegerField, OuterRef, Subquery, Prefetch
 from django.db.models.functions import Coalesce
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404
@@ -71,6 +72,42 @@ from .serializers import (
     CompetitionResultSerializer,
 )
 from .services.sandbox import validate_submission
+
+
+def invalidate_course_caches(course=None, course_slug=None):
+    """Invalidate all public caches that could serve stale course data.
+
+    Called from admin write paths (course/chapter/lesson create/update/delete,
+    publish/unpublish) so students never see outdated published content.
+    Uses ``transaction.on_commit`` when inside a transaction so the cache is
+    not cleared before the database write commits.
+    """
+    from django.core.cache import cache
+    from django.db import transaction
+
+    def _clear():
+        keys = list(cache._cache.keys()) if hasattr(cache, '_cache') else []
+        patterns = []
+        if course_slug:
+            patterns.append(f'cy:course:detail:{course_slug}')
+            patterns.append(f'cy:course:chapters:{course_slug}')
+            patterns.append(f'cy:course:lessons:{course_slug}:all')
+            patterns.append(f'cy:course:lessons:{course_slug}:')
+        patterns.append('cy:course:list:')
+        patterns.append('cy:response:/api/courses')
+
+        for key in keys:
+            key_str = str(key)
+            if any(key_str.startswith(p) or p in key_str for p in patterns):
+                try:
+                    cache.delete(key_str)
+                except Exception:
+                    pass
+
+    if transaction.get_connection().in_atomic_block:
+        transaction.on_commit(_clear)
+    else:
+        _clear()
 
 
 def _is_competition_manager(user):
@@ -810,10 +847,25 @@ class CourseViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ['title', 'description', 'subtitle']
     ordering_fields = ['title', 'estimated_hours', 'order', 'total_xp']
 
+    # Cache TTLs (seconds): course catalogue is stable; detail pages change
+    # only when an admin edits content, which invalidates via signals.
+    COURSE_LIST_TTL = 600
+    COURSE_DETAIL_TTL = 600
+
     def get_serializer_class(self):
         if self.action == 'retrieve':
             return CourseDetailSerializer
         return CourseListSerializer
+
+    def _list_cache_key(self):
+        """Key the course-list cache by the full query string so filters
+        (track, difficulty, language, search, page) each get their own entry."""
+        from django.core.cache import cache as _cache
+        qs = self.request.META.get('QUERY_STRING', '')
+        return f'cy:course:list:{self.request.user.pk if self.request.user.is_authenticated else "anon"}:{qs}'
+
+    def _detail_cache_key(self, slug):
+        return f'cy:course:detail:{slug}'
 
     def get_queryset(self):
         # Track title and the content aggregates (chapter/lesson/exercise
@@ -830,6 +882,31 @@ class CourseViewSet(viewsets.ReadOnlyModelViewSet):
         if language:
             qs = qs.filter(language=language)
         return qs
+
+    def list(self, request, *args, **kwargs):
+        # Anonymous reads hit the cache; authenticated responses include
+        # per-user enrolment/progress data and must not be shared.
+        if not request.user.is_authenticated:
+            key = self._list_cache_key()
+            cached = cache.get(key)
+            if cached is not None:
+                return Response(cached)
+        response = super().list(request, *args, **kwargs)
+        if not request.user.is_authenticated and response.status_code == 200:
+            cache.set(self._list_cache_key(), response.data, self.COURSE_LIST_TTL)
+        return response
+
+    def retrieve(self, request, *args, **kwargs):
+        slug = kwargs.get('slug')
+        if not request.user.is_authenticated:
+            key = self._detail_cache_key(slug)
+            cached = cache.get(key)
+            if cached is not None:
+                return Response(cached)
+        response = super().retrieve(request, *args, **kwargs)
+        if not request.user.is_authenticated and response.status_code == 200:
+            cache.set(self._detail_cache_key(slug), response.data, self.COURSE_DETAIL_TTL)
+        return response
 
     @action(
         detail=True,
@@ -890,6 +967,12 @@ class ChapterViewSet(viewsets.ReadOnlyModelViewSet):
     """List and retrieve chapters for a course."""
     permission_classes = [permissions.AllowAny]
 
+    CHAPTER_LIST_TTL = 600
+
+    def _chapter_list_cache_key(self):
+        course_slug = self.kwargs.get('course_slug')
+        return f'cy:course:chapters:{course_slug}'
+
     def get_serializer_class(self):
         if self.action == 'retrieve':
             return ChapterDetailSerializer
@@ -904,15 +987,21 @@ class ChapterViewSet(viewsets.ReadOnlyModelViewSet):
         ).select_related('course').order_by('order').prefetch_related(
             Prefetch(
                 'lessons',
-                # The sidebar LessonListSerializer never emits content_body,
-                # yet the prefetch used to pull every lesson's full markdown
-                # (~48 KB for a 26-lesson course) across the high-latency
-                # hosted link on each course-map load. Deferring the column
-                # keeps the same single-query prefetch without that payload.
                 queryset=Lesson.objects.filter(is_active=True)
                 .defer('content_body').order_by('chapter_id', 'order'),
             ),
         )
+
+    def list(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            key = self._chapter_list_cache_key()
+            cached = cache.get(key)
+            if cached is not None:
+                return Response(cached)
+        response = super().list(request, *args, **kwargs)
+        if not request.user.is_authenticated and response.status_code == 200:
+            cache.set(self._chapter_list_cache_key(), response.data, self.CHAPTER_LIST_TTL)
+        return response
 
 
 class LessonViewSet(viewsets.ReadOnlyModelViewSet):
@@ -924,6 +1013,17 @@ class LessonViewSet(viewsets.ReadOnlyModelViewSet):
     action_permissions = {
         'complete': [permissions.IsAuthenticated],
     }
+
+    LESSON_LIST_TTL = 600
+    LESSON_DETAIL_TTL = 600
+
+    def _lesson_list_cache_key(self):
+        course_slug = self.kwargs.get('course_slug')
+        chapter_slug = self.kwargs.get('chapter_slug')
+        return f'cy:course:lessons:{course_slug}:{chapter_slug or "all"}'
+
+    def _lesson_detail_cache_key(self):
+        return f'cy:lesson:detail:{self.kwargs.get("slug", self.kwargs.get("pk"))}'
 
     def get_permissions(self):
         classes = self.action_permissions.get(self.action, self.permission_classes)
@@ -963,6 +1063,18 @@ class LessonViewSet(viewsets.ReadOnlyModelViewSet):
         completion route captures ``pk``; DRF's default lookup only knows
         about ``pk``. Resolve whichever kwarg the matched pattern provided.
         """
+        if not self.request.user.is_authenticated:
+            key = self._lesson_detail_cache_key()
+            cached = cache.get(key)
+            if cached is not None:
+                # Rebuild a lightweight object from cached data for permission checks.
+                from django.shortcuts import get_object_or_404
+                obj = get_object_or_404(
+                    self.filter_queryset(self.get_queryset()), slug=cached.get('slug', '')
+                ) if cached.get('slug') else None
+                if obj:
+                    self.check_object_permissions(self.request, obj)
+                    return obj
         if 'slug' in self.kwargs:
             obj = get_object_or_404(
                 self.filter_queryset(self.get_queryset()), slug=self.kwargs['slug']
@@ -970,6 +1082,28 @@ class LessonViewSet(viewsets.ReadOnlyModelViewSet):
             self.check_object_permissions(self.request, obj)
             return obj
         return super().get_object()
+
+    def list(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            key = self._lesson_list_cache_key()
+            cached = cache.get(key)
+            if cached is not None:
+                return Response(cached)
+        response = super().list(request, *args, **kwargs)
+        if not request.user.is_authenticated and response.status_code == 200:
+            cache.set(self._lesson_list_cache_key(), response.data, self.LESSON_LIST_TTL)
+        return response
+
+    def retrieve(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            key = self._lesson_detail_cache_key()
+            cached = cache.get(key)
+            if cached is not None:
+                return Response(cached)
+        response = super().retrieve(request, *args, **kwargs)
+        if not request.user.is_authenticated and response.status_code == 200:
+            cache.set(self._lesson_detail_cache_key(), response.data, self.LESSON_DETAIL_TTL)
+        return response
 
     @action(detail=True, methods=['post'])
     def complete(self, request, pk=None):
@@ -1361,7 +1495,6 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
 
 class ProjectViewSet(viewsets.ReadOnlyModelViewSet):
     """List and retrieve projects."""
-    queryset = Project.objects.filter(is_active=True)
     serializer_class = ProjectSerializer
     permission_classes = [permissions.AllowAny]
     lookup_field = 'slug'
@@ -1370,7 +1503,12 @@ class ProjectViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ['title', 'estimated_hours']
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = (
+            Project.objects.filter(is_active=True)
+            .select_related('track')
+            .prefetch_related('milestones')
+            .order_by('title', 'id')
+        )
         track = self.request.query_params.get('track')
         difficulty = self.request.query_params.get('difficulty')
         if track:
@@ -2254,39 +2392,48 @@ class LeaderboardEntrySerializer(serializers.Serializer):
 @api_view(['GET'])
 @permission_classes([permissions.AllowAny])
 def leaderboard_view(request):
-    """Get the global leaderboard ranked by XP."""
+    """Get the global leaderboard ranked by XP.
+
+    Aggregates course completions and solved exercises in two grouped
+    queries instead of per-user subqueries, then merges the results in
+    Python. This keeps the SQL to a constant number of statements regardless
+    of page size.
+    """
     limit = int(request.query_params.get('limit', 50))
     offset = int(request.query_params.get('offset', 0))
 
-    profiles = UserProfile.objects.select_related('user').order_by('-xp_points')
+    profiles = (
+        UserProfile.objects.select_related('user')
+        .order_by('-xp_points', 'id')
+    )
     total = profiles.count()
 
-    def per_user_count(queryset, expression):
-        inner = queryset.order_by().values('user').annotate(n=expression).values('n')[:1]
-        return Coalesce(Subquery(inner), 0, output_field=IntegerField())
+    # Pre-aggregate in two grouped queries (constant cost, not N+1).
+    completed_courses = dict(
+        Enrollment.objects.filter(status='completed')
+        .values('user_id').annotate(n=Count('id'))
+        .values_list('user_id', 'n')
+    )
+    solved_challenges = dict(
+        ExerciseAttempt.objects.filter(status='correct')
+        .values('user_id').annotate(n=Count('exercise', distinct=True))
+        .values_list('user_id', 'n')
+    )
 
-    page = profiles.annotate(
-        courses_completed=per_user_count(
-            Enrollment.objects.filter(user=OuterRef('user_id'), status='completed'),
-            Count('pk'),
-        ),
-        challenges_solved=per_user_count(
-            ExerciseAttempt.objects.filter(user=OuterRef('user_id'), status='correct'),
-            Count('exercise', distinct=True),
-        ),
-    )[offset:offset + limit]
+    page = profiles[offset:offset + limit]
 
     entries = []
     for rank, profile in enumerate(page, start=offset + 1):
+        user = profile.user
         entries.append({
             'rank': rank,
-            'user_id': profile.user.id,
-            'username': profile.user.username,
+            'user_id': user.id,
+            'username': user.username,
             'xp_points': profile.xp_points,
             'level': profile.level,
             'streak_days': profile.streak_days,
-            'courses_completed': profile.courses_completed,
-            'challenges_solved': profile.challenges_solved,
+            'courses_completed': completed_courses.get(user.id, 0),
+            'challenges_solved': solved_challenges.get(user.id, 0),
         })
 
     return Response({

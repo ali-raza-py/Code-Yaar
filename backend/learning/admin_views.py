@@ -50,6 +50,7 @@ from .serializers import (
     PracticalClassAdminSerializer, PracticalSubjectAdminSerializer,
     PracticalAdminSerializer, AchievementSerializer,
 )
+from .api_views import invalidate_course_caches
 
 
 # ─── Dashboard ─────────────────────────────────────────────────────────────────
@@ -386,6 +387,19 @@ class CourseAdminViewSet(viewsets.ModelViewSet):
             qs = qs.filter(track_id=track)
         return qs
 
+    def perform_create(self, serializer):
+        course = serializer.save()
+        invalidate_course_caches(course=course, course_slug=course.slug)
+
+    def perform_update(self, serializer):
+        course = serializer.save()
+        invalidate_course_caches(course=course, course_slug=course.slug)
+
+    def perform_destroy(self, instance):
+        slug = instance.slug
+        instance.delete()
+        invalidate_course_caches(course_slug=slug)
+
     @action(detail=True, methods=['post'])
     def publish(self, request, pk=None):
         """Publish a course, but not through its content problems.
@@ -415,6 +429,7 @@ class CourseAdminViewSet(viewsets.ModelViewSet):
             'is_published', 'is_active', 'published_at', 'publish_at', 'archived_at',
             'updated_at',
         ])
+        invalidate_course_caches(course=course, course_slug=course.slug)
         record_admin_action(
             request.user, 'course.publish', obj=course, label=course.title,
             detail={
@@ -433,6 +448,7 @@ class CourseAdminViewSet(viewsets.ModelViewSet):
         course.is_published = False
         course.publish_at = None
         course.save(update_fields=['is_published', 'publish_at', 'updated_at'])
+        invalidate_course_caches(course=course, course_slug=course.slug)
         record_admin_action(request.user, 'course.unpublish', obj=course,
                             label=course.title, request=request)
         return Response(self.get_serializer(course).data)
@@ -561,6 +577,19 @@ class ChapterAdminViewSet(viewsets.ModelViewSet):
             qs = qs.filter(course_id=course)
         return qs
 
+    def perform_create(self, serializer):
+        chapter = serializer.save()
+        invalidate_course_caches(course_slug=chapter.course.slug)
+
+    def perform_update(self, serializer):
+        chapter = serializer.save()
+        invalidate_course_caches(course_slug=chapter.course.slug)
+
+    def perform_destroy(self, instance):
+        course_slug = instance.course.slug
+        instance.delete()
+        invalidate_course_caches(course_slug=course_slug)
+
     @action(detail=False, methods=['post'], url_path='reorder')
     def reorder(self, request):
         """Reorder chapters inside one course.
@@ -573,7 +602,8 @@ class ChapterAdminViewSet(viewsets.ModelViewSet):
         items = request.data.get('items', [])
         course_id = request.data.get('course_id')
         if not isinstance(items, list):
-            return Response({'detail': '"items" must be a list.'}, status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': '"items" must be a list.'},
+                            status.HTTP_400_BAD_REQUEST)
         mapping = {}
         for entry in items:
             if not isinstance(entry, dict):
@@ -610,6 +640,7 @@ class ChapterAdminViewSet(viewsets.ModelViewSet):
         if course_id not in (None, ''):
             course = Course.objects.filter(pk=course_id).first()
             if course is not None:
+                invalidate_course_caches(course=course, course_slug=course.slug)
                 record_admin_action(request.user, 'chapter.reorder', obj=course,
                                     label=course.title, detail={'count': len(rows)},
                                     request=request)
@@ -667,6 +698,19 @@ class LessonAdminViewSet(viewsets.ModelViewSet):
             qs = qs.filter(chapter__course_id=course)
         return qs
 
+    def perform_create(self, serializer):
+        lesson = serializer.save()
+        invalidate_course_caches(course_slug=lesson.chapter.course.slug)
+
+    def perform_update(self, serializer):
+        lesson = serializer.save()
+        invalidate_course_caches(course_slug=lesson.chapter.course.slug)
+
+    def perform_destroy(self, instance):
+        course_slug = instance.chapter.course.slug
+        instance.delete()
+        invalidate_course_caches(course_slug=course_slug)
+
     @action(detail=False, methods=['post'], url_path='reorder')
     def reorder(self, request):
         """Reorder lessons, scoped to a course or chapter when supplied.
@@ -709,6 +753,23 @@ class LessonAdminViewSet(viewsets.ModelViewSet):
             for lesson in rows:
                 lesson.order = mapping[lesson.pk]
             Lesson.objects.bulk_update(rows, ['order'])
+        # Invalidate course caches: lessons belong to chapters which belong to courses.
+        course_id = request.data.get('course_id') or request.query_params.get('course')
+        chapter_id = request.data.get('chapter_id') or request.query_params.get('chapter')
+        if course_id:
+            try:
+                course = Course.objects.filter(pk=course_id).first()
+                if course:
+                    invalidate_course_caches(course=course, course_slug=course.slug)
+            except Course.DoesNotExist:
+                pass
+        elif chapter_id:
+            try:
+                chapter = Chapter.objects.filter(pk=chapter_id).select_related('course').first()
+                if chapter:
+                    invalidate_course_caches(course_slug=chapter.course.slug)
+            except Chapter.DoesNotExist:
+                pass
         return Response({'status': 'ok', 'reordered': len(rows)})
 
 
@@ -747,6 +808,21 @@ class ExerciseAdminViewSet(viewsets.ModelViewSet):
         if lesson:
             qs = qs.filter(lesson_id=lesson)
         return qs
+
+    def perform_create(self, serializer):
+        exercise = serializer.save()
+        invalidate_course_caches(
+            course_slug=exercise.lesson.chapter.course.slug)
+
+    def perform_update(self, serializer):
+        exercise = serializer.save()
+        invalidate_course_caches(
+            course_slug=exercise.lesson.chapter.course.slug)
+
+    def perform_destroy(self, instance):
+        course_slug = instance.lesson.chapter.course.slug
+        instance.delete()
+        invalidate_course_caches(course_slug=course_slug)
 
 
 # ─── Students (Admin) ──────────────────────────────────────────────────────────

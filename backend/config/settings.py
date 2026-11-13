@@ -69,6 +69,9 @@ MIDDLEWARE = [
     # Dev-only profiler; placed high so it times the full request. DEBUG-gated.
     *(['silk.middleware.SilkyMiddleware'] if SILK_ENABLED else []),
     'corsheaders.middleware.CorsMiddleware',
+    # Cache-Control headers for public API responses + server response cache.
+    'learning.middleware.PublicCacheControlMiddleware',
+    'learning.middleware.ResponseCacheMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     *(['debug_toolbar.middleware.DebugToolbarMiddleware'] if DEBUG else []),
@@ -347,6 +350,30 @@ if EMAIL_BACKEND_PATH.endswith('smtp.EmailBackend'):
         'use_ssl': _env_flag('EMAIL_USE_SSL'),
         'timeout': int(os.getenv('EMAIL_TIMEOUT') or 10),
     }
+
+# ─── Django cache framework ──────────────────────────────────────────────
+# LocMemCache in development (one process, no shared state — fine for `runserver`).
+# Production: set REDIS_URL to use Redis as a shared cache backend. Redis is
+# optional; the cache degrades gracefully to per-process memory when absent.
+# Cache keys are prefixed so multiple environments/projects never collide.
+# Never cache authenticated/personalized responses here — cache keys include
+# the caller's scope only when explicitly chosen by a view.
+_CACHE_LOCATION = os.getenv('REDIS_URL', '').strip()
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache'
+        if _CACHE_LOCATION
+        else 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': _CACHE_LOCATION or 'code-yaar-locmem',
+        'KEY_PREFIX': os.getenv('CACHE_KEY_PREFIX', 'cy:v1:'),
+        'TIMEOUT': 300,
+        'OPTIONS': {
+            'CLIENT_CLASS': 'redis.ConnectionPool'
+            if _CACHE_LOCATION
+            else None,
+        } if _CACHE_LOCATION else {},
+    }
+}
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

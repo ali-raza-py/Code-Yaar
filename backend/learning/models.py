@@ -132,6 +132,9 @@ class UserProfile(models.Model):
 
     class Meta:
         ordering = ['-xp_points']
+        indexes = [
+            models.Index(fields=['-xp_points'], name='profile_xp_points_idx'),
+        ]
 
 
 class CareerTrack(models.Model):
@@ -448,6 +451,12 @@ class Course(models.Model):
 
     class Meta:
         ordering = ['track', 'order', 'title']
+        indexes = [
+            models.Index(
+                fields=['is_published', 'is_active', 'slug'],
+                name='course_published_active_slug',
+            ),
+        ]
 
 
 class SourceReference(models.Model):
@@ -587,6 +596,12 @@ class Chapter(SourceReference):
         ordering = ['course', 'order']
         unique_together = ['course', 'slug']
         verbose_name_plural = 'chapters'
+        indexes = [
+            models.Index(
+                fields=['course', 'is_active', 'order'],
+                name='chap_course_active_order',
+            ),
+        ]
 
 
 class Lesson(SourceReference):
@@ -658,6 +673,12 @@ class Lesson(SourceReference):
     class Meta:
         ordering = ['chapter__course', 'chapter__order', 'order']
         unique_together = ['chapter', 'slug']
+        indexes = [
+            models.Index(
+                fields=['chapter', 'is_active', 'order'],
+                name='lesson_chapter_active_order',
+            ),
+        ]
 
 
 class Exercise(SourceReference):
@@ -735,6 +756,12 @@ class Exercise(SourceReference):
     class Meta:
         ordering = ['lesson', 'order']
         unique_together = ['lesson', 'slug']
+        indexes = [
+            models.Index(
+                fields=['lesson', 'is_active'],
+                name='exercise_lesson_active',
+            ),
+        ]
 
 
 class Hint(models.Model):
@@ -838,6 +865,12 @@ class Enrollment(models.Model):
     class Meta:
         unique_together = ['user', 'course']
         ordering = ['-enrolled_at']
+        indexes = [
+            models.Index(
+                fields=['user', 'course', 'status'],
+                name='enroll_user_course_status',
+            ),
+        ]
 
 
 class LessonProgress(models.Model):
@@ -872,6 +905,12 @@ class LessonProgress(models.Model):
     class Meta:
         unique_together = ['user', 'lesson']
         ordering = ['lesson__chapter__order', 'lesson__order']
+        indexes = [
+            models.Index(
+                fields=['user', 'status'],
+                name='lesson_progress_user_status',
+            ),
+        ]
 
 
 class ExerciseAttempt(models.Model):
@@ -924,6 +963,12 @@ class ExerciseAttempt(models.Model):
                 fields=['submission_id'],
                 condition=~models.Q(submission_id__isnull=True),
                 name='unique_exercise_attempt_submission_id',
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=['user', 'exercise', 'status'],
+                name='exercise_attempt_user_status',
             ),
         ]
 

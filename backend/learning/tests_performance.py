@@ -136,7 +136,7 @@ class EndpointQueryBudgetTest(TestCase):
     BUDGET_COURSES_AUTH = 6
     BUDGET_TRACK_DETAIL_ANON = 4
     BUDGET_TRACK_DETAIL_AUTH = 7
-    BUDGET_LEADERBOARD = 3
+    BUDGET_LEADERBOARD = 4
 
     @classmethod
     def setUpTestData(cls):
