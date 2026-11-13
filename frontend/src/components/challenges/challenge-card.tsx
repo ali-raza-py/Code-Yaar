@@ -18,7 +18,7 @@ export function ChallengeCard({ challenge, solved: solvedProp }: ChallengeCardPr
       <div className="flex items-center justify-between gap-3">
         <DifficultyPill difficulty={challenge.difficulty} size="sm" />
         <span className="inline-flex items-center gap-1.5 text-xs text-[var(--challenge-muted)]">
-          {solved ? <CheckCircle2 aria-label="Solved" className="h-4 w-4 text-success" /> : <Circle aria-label="Unsolved" className="h-4 w-4" />}
+          {solved ? <CheckCircle2 aria-label="Solved" className="h-4 w-4 text-success-foreground" /> : <Circle aria-label="Unsolved" className="h-4 w-4" />}
           {solved ? "Completed" : inProgress ? "In progress" : "Open"}
         </span>
       </div>
@@ -30,7 +30,7 @@ export function ChallengeCard({ challenge, solved: solvedProp }: ChallengeCardPr
         <div className="flex items-center gap-3">
           <span className="rounded-md bg-[var(--challenge-surface-muted)] px-2 py-1 font-semibold text-[var(--challenge-text-soft)]">{challenge.topic}</span>
           <span className="inline-flex items-center gap-1"><Clock3 aria-hidden="true" className="h-3.5 w-3.5" />{challenge.estimated_minutes}m</span>
-          <span className="font-semibold text-success">+{challenge.xp_reward} XP</span>
+          <span className="font-semibold text-success-foreground">+{challenge.xp_reward} XP</span>
         </div>
         <Link href={`/challenges/${challenge.slug}`} aria-label={`${actionLabel} ${challenge.title}`} className={`inline-flex min-h-9 items-center gap-1 rounded-md px-2.5 font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--challenge-accent)] ${solved ? "text-success" : "text-[var(--challenge-accent-strong)] opacity-75 group-hover:opacity-100 hover:bg-[var(--challenge-accent-soft)]"}`}>
           {actionLabel} <ArrowUpRight aria-hidden="true" className="h-3.5 w-3.5" />

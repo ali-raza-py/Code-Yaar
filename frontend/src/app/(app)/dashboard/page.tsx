@@ -106,10 +106,10 @@ export default function DashboardPage() {
           to begin Python Foundations.
         </p>
         <div className="mt-6 flex items-center justify-center gap-3">
-          <Link href="/sign-in" className="rounded-lg bg-cta px-5 py-2.5 text-sm font-bold text-white hover:bg-cta-hover">
+          <Link href="/sign-in" className="rounded-lg bg-primary text-primary-foreground px-5 py-2.5 text-sm font-bold transition-colors hover:bg-primary/90">
             Sign in
           </Link>
-          <Link href="/sign-up" className="rounded-lg border border-border px-5 py-2.5 text-sm font-medium text-foreground hover:bg-muted">
+          <Link href="/sign-up" className="rounded-lg border border-border bg-background px-5 py-2.5 text-sm font-medium text-foreground hover:bg-secondary">
             Create account
           </Link>
         </div>
@@ -175,7 +175,7 @@ export default function DashboardPage() {
           </span>
           <Link
             href="/progress?tab=overview"
-            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-cta px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-cta-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-semibold transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
             View progress
             <ArrowRight aria-hidden="true" className="h-4 w-4" />
@@ -186,16 +186,16 @@ export default function DashboardPage() {
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.7fr)_minmax(18rem,0.9fr)] xl:gap-8">
         <div className="min-w-0 space-y-5">
           {/* Continue Learning card */}
-          <section aria-labelledby="continue-learning-title" className="rounded-xl bg-hero-navy p-5 text-white sm:p-6">
+          <section aria-labelledby="continue-learning-title" className="rounded-xl bg-primary p-5 text-primary-foreground sm:p-6">
             <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
               <div className="min-w-0">
-                <p className="text-xs font-medium tracking-wide text-white/70">
+                <p className="text-xs font-medium tracking-wide text-primary-foreground/90">
                   {enrollment ? 'Continue where you left off' : 'Your learning'}
                 </p>
                 <h2 id="continue-learning-title" className="mt-1.5 max-w-2xl break-words text-xl font-semibold leading-snug tracking-tight sm:text-2xl">
                   {enrollment ? enrollment.course_title : 'No active courses yet'}
                 </h2>
-                <p className="mt-1.5 text-sm leading-5 text-white/70">
+                <p className="mt-1.5 text-sm leading-5 text-primary-foreground/90">
                   {enrollment
                     ? `Part of the ${enrollment.track_title} track`
                     : 'Choose a course to start your structured learning path.'}
@@ -203,19 +203,19 @@ export default function DashboardPage() {
                 {enrollment && (
                   <div className="mt-4 max-w-xl">
                     <div className="mb-2 flex items-center justify-between gap-4 text-xs">
-                      <span className="text-white/75">Course progress</span>
-                      <span className="font-semibold tabular-nums text-white">{courseProgress}%</span>
+                      <span className="text-primary-foreground/90">Course progress</span>
+                      <span className="font-semibold tabular-nums text-primary-foreground">{courseProgress}%</span>
                     </div>
                     <div
                       aria-label={`${courseProgress}% complete`}
                       aria-valuemax={100}
                       aria-valuemin={0}
                       aria-valuenow={courseProgress}
-                      className="h-2 overflow-hidden rounded-full bg-white/15"
+                      className="h-2 overflow-hidden rounded-full bg-primary-foreground/10"
                       role="progressbar"
                     >
                       <div
-                        className="h-full rounded-full bg-mint transition-[width] duration-500"
+                        className="h-full rounded-full bg-primary transition-[width] duration-500"
                         style={{ width: `${courseProgress}%` }}
                       />
                     </div>
@@ -224,7 +224,7 @@ export default function DashboardPage() {
               </div>
               <Link
                 href={enrollment ? `/learn/${enrollment.course_slug}` : '/learn'}
-                className="inline-flex min-h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-cta px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-cta-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-hero-navy"
+                className="inline-flex min-h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-primary-foreground px-4 py-2.5 text-sm font-medium text-primary transition-colors hover:bg-primary-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-primary"
               >
                 {enrollment ? 'Continue learning' : 'Browse courses'}
                 <ArrowRight aria-hidden="true" className="h-4 w-4" />
@@ -394,7 +394,7 @@ export default function DashboardPage() {
             <div className="mt-5 grid grid-cols-2 divide-x divide-border border-t border-border pt-4">
               <div className="pr-4">
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Flame aria-hidden="true" className="h-4 w-4 text-amber" />
+                  <Flame aria-hidden="true" className="h-4 w-4 text-success" />
                   Daily streak
                 </div>
                 <p className="mt-1 text-lg font-semibold tabular-nums text-foreground">
@@ -417,7 +417,7 @@ export default function DashboardPage() {
           <section aria-labelledby="leaderboard-title" className="card-hairline p-5 sm:p-6">
             <div className="flex items-center justify-between gap-3">
               <h2 id="leaderboard-title" className="flex items-center gap-2 font-semibold text-foreground">
-                <Trophy aria-hidden="true" className="h-5 w-5 text-amber" />
+                <Trophy aria-hidden="true" className="h-5 w-5 text-success" />
                 Leaderboard
               </h2>
               <Link href="/leaderboard" className="inline-flex min-h-10 shrink-0 items-center text-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -441,7 +441,7 @@ export default function DashboardPage() {
                         }`}
                       >
                         <span className={`text-center tabular-nums ${
-                          entry.rank === 1 ? 'font-semibold text-amber' : 'text-muted-foreground'
+                          entry.rank === 1 ? 'font-semibold text-success' : 'text-muted-foreground'
                         }`}>
                           {entry.rank}
                         </span>
@@ -526,8 +526,8 @@ export default function DashboardPage() {
                         {item.priority !== "normal" && (
                           <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
                             item.priority === "urgent"
-                              ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
-                              : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
+                              ? "bg-error/10 text-error"
+                              : "bg-warning/10 text-warning"
                           }`}>
                             {item.priority_label}
                           </span>

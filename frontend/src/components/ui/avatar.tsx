@@ -9,15 +9,12 @@ import { useState } from "react";
  * a broken image never shows — the `onError` path falls back to initials.
  */
 
-// Named Tailwind tints so the fallback colour reads consistently in both themes.
+// Emerald brand tones so the fallback colour reads consistently in both themes.
 const PALETTE = [
   "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-  "bg-sky-500/15 text-sky-700 dark:text-sky-300",
-  "bg-violet-500/15 text-violet-700 dark:text-violet-300",
-  "bg-amber-500/15 text-amber-700 dark:text-amber-300",
-  "bg-rose-500/15 text-rose-700 dark:text-rose-300",
-  "bg-teal-500/15 text-teal-700 dark:text-teal-300",
-  "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300",
+  "bg-emerald-400/15 text-emerald-600 dark:text-emerald-400",
+  "bg-emerald-300/15 text-emerald-800 dark:text-emerald-200",
+  "bg-emerald-200/15 text-emerald-900 dark:text-emerald-100",
 ];
 
 function hashString(value: string): number {

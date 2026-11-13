@@ -26,7 +26,7 @@ export function FeaturedCourses() {
     return (
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {[1, 2, 3].map((i) => (
-          <div key={i} className="h-44 animate-pulse rounded-[var(--radius-card)] border border-forest-border bg-card/60" />
+          <div key={i} className="h-44 animate-pulse rounded-[var(--radius-card)] border border-border bg-card" />
         ))}
       </div>
     );
@@ -34,9 +34,9 @@ export function FeaturedCourses() {
 
   if (courses.length === 0) {
     return (
-      <div className="rounded-[var(--radius-card)] border border-forest-border bg-card p-5 text-sm text-muted-foreground">
-        Courses are being prepared. Meanwhile, the{' '}
-        <Link href="/tracks" className="focus-ring rounded font-semibold text-forest-accent">learning tracks</Link>{' '}
+      <div className="rounded-[var(--radius-card)] border border-border bg-card p-5 text-sm text-muted-foreground">
+        Courses are being prepared. Meanwhile, the{" "}
+        <Link href="/tracks" className="focus-ring rounded font-semibold text-primary hover:text-cta-hover">learning tracks</Link>{" "}
         show where the catalog is heading.
       </div>
     );
@@ -48,17 +48,17 @@ export function FeaturedCourses() {
         <Link
           key={course.id}
           href={`/courses/${course.slug}`}
-          className="focus-ring group flex flex-col rounded-[var(--radius-card)] border border-forest-border bg-card p-5 text-card-foreground transition hover:-translate-y-1 hover:border-forest-border-hover hover:shadow-[5px_5px_0_var(--forest-shadow-soft)]"
+          className="focus-ring group flex flex-col rounded-[var(--radius-card)] border border-border bg-card p-5 text-card-foreground transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-[var(--shadow-1)]"
         >
-          <div className="flex items-center justify-between gap-3 text-[10px] font-semibold uppercase tracking-wider text-forest-line-soft">
-            <span className="inline-flex items-center gap-1.5"><BookOpen className="h-3.5 w-3.5" />{course.track_title || course.language}</span>
+          <div className="flex items-center justify-between gap-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5"><BookOpen className="h-3.5 w-3.5 text-primary" />{course.track_title || course.language}</span>
             <span className="capitalize">{course.difficulty}</span>
           </div>
-          <h3 className="mt-3 font-bold leading-snug group-hover:text-forest-accent">{course.title}</h3>
-          <p className="mt-2 line-clamp-2 text-sm text-forest-muted">{course.description}</p>
-          <div className="mt-auto flex items-center justify-between pt-5 text-xs text-forest-muted">
+          <h3 className="mt-3 font-semibold leading-snug text-foreground transition-colors group-hover:text-primary">{course.title}</h3>
+          <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">{course.description}</p>
+          <div className="mt-auto flex items-center justify-between gap-3 pt-5 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" />{course.estimated_hours}h · {course.lesson_count} lessons</span>
-            <span className="inline-flex items-center gap-1 font-semibold text-forest-accent">View course<ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" /></span>
+            <span className="inline-flex items-center gap-1 font-medium text-primary">View course<ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" /></span>
           </div>
         </Link>
       ))}

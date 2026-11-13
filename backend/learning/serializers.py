@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from django.db.models import Count
+from django.db.models import Count, Prefetch
 
 from . import batching
 from .models import (
@@ -1013,7 +1013,7 @@ class ProjectMilestoneSerializer(serializers.ModelSerializer):
 
 
 class ProjectSerializer(serializers.ModelSerializer):
-    track_title = serializers.CharField(source='track.title', read_only=True, default=None)
+    track_title = serializers.SerializerMethodField()
     milestones = ProjectMilestoneSerializer(many=True, read_only=True)
 
     class Meta:
@@ -1023,6 +1023,10 @@ class ProjectSerializer(serializers.ModelSerializer):
             'difficulty', 'technologies', 'estimated_hours',
             'track', 'track_title', 'milestones',
         ]
+
+    def get_track_title(self, obj):
+        track = getattr(obj, 'track', None)
+        return track.title if track else None
 
 
 class ChallengeSerializer(serializers.ModelSerializer):

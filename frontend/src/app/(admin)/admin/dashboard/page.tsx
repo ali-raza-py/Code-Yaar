@@ -33,29 +33,27 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 const statCards = [
-  { key: "totalStudents", label: "Total Students", icon: Users, color: "bg-blue-500" },
-  { key: "activeStudents", label: "Active Students", icon: TrendingUp, color: "bg-green-500" },
-  { key: "totalCourses", label: "Published Courses", icon: BookOpen, color: "bg-purple-500" },
-  { key: "totalTracks", label: "Learning Tracks", icon: GraduationCap, color: "bg-orange-500" },
-  { key: "totalEnrollments", label: "Total Enrollments", icon: Target, color: "bg-cyan-500" },
-  { key: "completedCourses", label: "Completed Courses", icon: Award, color: "bg-emerald-500" },
-  { key: "totalAssessments", label: "Assessments", icon: FileText, color: "bg-indigo-500" },
-  { key: "totalChallenges", label: "Coding Challenges", icon: Code2, color: "bg-pink-500" },
-  { key: "certificatesIssued", label: "Certificates Issued", icon: Medal, color: "bg-amber-500" },
-  { key: "activeCompetitions", label: "Active Competitions", icon: Trophy, color: "bg-red-500" },
+  { key: "totalStudents", label: "Total Students", icon: Users },
+  { key: "activeStudents", label: "Active Students", icon: TrendingUp },
+  { key: "totalCourses", label: "Published Courses", icon: BookOpen },
+  { key: "totalTracks", label: "Learning Tracks", icon: GraduationCap },
+  { key: "totalEnrollments", label: "Total Enrollments", icon: Target },
+  { key: "completedCourses", label: "Completed Courses", icon: Award },
+  { key: "totalAssessments", label: "Assessments", icon: FileText },
+  { key: "totalChallenges", label: "Coding Challenges", icon: Code2 },
+  { key: "certificatesIssued", label: "Certificates Issued", icon: Medal },
+  { key: "activeCompetitions", label: "Active Competitions", icon: Trophy },
 ] as const;
 
 function StatCard({
   label,
   value,
   icon: Icon,
-  color,
   trend,
 }: {
   label: string;
   value: number | string;
   icon: React.ElementType;
-  color: string;
   trend?: string;
 }) {
   return (
@@ -66,11 +64,11 @@ function StatCard({
             <p className="text-sm font-medium text-muted-foreground">{label}</p>
             <p className="mt-1 text-3xl font-bold text-foreground">{value}</p>
             {trend && (
-              <p className="mt-1 text-xs text-green-600 dark:text-green-400">{trend}</p>
+              <p className="mt-1 text-xs text-primary-foreground dark:text-primary-foreground">{trend}</p>
             )}
           </div>
-          <div className={cn("flex h-12 w-12 items-center justify-center rounded-xl", color)}>
-            <Icon className="h-6 w-6 text-white" aria-hidden="true" />
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <Icon className="h-6 w-6" aria-hidden="true" />
           </div>
         </div>
       </CardContent>
@@ -307,13 +305,12 @@ export default function AdminDashboardPage() {
 
       {/* Stats Grid */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-        {statCards.map(({ key, label, icon: Icon, color }) => (
+        {statCards.map(({ key, label, icon: Icon }) => (
           <StatCard
             key={key}
             label={label}
             value={stats?.[key as keyof AdminDashboardStats] ?? 0}
             icon={Icon}
-            color={color}
           />
         ))}
       </div>
@@ -342,7 +339,7 @@ export default function AdminDashboardPage() {
             href="/admin/tracks/create"
             className="group card-hairline p-5 transition-colors hover:border-primary"
           >
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-green-500/10 text-green-500">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
               <GraduationCap className="h-6 w-6" />
             </div>
             <h3 className="mt-4 font-semibold text-foreground group-hover:text-primary">Create Track</h3>
@@ -352,7 +349,7 @@ export default function AdminDashboardPage() {
             href="/admin/announcements/create"
             className="group card-hairline p-5 transition-colors hover:border-primary"
           >
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
               <FileText className="h-6 w-6" />
             </div>
             <h3 className="mt-4 font-semibold text-foreground group-hover:text-primary">Post Announcement</h3>
@@ -362,7 +359,7 @@ export default function AdminDashboardPage() {
             href="/admin/competitions/create"
             className="group card-hairline p-5 transition-colors hover:border-primary"
           >
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-purple-500/10 text-purple-500">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
               <Trophy className="h-6 w-6" />
             </div>
             <h3 className="mt-4 font-semibold text-foreground group-hover:text-primary">Create Competition</h3>

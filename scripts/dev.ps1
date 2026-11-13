@@ -30,11 +30,19 @@
     instead of refusing. Without -Force the launcher only reclaims its own
     orphaned windows and otherwise names the occupying process.
 
+.PARAMETER Migrate
+    Run `manage.py migrate` before starting. By default migrations are
+    skipped because dev restarts against a small hosted/pooler database
+    (e.g. Supabase session pooler) can exhaust the connection pool.
+
 .EXAMPLE
     .\scripts\dev.ps1
 
 .EXAMPLE
     .\scripts\dev.ps1 -Setup
+
+.EXAMPLE
+    .\scripts\dev.ps1 -Migrate
 
 .EXAMPLE
     .\scripts\dev.ps1 -Force
@@ -48,7 +56,8 @@ param(
     [int]$BackendPort = 8000,
     [int]$FrontendPort = 3000,
     [switch]$Setup,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$Migrate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -452,13 +461,16 @@ if (-not $configuredApi) {
     Write-Warn "update frontend/.env.local, or run: .\scripts\dev.ps1 -BackendPort <port from $configuredApi>"
 }
 
-Write-Step 'Applying database migrations'
-Push-Location $backendDir
-try {
-    Invoke-Checked $python @('manage.py', 'check') 'manage.py check'
-    Invoke-Checked $python @('manage.py', 'migrate', '--noinput') 'database migration'
-} finally {
-    Pop-Location
+if ($Migrate) {
+    Write-Step 'Applying database migrations'
+    Push-Location $backendDir
+    try {
+        Invoke-Checked $python @('manage.py', 'migrate', '--noinput') 'database migration'
+    } finally {
+        Pop-Location
+    }
+} else {
+    Write-Note 'skipping database migrations (use -Migrate to apply them)'
 }
 
 # ── Start the API in its own window ─────────────────────────────────────────

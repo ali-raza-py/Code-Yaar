@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -152,20 +152,20 @@ function SidebarLink({
           "before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-r-full before:transition-colors",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--sidebar-bg)]",
           active
-            ? "bg-[var(--sidebar-active-bg)] text-white before:bg-[var(--sidebar-accent)]"
-            : "text-white/75 hover:bg-white/[0.07] hover:text-white before:bg-transparent"
+            ? "bg-[var(--sidebar-active-bg)] text-[var(--sidebar-accent-strong)] before:bg-[var(--sidebar-accent)]"
+            : "text-[var(--sidebar-text)] hover:bg-[var(--sidebar-hover-bg)] before:bg-transparent"
         )}
       >
         <Icon
           aria-hidden="true"
           className={cn(
             "h-5 w-5 shrink-0 stroke-[1.7] transition-colors",
-            active ? "text-[var(--sidebar-accent)]" : "text-white/65 group-hover:text-white"
+            active ? "text-[var(--sidebar-accent-strong)]" : "text-[var(--sidebar-icon)] group-hover:text-[var(--sidebar-accent-strong)]"
           )}
         />
         <span className="min-w-0 truncate">{item.label}</span>
         {item.badge && (
-          <span className="ml-auto rounded-pill border border-[var(--sidebar-badge-border)] bg-[var(--sidebar-badge-bg)] px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-[var(--sidebar-accent-soft)]">
+          <span className="ml-auto rounded-pill border border-[var(--sidebar-badge-border)] bg-[var(--sidebar-badge-bg)] px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-[var(--sidebar-accent-strong)]">
             {item.badge}
           </span>
         )}
@@ -215,15 +215,15 @@ function TreeRow({
             "before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-r-full before:transition-colors",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--sidebar-bg)]",
             active
-              ? "bg-[var(--sidebar-active-bg)] text-white before:bg-[var(--sidebar-accent)]"
-              : "text-white/75 hover:bg-white/[0.07] hover:text-white before:bg-transparent"
+              ? "bg-[var(--sidebar-active-bg)] text-[var(--sidebar-accent-strong)] before:bg-[var(--sidebar-accent)]"
+              : "text-[var(--sidebar-text)] hover:bg-[var(--sidebar-hover-bg)] hover:text-[var(--sidebar-accent-strong)] before:bg-transparent"
           )}
         >
           <Icon
             aria-hidden="true"
             className={cn(
               "h-5 w-5 shrink-0 stroke-[1.7] transition-colors",
-              active ? "text-[var(--sidebar-accent)]" : "text-white/65 group-hover:text-white"
+              active ? "text-[var(--sidebar-accent)]" : "text-[var(--sidebar-icon)] group-hover:text-[var(--sidebar-accent-strong)]"
             )}
           />
           <span className="min-w-0 truncate">{item.label}</span>
@@ -235,10 +235,10 @@ function TreeRow({
             paddingRight: hasChildren ? "2.5rem" : undefined,
           }}
           className={cn(
-            "group relative flex min-h-10 items-center gap-3 rounded-lg text-sm font-medium text-white/75"
+            "group relative flex min-h-10 items-center gap-3 rounded-lg text-sm font-medium text-[var(--sidebar-text)]"
           )}
         >
-          <Icon aria-hidden="true" className="h-5 w-5 shrink-0 stroke-[1.7] text-white/65" />
+          <Icon aria-hidden="true" className="h-5 w-5 shrink-0 stroke-[1.7] text-[var(--sidebar-icon)]" />
           <span className="min-w-0 truncate">{item.label}</span>
         </div>
         )}
@@ -249,10 +249,10 @@ function TreeRow({
             aria-label={`${expanded ? "Collapse" : "Expand"} ${item.label}`}
             aria-expanded={expanded}
             className={cn(
-              "absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]",
+              "absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md transition-colors hover:bg-[var(--sidebar-hover-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]",
               activeDescendant
-                ? "text-[var(--sidebar-accent)] hover:text-white"
-                : "text-white/60 hover:text-white"
+                ? "text-[var(--sidebar-accent)] hover:text-[var(--sidebar-accent-strong)]"
+                : "text-[var(--sidebar-icon)] hover:text-[var(--sidebar-accent-strong)]"
             )}
           >
             <ChevronDown
@@ -408,15 +408,15 @@ function SidebarPanel({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--sidebar-bg)] text-white">
-      <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-white/10 px-4">
+    <div className="flex h-full min-h-0 flex-col border-r border-[var(--sidebar-border)] bg-[var(--sidebar-bg)] text-[var(--sidebar-text)]">
+      <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-[var(--sidebar-border)] px-4">
         <div className="relative h-6 w-6 shrink-0">
           <svg
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
             strokeWidth="2"
-            className="h-6 w-6 text-white"
+            className="h-6 w-6 text-[var(--sidebar-accent-strong)]"
             aria-hidden="true"
           >
             <path d="M12 2L2 7l10 5 10-5-10-5z" />
@@ -430,7 +430,7 @@ function SidebarPanel({
             type="button"
             onClick={onCollapse}
             aria-label="Collapse navigation"
-            className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-white/70 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]"
+            className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--sidebar-icon)] transition-colors hover:bg-[var(--sidebar-hover-bg)] hover:text-[var(--sidebar-accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]"
           >
             <ChevronLeft aria-hidden="true" className="h-4 w-4" />
           </button>
@@ -439,7 +439,7 @@ function SidebarPanel({
 
       <nav
         aria-label="Admin navigation"
-        className="min-h-0 flex-1 overflow-y-auto px-3 py-2 [scrollbar-color:rgba(255,255,255,0.28)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/25 [&::-webkit-scrollbar-track]:bg-transparent"
+        className="min-h-0 flex-1 overflow-y-auto px-3 py-2 [scrollbar-width:thin] [&::-webkit-scrollbar-track]:bg-transparent"
       >
         <RenderNavItems
           items={adminNavItems}
@@ -448,21 +448,21 @@ function SidebarPanel({
         />
       </nav>
 
-      <div className="shrink-0 border-t border-white/10 p-3">
-        <div className="flex items-center gap-3 rounded-lg p-2 text-white transition-colors hover:bg-white/[0.07] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]">
+      <div className="shrink-0 border-t border-[var(--sidebar-border)] p-3">
+        <div className="flex items-center gap-3 rounded-lg p-2 text-[var(--sidebar-text)] transition-colors hover:bg-[var(--sidebar-hover-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/20 text-primary font-medium text-sm">
             {(displayName || "A").charAt(0).toUpperCase()}
           </div>
           <span className="min-w-0">
             <span className="block truncate text-xs font-semibold">{displayName}</span>
-            <span className="block text-[11px] text-white/65">{userRole}</span>
+            <span className="block text-[11px] text-[var(--sidebar-muted)]">{userRole}</span>
           </span>
         </div>
 
         <button
           type="button"
           onClick={handleSignOut}
-          className="mt-1 flex min-h-10 w-full items-center gap-3 rounded-lg px-2 text-sm font-medium text-red-200 transition-colors hover:bg-red-400/10 hover:text-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200"
+          className="mt-1 flex min-h-10 w-full items-center gap-3 rounded-lg px-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/30"
         >
           <LogOut aria-hidden="true" className="h-5 w-5 stroke-[1.7]" />
           <span>Sign out</span>
@@ -470,7 +470,7 @@ function SidebarPanel({
         <Link
           href="/dashboard"
           onClick={onNavigate}
-          className="mt-1 flex min-h-10 w-full items-center gap-3 rounded-lg px-2 text-sm font-medium text-white/80 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]"
+          className="mt-1 flex min-h-10 w-full items-center gap-3 rounded-lg px-2 text-sm font-medium text-[var(--sidebar-text)] transition-colors hover:bg-[var(--sidebar-hover-bg)] hover:text-[var(--sidebar-accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]"
         >
           <Home aria-hidden="true" className="h-5 w-5 stroke-[1.7]" />
           <span>User experience</span>
@@ -500,7 +500,7 @@ export function AdminSidebar({
             type="button"
             onClick={() => onToggle(false)}
             aria-label="Open navigation"
-            className="flex h-16 w-6 items-center justify-center rounded-r-lg bg-[var(--sidebar-bg)] text-white shadow-lg transition-colors hover:bg-[var(--sidebar-active-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]"
+            className="flex h-16 w-6 items-center justify-center rounded-r-lg border border-l-0 border-[var(--sidebar-border)] bg-[var(--sidebar-bg)] text-[var(--sidebar-text)] shadow-sm transition-colors hover:bg-[var(--sidebar-hover-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]"
           >
             <ChevronRight aria-hidden="true" className="h-4 w-4" />
           </button>
@@ -539,7 +539,7 @@ export function AdminSidebar({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={closeMobile}
-              className="fixed inset-0 z-40 bg-slate-950/60 md:hidden"
+              className="fixed inset-0 z-40 bg-black/50 md:hidden"
             />
             <motion.aside
               initial={{ x: "-100%" }}
@@ -553,7 +553,7 @@ export function AdminSidebar({
                 type="button"
                 aria-label="Close navigation"
                 onClick={closeMobile}
-                className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]"
+                className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-lg text-[var(--sidebar-icon)] transition-colors hover:bg-[var(--sidebar-hover-bg)] hover:text-[var(--sidebar-accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-accent)]"
               >
                 <X aria-hidden="true" className="h-4 w-4" />
               </button>

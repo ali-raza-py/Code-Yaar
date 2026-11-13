@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
  */
 
 export const inputClass =
-  "flex h-11 w-full rounded-lg border border-input bg-background px-3.5 py-2 text-sm transition-colors placeholder:text-muted-foreground/40 focus:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60";
+  "flex h-11 w-full rounded-lg border border-input bg-background px-3.5 py-2 text-sm text-foreground transition-[border-color,box-shadow,background-color] duration-200 placeholder:text-muted-foreground/70 focus:border-ring focus:outline-none focus:ring-2 focus:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50";
 
 interface FormFieldProps
   extends Omit<React.InputHTMLAttributes<HTMLInputElement>, "id" | "className"> {

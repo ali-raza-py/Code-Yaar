@@ -62,12 +62,12 @@ export function CourseResumeCard() {
 
   if (state.status === "loading") {
     return (
-      <div className="relative border border-forest-line bg-forest-surface p-5 shadow-[12px_12px_0_var(--forest-shadow-deep)] sm:p-7">
+      <div className="relative rounded-[var(--radius-card)] border border-white/10 bg-white/5 p-5 shadow-[var(--shadow-2)] backdrop-blur-sm sm:p-7">
         <div className="animate-pulse space-y-4">
-          <div className="h-3 w-40 rounded bg-forest-line" />
-          <div className="h-6 w-56 rounded bg-forest-line" />
-          <div className="h-4 w-full rounded bg-forest-line" />
-          <div className="h-4 w-2/3 rounded bg-forest-line" />
+          <div className="h-3 w-40 rounded bg-white/10" />
+          <div className="h-6 w-56 rounded bg-white/10" />
+          <div className="h-4 w-full rounded bg-white/10" />
+          <div className="h-4 w-2/3 rounded bg-white/10" />
         </div>
       </div>
     );
@@ -75,13 +75,13 @@ export function CourseResumeCard() {
 
   if (state.status === "unavailable") {
     return (
-      <div className="relative border border-forest-line bg-forest-surface p-5 shadow-[12px_12px_0_var(--forest-shadow-deep)] sm:p-7">
-        <span className="font-mono text-xs text-mint-soft">LEARNING STATUS</span>
-        <p className="mt-4 text-sm leading-6 text-forest-on-deep">
+      <div className="relative rounded-[var(--radius-card)] border border-white/10 bg-white/5 p-5 text-[var(--color-text-dark-hero)] shadow-[var(--shadow-2)] backdrop-blur-sm sm:p-7">
+        <span className="font-mono text-xs font-semibold tracking-wide text-primary">LEARNING STATUS</span>
+        <p className="mt-4 text-sm leading-6 text-[var(--color-text-dark-muted)]">
           We couldn&apos;t reach the server to load your progress. Browse courses below instead.
         </p>
-        <Link href="/learn" className="focus-ring mt-4 inline-flex items-center rounded font-semibold text-mint hover:text-white">
-          Browse courses <ArrowRight className="ml-1 inline h-4 w-4" />
+        <Link href="/learn" className="focus-ring mt-4 inline-flex items-center gap-1 rounded font-semibold text-primary transition-colors hover:text-cta-hover">
+          Browse courses <ArrowRight className="h-4 w-4" />
         </Link>
       </div>
     );
@@ -95,33 +95,33 @@ export function CourseResumeCard() {
       : "Python Foundations";
 
   return (
-    <div className="relative border border-forest-line bg-forest-surface p-5 shadow-[12px_12px_0_var(--forest-shadow-deep)] sm:p-7">
-      <div className="flex items-center justify-between border-b border-forest-line pb-4">
-        <span className="font-mono text-xs text-mint-soft">
+    <div className="relative rounded-[var(--radius-card)] border border-white/10 bg-white/[0.06] p-5 text-[var(--color-text-dark-hero)] shadow-[var(--shadow-2)] backdrop-blur-sm sm:p-7">
+      <div className="flex items-center justify-between border-b border-white/10 pb-4">
+        <span className="font-mono text-xs font-semibold tracking-wide text-primary">
           {isResume ? "YOUR NEXT SESSION" : "START YOUR FIRST SESSION"}
         </span>
-        <span className="rounded-pill bg-mint px-2.5 py-1 font-mono text-[10px] font-bold text-forest-deep">FREE</span>
+        <span className="rounded-pill bg-primary px-2.5 py-1 font-mono text-[10px] font-bold text-primary-foreground">FREE</span>
       </div>
       <div className="py-7">
-        <p className="font-mono text-xs uppercase tracking-wider text-forest-on-deep-soft">
+        <p className="font-mono text-xs uppercase tracking-wider text-[var(--color-text-dark-muted)]">
           {isResume ? state.enrollment!.course_title : "Featured course"}
         </p>
-        <h2 className="mt-2 text-2xl font-bold">{title}</h2>
-        <p className="mt-3 text-sm leading-6 text-forest-on-deep">
+        <h2 className="mt-2 text-2xl font-semibold text-[var(--color-text-dark-hero)]">{title}</h2>
+        <p className="mt-3 text-sm leading-6 text-[var(--color-text-dark-muted)]">
           Learn the concept, try the example, then write code that passes a real test.
         </p>
       </div>
-      <div className="flex items-center justify-between border-t border-forest-line pt-4 text-sm">
-        <span className="text-forest-on-deep-soft">
+      <div className="flex items-center justify-between gap-4 border-t border-white/10 pt-4 text-sm">
+        <span className="text-[var(--color-text-dark-muted)]">
           {isResume
             ? state.lessonProgress
             : "Sign in to save your progress and earn XP"}
         </span>
         <Link
           href={isResume ? `/learn/${state.enrollment!.course_slug}` : "/courses/python-foundations"}
-          className="focus-ring rounded font-semibold text-mint hover:text-white"
+          className="focus-ring inline-flex items-center gap-1 rounded font-semibold text-primary transition-colors hover:text-cta-hover"
         >
-          {isResume ? "Continue" : "Open course"} <ArrowRight className="ml-1 inline h-4 w-4" />
+          {isResume ? "Continue" : "Open course"} <ArrowRight className="h-4 w-4" />
         </Link>
       </div>
     </div>

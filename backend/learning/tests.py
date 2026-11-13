@@ -896,6 +896,17 @@ class CourseAPITest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['title'], 'Python Foundations')
 
+    def test_retrieve_course_includes_chapters_and_lessons(self):
+        """Course detail must serialize chapters (with prefetched lessons)
+        without raising; regression test for the missing Prefetch import."""
+        response = self.client.get(f'/api/courses/{self.course.slug}/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        chapters = response.data['chapters']
+        self.assertEqual(len(chapters), 1)
+        self.assertEqual(chapters[0]['slug'], 'basics')
+        self.assertEqual(len(chapters[0]['lessons']), 1)
+        self.assertEqual(chapters[0]['lessons'][0]['slug'], 'hello')
+
     def test_list_chapters(self):
         response = self.client.get(f'/api/courses/{self.course.slug}/chapters/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)

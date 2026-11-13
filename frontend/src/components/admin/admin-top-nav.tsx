@@ -11,22 +11,22 @@ export function AdminTopNav({ onMenuClick }: { onMenuClick: () => void }) {
   const displayName = user?.first_name || user?.username || "Admin";
 
   return (
-    <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-4 border-b border-[var(--color-section-border)] bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4 md:px-6 lg:px-8">
+    <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-4 border-b border-border bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:px-6 lg:px-8">
       <button
         type="button"
         onClick={onMenuClick}
         aria-label="Open navigation"
-        className="flex h-10 w-10 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)] md:hidden"
+        className="flex h-10 w-10 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hidden"
       >
         <Menu className="h-5 w-5" />
       </button>
 
-      <div className="flex h-10 flex-1 items-center gap-2 bg-[var(--color-section-light)] rounded-lg px-3 text-sm placeholder:text-muted-foreground md:max-w-md">
+      <div className="flex h-10 flex-1 items-center gap-2 rounded-lg border border-input bg-secondary/40 px-3 text-sm md:max-w-md">
         <Search className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
         <input
           type="search"
           placeholder="Search courses, students, tracks..."
-          className="flex h-full w-full bg-transparent border-none outline-none text-foreground placeholder:text-muted-foreground"
+          className="flex h-full w-full border-none bg-transparent text-foreground outline-none placeholder:text-muted-foreground"
           aria-label="Global search"
         />
       </div>
@@ -36,7 +36,7 @@ export function AdminTopNav({ onMenuClick }: { onMenuClick: () => void }) {
           type="button"
           onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
           aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-          className="flex h-10 w-10 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+          className="flex h-10 w-10 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
         </button>
@@ -44,7 +44,7 @@ export function AdminTopNav({ onMenuClick }: { onMenuClick: () => void }) {
         <button
           type="button"
           aria-label="Notifications"
-          className="relative flex h-10 w-10 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+          className="relative flex h-10 w-10 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <Bell className="h-5 w-5" />
         </button>
@@ -54,14 +54,14 @@ export function AdminTopNav({ onMenuClick }: { onMenuClick: () => void }) {
             type="button"
             aria-label="User menu"
             aria-expanded="false"
-            className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+            className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <Avatar
               src={profile?.avatar}
               name={displayName}
               username={user?.username}
               size={32}
-              className="shrink-0 ring-1 ring-[var(--color-section-border)]"
+              className="shrink-0 ring-1 ring-border"
             />
             <span className="hidden truncate md:block">{displayName}</span>
             <User className="h-4 w-4 md:hidden" aria-hidden="true" />

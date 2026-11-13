@@ -261,27 +261,56 @@ function unwrapList<T>(data: Paginated<T>): T[] {
  * unactionable in the UI, so it becomes an ApiError naming the API base URL.
  * `status: 0` marks it as a transport failure rather than an HTTP status.
  */
+const FETCH_TIMEOUT_MS = 15000;
+const MAX_FETCH_RETRIES = 2;
+const RETRY_BACKOFF_MS = 400;
+
 async function fetchOrThrow(url: string, init: RequestInit = {}): Promise<Response> {
-  const controller = new AbortController();
-  let timedOut = false;
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, 15000);
-  try {
-    return await fetch(url, { ...init, signal: init.signal ?? controller.signal });
-  } catch (caught) {
-    if (timedOut && caught instanceof DOMException && caught.name === 'AbortError') {
-      throw new ApiError(0, `The API request timed out after 15 seconds. Check the server and try again.`);
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt <= MAX_FETCH_RETRIES; attempt++) {
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { ...init, signal: init.signal ?? controller.signal });
+      clearTimeout(timeout);
+      // Retry on transient server errors, but not on client errors (4xx) which
+      // retrying cannot fix.
+      if (res.status >= 500 && attempt < MAX_FETCH_RETRIES) {
+        lastError = res;
+        await new Promise((resolve) => setTimeout(resolve, RETRY_BACKOFF_MS * (attempt + 1)));
+        continue;
+      }
+      return res;
+    } catch (caught) {
+      clearTimeout(timeout);
+      if (caught instanceof DOMException && caught.name === 'AbortError') {
+        if (timedOut) {
+          lastError = new ApiError(0, `The API request timed out after ${FETCH_TIMEOUT_MS / 1000} seconds.`);
+        } else {
+          throw caught;
+        }
+      } else {
+        lastError = caught;
+      }
+      if (attempt < MAX_FETCH_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, RETRY_BACKOFF_MS * (attempt + 1)));
+        continue;
+      }
+    } finally {
+      clearTimeout(timeout);
     }
-    if (caught instanceof DOMException && caught.name === 'AbortError') throw caught;
-    throw new ApiError(
-      0,
-      `Can't reach the API at ${API_BASE}. Is the Django server running? (start both with scripts/dev.ps1)`
-    );
-  } finally {
-    clearTimeout(timeout);
   }
+  if (lastError instanceof Response) {
+    throw await readError(lastError);
+  }
+  throw new ApiError(
+    0,
+    `Can't reach the API at ${API_BASE}. Is the Django server running? (start both with scripts/dev.ps1)`
+  );
 }
 
 let csrfToken: string | null = null;
@@ -488,11 +517,21 @@ async function cachedRequest<T>(
   const pending = execute().finally(() => inFlightRequests.delete(cacheKey));
   inFlightRequests.set(cacheKey, pending);
 
-  const value = await pending;
-  if (ttl > 0) {
-    responseCache.set(cacheKey, { expiresAt: now + ttl, value });
+  try {
+    const value = await pending;
+    if (ttl > 0) {
+      responseCache.set(cacheKey, { expiresAt: now + ttl, value });
+    }
+    return value;
+  } catch (error) {
+    // Stale-while-error: if a transient/transport failure hits and we already
+    // have a cached (even expired) value, serve it instead of surfacing a
+    // "Connection Lost" for data that is merely out of date.
+    if (cached !== undefined) {
+      return cached.value as T;
+    }
+    throw error;
   }
-  return value;
 }
 
 export async function request<T>(

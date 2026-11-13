@@ -40,26 +40,26 @@ const footerLinks = [
 
 export function Footer() {
   return (
-    <footer className="border-t border-[var(--color-section-border)] bg-background">
+    <footer className="border-t border-border bg-background">
       <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:px-8">
         <div className="grid grid-cols-2 gap-8 md:grid-cols-5">
           {/* Brand */}
           <div className="col-span-2">
             <Link
               href="/"
-              className="inline-flex items-center gap-2"
-              aria-label="Code-Yaar Home"
+              className="inline-flex items-center gap-2.5 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              aria-label="Code Yaar Home"
             >
               <div className="relative h-6 w-6">
                 <Image
-                  src="/logo-light.png"
-                  alt="Code-Yaar"
+                  src="/brand/logo-mark.png"
+                  alt="Code Yaar"
                   fill
                   sizes="24px"
                   className="object-contain"
                 />
               </div>
-              <span className="text-sm font-bold tracking-tight">Code-Yaar</span>
+              <span className="text-sm font-semibold tracking-tight text-foreground">Code Yaar</span>
             </Link>
             <p className="mt-3 max-w-xs text-sm leading-relaxed text-muted-foreground">
               Learn to code, build real projects, and prove your skills.
@@ -67,9 +67,9 @@ export function Footer() {
             </p>
 
             {/* Social links */}
-            <div className="mt-4 flex gap-3">
+            <div className="mt-4 flex gap-2.5">
               {[
-                ["Twitter", "https://x.com"],
+                ["X", "https://x.com"],
                 ["GitHub", "https://github.com"],
                 ["LinkedIn", "https://linkedin.com"],
                 ["YouTube", "https://youtube.com"],
@@ -79,7 +79,7 @@ export function Footer() {
                   href={href}
                   target="_blank"
                   rel="noreferrer"
-                  className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-section-light)] text-xs font-medium text-muted-foreground transition-colors hover:bg-foreground hover:text-white"
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-secondary text-xs font-medium text-muted-foreground transition-colors duration-200 hover:border-primary/30 hover:bg-primary hover:text-primary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   aria-label={social}
                 >
                   {social[0]}
@@ -99,7 +99,7 @@ export function Footer() {
                   <li key={link.label}>
                     <Link
                       href={link.href}
-                      className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                      className="text-sm text-muted-foreground transition-colors duration-200 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
                     >
                       {link.label}
                     </Link>
@@ -111,11 +111,11 @@ export function Footer() {
         </div>
 
         {/* Bottom */}
-        <div className="mt-10 flex flex-col items-center justify-between gap-3 border-t border-[var(--color-section-border)] pt-6 sm:flex-row">
-          <p className="text-xs text-muted-foreground/60">
-            &copy; {new Date().getFullYear()} Code-Yaar. All rights reserved.
+        <div className="mt-10 flex flex-col items-center justify-between gap-3 border-t border-border pt-6 sm:flex-row">
+          <p className="text-xs text-muted-foreground">
+            &copy; {new Date().getFullYear()} Code Yaar. All rights reserved.
           </p>
-          <p className="text-xs text-muted-foreground/40">
+          <p className="text-xs text-muted-foreground/70">
             Think. Build. Evolve.
           </p>
         </div>

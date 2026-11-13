@@ -11,7 +11,7 @@ const dateFormatter = new Intl.DateTimeFormat(undefined, {
   day: "numeric",
   year: "numeric",
 });
-const colors = ["#ebedf0", "#9be9a8", "#40c463", "#30a14e", "#216e39"];
+const levels = [0, 1, 2, 3, 4] as const;
 
 function dayLabel(day: ContributionDay) {
   const activity = `${day.total_activities} learning activit${day.total_activities === 1 ? "y" : "ies"}`;
@@ -49,13 +49,12 @@ export function ContributionGraph({
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground" aria-label="Activity intensity legend">
           <span>Less</span>
-          {colors.map((color, index) => (
+          {levels.map((level) => (
             <span
-              key={color}
-              className="progress-cell h-3.5 w-3.5 rounded-sm border border-black/5"
-              data-level={index}
-              style={{ backgroundColor: color }}
-              aria-label={`Intensity ${index}`}
+              key={level}
+              className="progress-cell h-3.5 w-3.5 rounded-sm border border-border/60"
+              data-level={level}
+              aria-label={`Intensity ${level}`}
             />
           ))}
           <span>More</span>
@@ -92,11 +91,11 @@ export function ContributionGraph({
                     <button
                       key={day.date}
                       type="button"
-                      className="progress-cell h-3.5 w-3.5 rounded-sm border border-black/5 transition-transform hover:scale-125 focus-visible:z-10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                      className="progress-cell h-3.5 w-3.5 rounded-sm border border-border/60 transition-[transform,box-shadow] duration-150 hover:scale-125 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-card motion-reduce:transition-none motion-reduce:hover:scale-100"
                       data-level={day.intensity}
-                      style={{ backgroundColor: colors[day.intensity] }}
                       title={dayLabel(day)}
                       aria-label={dayLabel(day)}
+                      aria-pressed={selectedDate === day.date}
                       onClick={() => setSelectedDate(day.date)}
                     />
                   ) : (
@@ -110,8 +109,8 @@ export function ContributionGraph({
       </div>
 
       {selected && (
-        <div className="mt-4 rounded-lg border border-border bg-secondary p-3 text-sm" role="status">
-          <p className="font-semibold">{dayLabel(selected)}</p>
+        <div className="mt-4 rounded-lg border border-border bg-secondary/50 p-3 text-sm" role="status">
+          <p className="font-semibold text-foreground">{dayLabel(selected)}</p>
           <p className="mt-1 text-xs text-muted-foreground">
             {selected.lessons_completed} lessons · {selected.practicals_completed} practicals · {selected.quizzes_completed} quizzes
           </p>
