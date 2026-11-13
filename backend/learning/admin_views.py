@@ -211,9 +211,12 @@ def admin_top_courses(request):
                 'id': course.id,
                 'title': course.title,
                 'track': course.track.title,
-            'enrollments': course.enrollment_count,
-            'completionRate': completion_rate,
-        })
+                'enrollments': course.enrollment_count,
+                'completionRate': completion_rate,
+            })
+    except DatabaseError:
+        logger.exception('admin-top-courses database failure')
+        return Response({'detail': 'Database temporarily unavailable.'}, status=503)
 
     cache.set(cache_key, result, 15)
     return Response(result)
