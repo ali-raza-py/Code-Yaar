@@ -946,8 +946,20 @@ class CourseAPITest(TestCase):
         self.assertEqual(response.data['lesson_count'], 1)
 
     def test_final_assessment_chapter_is_flagged(self):
+        fa_course = Course.objects.create(
+            slug='fa-course', title='Final Assessment Course',
+            description='FA', track=self.track,
+            difficulty='beginner', language='python',
+            is_published=True, is_active=True,
+        )
+        regular = Chapter.objects.create(
+            course=fa_course, title='Regular chapter', slug='regular-chapter', order=1,
+        )
+        Lesson.objects.create(
+            chapter=regular, title='Regular lesson', slug='regular-lesson', order=1,
+        )
         final = Chapter.objects.create(
-            course=self.course, title='Final assessment', slug='final-assessment', order=2,
+            course=fa_course, title='Final assessment', slug='final-assessment', order=2,
         )
         final_lesson = Lesson.objects.create(
             chapter=final, title='Course quiz', slug='course-quiz', order=1,
@@ -958,9 +970,10 @@ class CourseAPITest(TestCase):
             language='none', is_final_assessment=True,
         )
 
-        response = self.client.get(f'/api/courses/{self.course.slug}/')
+        response = self.client.get(f'/api/courses/{fa_course.slug}/')
         chapters = response.data['chapters']
         # Final assessment is last and clearly marked for the sidebar.
+        self.assertEqual(len(chapters), 2)
         self.assertEqual(chapters[-1]['slug'], 'final-assessment')
         self.assertTrue(chapters[-1]['is_final_assessment'])
         self.assertFalse(chapters[0]['is_final_assessment'])

@@ -1,7 +1,6 @@
 import { fetchCourseDetailServer } from '@/lib/server-api';
 import { CourseDetailClient } from '@/components/learning/course-detail-client';
-import { NotFoundError } from '@/components/learning/workspace/error-states';
-import { CourseSkeleton } from '@/components/learning/course-skeleton';
+import { NotFoundError, ServerError } from '@/components/learning/workspace/error-states';
 
 export default async function CourseLandingPage({
   params,
@@ -11,16 +10,26 @@ export default async function CourseLandingPage({
   const { slug } = await params;
 
   let course: any = null;
-  let error: Error | null = null;
+  let serverError: Error | null = null;
+  let notFound = false;
 
   try {
     course = await fetchCourseDetailServer(slug);
   } catch (err) {
-    error = err instanceof Error ? err : new Error('Failed to load course');
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('returned 404')) {
+      notFound = true;
+    } else {
+      serverError = err instanceof Error ? err : new Error('Failed to load course');
+    }
   }
 
-  if (error || !course) {
+  if (notFound || !course) {
     return <NotFoundError resource="Course" />;
+  }
+
+  if (serverError) {
+    return <ServerError />;
   }
 
   return <CourseDetailClient course={course} />;

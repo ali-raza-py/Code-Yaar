@@ -853,7 +853,7 @@ export const courses = {
     if (params?.difficulty) query.set('difficulty', params.difficulty);
     if (params?.language) query.set('language', params.language);
     if (params?.search) query.set('search', params.search);
-    query.set('page_size', String(params?.page_size ?? 200));
+    query.set('page_size', String(params?.page_size ?? 20));
     const qs = query.toString();
     const data = await request<Paginated<Course>>(`/courses/${qs ? `?${qs}` : ''}`, {
       cachePolicy: 'courses',

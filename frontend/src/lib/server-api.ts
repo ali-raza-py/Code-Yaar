@@ -13,17 +13,56 @@
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
 
-async function serverFetch(path: string, { cache = 'force-cache' }: { cache?: 'force-cache' | 'no-store' } = {}): Promise<Response> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    cache,
-    headers: {
-      'Accept': 'application/json',
-    },
-  });
-  if (!res.ok) {
-    throw new Error(`API ${path} returned ${res.status}`);
+const SERVER_FETCH_TIMEOUT_MS = 20000;
+const SERVER_FETCH_MAX_RETRIES = 2;
+const SERVER_FETCH_BACKOFF_MS = 500;
+
+async function serverFetch(
+  path: string,
+  { cache = 'force-cache' }: { cache?: 'force-cache' | 'no-store' } = {}
+): Promise<Response> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt <= SERVER_FETCH_MAX_RETRIES; attempt++) {
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, SERVER_FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(`${API_BASE}${path}`, {
+        cache,
+        signal: controller.signal,
+        headers: {
+          'Accept': 'application/json',
+        },
+      });
+      clearTimeout(timeout);
+      // Retry on transient server errors, but not on client errors (4xx)
+      if (res.status >= 500 && attempt < SERVER_FETCH_MAX_RETRIES) {
+        lastError = res;
+        await new Promise((resolve) => setTimeout(resolve, SERVER_FETCH_BACKOFF_MS * (attempt + 1)));
+        continue;
+      }
+      return res;
+    } catch (caught) {
+      clearTimeout(timeout);
+      if (caught instanceof DOMException && caught.name === 'AbortError') {
+        lastError = timedOut
+          ? new Error(`API ${path} timed out after ${SERVER_FETCH_TIMEOUT_MS / 1000}s`)
+          : caught;
+      } else {
+        lastError = caught;
+      }
+      if (attempt < SERVER_FETCH_MAX_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, SERVER_FETCH_BACKOFF_MS * (attempt + 1)));
+        continue;
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
   }
-  return res;
+  throw lastError ?? new Error(`API ${path} failed`);
 }
 
 export async function fetchCoursesServer(params?: {

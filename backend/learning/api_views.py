@@ -6,6 +6,7 @@ from rest_framework.decorators import api_view, permission_classes, action, thro
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
+from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -1068,7 +1069,6 @@ class LessonViewSet(viewsets.ReadOnlyModelViewSet):
             cached = cache.get(key)
             if cached is not None:
                 # Rebuild a lightweight object from cached data for permission checks.
-                from django.shortcuts import get_object_or_404
                 obj = get_object_or_404(
                     self.filter_queryset(self.get_queryset()), slug=cached.get('slug', '')
                 ) if cached.get('slug') else None
