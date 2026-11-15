@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { useAuth } from '@/hooks/use-auth';
 import { courses as coursesApi } from '@/lib/api';
@@ -12,6 +13,7 @@ interface EnrollButtonProps {
 }
 
 export function EnrollButton({ course, user }: EnrollButtonProps) {
+  const router = useRouter();
   const [enrolling, setEnrolling] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -20,6 +22,10 @@ export function EnrollButton({ course, user }: EnrollButtonProps) {
     setNotice(null);
     try {
       await coursesApi.enroll(course.slug);
+      // Enrollment succeeded (or user was already enrolled). Take them to the
+      // course workspace instead of leaving them on a stale "Enroll & Start"
+      // button that does nothing on a second click.
+      router.push(`/learn/${course.slug}`);
     } catch (reason) {
       setNotice(reason instanceof Error ? reason.message : 'Enrollment failed. Please try again.');
     } finally {
