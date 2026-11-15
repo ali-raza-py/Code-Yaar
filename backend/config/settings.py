@@ -447,17 +447,16 @@ SIMPLE_JWT = {
 # credentialed requests from the Vercel frontend to the EthioDeploy backend.
 # Re-validated by a CSRF double-submit check on every cookie-based endpoint
 # (`/auth/token/refresh/`, `/auth/logout/`).
+# SameSite=None additionally requires Secure=True, which is on by default in
+# production (AUTH_REFRESH_COOKIE_SECURE).
 AUTH_REFRESH_COOKIE_NAME = os.getenv('AUTH_REFRESH_COOKIE_NAME', 'cy_refresh')
 AUTH_REFRESH_COOKIE_PATH = os.getenv('AUTH_REFRESH_COOKIE_PATH', '/')
 AUTH_REFRESH_COOKIE_DOMAIN = os.getenv('AUTH_REFRESH_COOKIE_DOMAIN') or None
-AUTH_REFRESH_COOKIE_SAMESITE = os.getenv('AUTH_REFRESH_COOKIE_SAMESITE', 'Lax')
-# In production (cross-site Vercel frontend -> EthioDeploy backend) this MUST
-# be set to `None` via the deployment environment, otherwise browsers withhold
-# the HttpOnly refresh cookie on credentialed cross-site fetches and token
-# refresh -- and therefore session restore after a page refresh -- silently
-# fails. SameSite=None additionally requires Secure=True, which is on by
-# default in production (AUTH_REFRESH_COOKIE_SECURE).
-# AUTH_REFRESH_COOKIE_SAMESITE=None
+AUTH_REFRESH_COOKIE_SAMESITE = os.getenv(
+    'AUTH_REFRESH_COOKIE_SAMESITE', 'Lax' if DEBUG else 'None'
+)
+# Override with AUTH_REFRESH_COOKIE_SAMESITE=None in the production deployment
+# environment only if you intentionally want Lax (e.g. same-site frontend/API).
 AUTH_REFRESH_COOKIE_SECURE = os.getenv(
     'AUTH_REFRESH_COOKIE_SECURE', 'False' if DEBUG else 'True'
 ) == 'True'

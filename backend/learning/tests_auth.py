@@ -138,6 +138,7 @@ class AuthAPITestCase(TransactionTestCase):
 
 
 class RegistrationTests(AuthAPITestCase):
+    @override_settings(AUTH_REFRESH_COOKIE_SAMESITE='Lax')
     def test_registration_creates_a_student_account(self):
         response = self.signed_in()
 
