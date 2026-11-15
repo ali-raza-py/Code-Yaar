@@ -1763,3 +1763,190 @@ class LearningTracksAPITest(TestCase):
             self.board.delete()
         # Courses (and their enrollment chains) survive untouched.
         self.assertEqual(self.board.courses.count(), 3)
+
+
+class CourseCatalogAPITest(TestCase):
+    """Regression tests for the course listing, detail and exercise pipeline.
+
+    Covers the production incident: course list pagination (Problem A),
+    course detail by slug (Problem B) and the lesson→chapter→course
+    exercise hierarchy (Problem C).
+    """
+
+    def setUp(self):
+        # Clear the shared in-memory cache so stale course-list entries from
+        # earlier tests (the list view caches per query string for 600s) do not
+        # leak into these tests and flip counts.
+        cache.clear()
+        self.client = APIClient()
+        self.track = CareerTrack.objects.create(
+            slug='computer-science', title='Computer Science',
+            description='CS track', is_published=True, is_active=True,
+        )
+        self.other = CareerTrack.objects.create(
+            slug='data', title='Data', description='Data track',
+            is_published=True, is_active=True,
+        )
+
+        # 5 published courses + 1 draft course (draft must stay hidden).
+        self.published = []
+        for i in range(5):
+            c = Course.objects.create(
+                slug=f'course-{i}', title=f'Course {i}',
+                description=f'Desc {i}', track=self.track,
+                difficulty='beginner', language='python',
+                is_published=True, is_active=True, order=i,
+            )
+            self.published.append(c)
+        self.draft = Course.objects.create(
+            slug='draft-course', title='Draft Course',
+            description='Not visible yet', track=self.track,
+            difficulty='beginner', language='python',
+            is_published=False, is_active=True,
+        )
+
+        # course[0]: 1 chapter, 2 lessons; lesson A has 3 exercises, lesson B none.
+        self.chapter = Chapter.objects.create(
+            course=self.published[0], title='Chapter 1', slug='chapter-1', order=1,
+        )
+        self.lesson_a = Lesson.objects.create(
+            chapter=self.chapter, title='Lesson A', slug='lesson-a',
+            order=1, xp_reward=50,
+        )
+        self.lesson_b = Lesson.objects.create(
+            chapter=self.chapter, title='Lesson B', slug='lesson-b',
+            order=2, xp_reward=0,
+        )
+        for i in range(3):
+            Exercise.objects.create(
+                lesson=self.lesson_a, title=f'Exercise {i}', slug=f'ex-{i}',
+                exercise_type='code', instructions='print("hi")',
+                starter_code='# code\n', solution_code='print("hi")',
+                language='python', xp_reward=10, order=i + 1,
+            )
+
+    # ─── Problem A: course listing + pagination ───
+
+    def test_published_courses_are_counted_and_draft_hidden(self):
+        response = self.client.get('/api/courses/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 5)
+        self.assertEqual(len(response.data['results']), 5)
+        slugs = [c['slug'] for c in response.data['results']]
+        self.assertNotIn(self.draft.slug, slugs)
+        for c in self.published:
+            self.assertIn(c.slug, slugs)
+
+    def test_pagination_returns_metadata_and_subsequent_pages(self):
+        page1 = self.client.get('/api/courses/?page_size=2')
+        self.assertEqual(page1.status_code, status.HTTP_200_OK)
+        self.assertEqual(page1.data['count'], 5)
+        self.assertEqual(len(page1.data['results']), 2)
+        self.assertIsNotNone(page1.data['next'])
+        self.assertIsNone(page1.data['previous'])
+
+        page2 = self.client.get(page1.data['next'])
+        self.assertEqual(page2.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(page2.data['results']), 2)
+        self.assertIsNotNone(page2.data['next'])
+        self.assertIsNotNone(page2.data['previous'])
+
+        page3 = self.client.get(page2.data['next'])
+        self.assertEqual(page3.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(page3.data['results']), 1)
+        self.assertIsNone(page3.data['next'])
+
+    def test_course_list_filters(self):
+        response = self.client.get(f'/api/courses/?track={self.track.slug}')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 5)
+
+        response = self.client.get('/api/courses/?track=data')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 0)
+
+        response = self.client.get('/api/courses/?search=Course 0')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['slug'], 'course-0')
+
+    def test_language_and_difficulty_filters(self):
+        response = self.client.get('/api/courses/?language=python')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 5)
+
+        response = self.client.get('/api/courses/?difficulty=beginner')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 5)
+
+        response = self.client.get('/api/courses/?difficulty=advanced')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 0)
+
+    # ─── Problem B: course detail ───
+
+    def test_published_course_opens_by_slug(self):
+        response = self.client.get(f'/api/courses/{self.published[0].slug}/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['slug'], self.published[0].slug)
+        self.assertEqual(response.data['title'], self.published[0].title)
+        self.assertEqual(response.data['track_title'], self.track.title)
+
+    def test_course_detail_includes_chapters_and_lessons(self):
+        response = self.client.get(f'/api/courses/{self.published[0].slug}/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        chapters = response.data['chapters']
+        self.assertEqual(len(chapters), 1)
+        self.assertEqual(chapters[0]['slug'], self.chapter.slug)
+        lessons = chapters[0]['lessons']
+        self.assertEqual(len(lessons), 2)
+        lesson_slugs = [l['slug'] for l in lessons]
+        self.assertIn(self.lesson_a.slug, lesson_slugs)
+        self.assertIn(self.lesson_b.slug, lesson_slugs)
+
+    def test_invalid_course_slug_returns_404(self):
+        response = self.client.get('/api/courses/does-not-exist/')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_draft_course_detail_returns_404(self):
+        response = self.client.get(f'/api/courses/{self.draft.slug}/')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    # ─── Problem C: exercise hierarchy ───
+
+    def test_exercises_belong_to_correct_lesson_chapter_course(self):
+        # Lesson detail carries chapter_title + course_title plus its exercises,
+        # mirroring the frontend lesson reader pipeline.
+        response = self.client.get(
+            f'/api/courses/{self.published[0].slug}/lessons/{self.lesson_a.slug}/'
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['course_title'], self.published[0].title)
+        self.assertEqual(response.data['chapter_title'], self.chapter.title)
+        exercises = response.data['exercises']
+        self.assertEqual(len(exercises), 3)
+        # The lesson-scoped exercise list endpoint confirms the same set.
+        listed = self.client.get(f'/api/lessons/{self.lesson_a.id}/exercises/')
+        self.assertEqual(listed.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(listed.data['results']), 3)
+
+    def test_empty_lesson_returns_no_exercises(self):
+        response = self.client.get(f'/api/lessons/{self.lesson_b.id}/exercises/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 0)
+        self.assertEqual(response.data['results'], [])
+
+    def test_exercise_pagination(self):
+        page1 = self.client.get(f'/api/lessons/{self.lesson_a.id}/exercises/?page_size=1')
+        self.assertEqual(page1.status_code, status.HTTP_200_OK)
+        self.assertEqual(page1.data['count'], 3)
+        self.assertEqual(len(page1.data['results']), 1)
+        self.assertIsNotNone(page1.data['next'])
+
+        page2 = self.client.get(page1.data['next'])
+        self.assertEqual(len(page2.data['results']), 1)
+        self.assertIsNotNone(page2.data['next'])
+
+        page3 = self.client.get(page2.data['next'])
+        self.assertEqual(len(page3.data['results']), 1)
+        self.assertIsNone(page3.data['next'])

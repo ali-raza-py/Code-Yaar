@@ -853,12 +853,15 @@ export const courses = {
     if (params?.difficulty) query.set('difficulty', params.difficulty);
     if (params?.language) query.set('language', params.language);
     if (params?.search) query.set('search', params.search);
-    query.set('page_size', String(params?.page_size ?? 20));
+    query.set('page_size', String(params?.page_size ?? 100));
     const qs = query.toString();
-    const data = await request<Paginated<Course>>(`/courses/${qs ? `?${qs}` : ''}`, {
+    // DRF paginates list endpoints globally ({ count, next, previous, results }).
+    // Consume every page so the full eligible catalogue is returned instead of
+    // stopping at the first page (regression: page_size was reduced 200 -> 20
+    // and pagination was never followed).
+    return fetchAllPages<Course>(`/courses/${qs ? `?${qs}` : ''}`, {
       cachePolicy: 'courses',
     });
-    return unwrapList(data);
   },
 
   detail: (slug: string) =>
