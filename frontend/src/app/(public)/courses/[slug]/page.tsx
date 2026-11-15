@@ -25,12 +25,12 @@ export default async function CourseLandingPage({
     }
   }
 
-  if (notFound || !course) {
-    return <NotFoundError resource="Course" />;
-  }
-
   if (serverError) {
     return <ServerError />;
+  }
+
+  if (notFound || !course) {
+    return <NotFoundError resource="Course" />;
   }
 
   return <CourseDetailClient course={course} />;
