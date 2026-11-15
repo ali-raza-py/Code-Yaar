@@ -701,16 +701,20 @@ class CourseDetailSerializer(serializers.ModelSerializer):
         # Sorted by content order so chapters follow the intended path and
         # the final assessment always comes last. Lessons arrive through one
         # prefetch so the course map costs a single query, not one per chapter.
-        chapters = Chapter.objects.filter(
-            course=obj, is_active=True,
-        ).order_by('order', 'id').prefetch_related(
-            Prefetch(
-                'lessons',
-                queryset=Lesson.objects.filter(is_active=True).order_by(
-                    'chapter_id', 'order'
+        prefetched = getattr(obj, '_prefetched_objects_cache', None)
+        if prefetched is not None and 'chapters' in prefetched:
+            chapters = prefetched['chapters']
+        else:
+            chapters = Chapter.objects.filter(
+                course=obj, is_active=True,
+            ).order_by('order', 'id').prefetch_related(
+                Prefetch(
+                    'lessons',
+                    queryset=Lesson.objects.filter(is_active=True).order_by(
+                        'chapter_id', 'order'
+                    ),
                 ),
-            ),
-        )
+            )
         return ChapterListSerializer(chapters, many=True, context=self.context).data
 
     def _stats(self, obj):

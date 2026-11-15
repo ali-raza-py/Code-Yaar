@@ -31,7 +31,7 @@ function LearnContent() {
 
   const load = async () => {
     try {
-      const data = await coursesApi.list();
+      const data = await coursesApi.list({ page_size: 50, singlePage: true });
       setCourses(data);
       setError(false);
     } catch {

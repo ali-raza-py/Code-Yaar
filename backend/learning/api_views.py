@@ -864,6 +864,32 @@ class CourseViewSet(viewsets.ReadOnlyModelViewSet):
         # counts, XP, hours) are read for every card, so load them with the
         # courses instead of one query per field per row.
         qs = super().get_queryset().select_related('track').with_catalogue_stats()
+        # For the detail page, prefetch the full chapter→lesson→exercise tree
+        # so the serializer reads from memory instead of re-querying per course.
+        if self.action == 'retrieve':
+            qs = qs.prefetch_related(
+                Prefetch(
+                    'chapters',
+                    queryset=Chapter.objects.filter(is_active=True)
+                    .order_by('order', 'id')
+                    .prefetch_related(
+                        Prefetch(
+                            'lessons',
+                            queryset=Lesson.objects.filter(is_active=True)
+                            .defer('content_body')
+                            .order_by('chapter_id', 'order')
+                            .prefetch_related(
+                                Prefetch(
+                                    'exercises',
+                                    queryset=Exercise.objects.filter(is_active=True)
+                                    .defer('solution_code', 'starter_code')
+                                    .order_by('order'),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            )
         track = self.request.query_params.get('track')
         difficulty = self.request.query_params.get('difficulty')
         language = self.request.query_params.get('language')
@@ -1280,11 +1306,13 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
 
         prior_count = ExerciseAttempt.objects.filter(
             user=request.user, exercise=exercise
-        ).count()
-        already_solved = ExerciseAttempt.objects.filter(
-            user=request.user, exercise=exercise, status='correct'
-        ).exists()
-        if (exercise.max_attempts > 0 and prior_count >= exercise.max_attempts
+        ).aggregate(
+            prior_count=Count('pk'),
+            already_solved=Count('pk', filter=Q(status='correct')),
+        )
+        prior_count_val = prior_count['prior_count']
+        already_solved = prior_count['already_solved'] > 0
+        if (exercise.max_attempts > 0 and prior_count_val >= exercise.max_attempts
                 and not already_solved):
             return Response(
                 {'detail': 'Attempt limit reached for this exercise.'},
@@ -1308,7 +1336,7 @@ class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
                 feedback=result.get('feedback', ''),
                 test_results=result.get('test_results', []),
                 time_spent_seconds=time_spent,
-                attempt_number=prior_count + 1,
+                attempt_number=prior_count_val + 1,
             )
 
             # If correct, award XP and update progress; auto-enroll so progress
