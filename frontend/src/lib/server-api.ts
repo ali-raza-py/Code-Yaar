@@ -17,6 +17,24 @@ const SERVER_FETCH_TIMEOUT_MS = 20000;
 const SERVER_FETCH_MAX_RETRIES = 2;
 const SERVER_FETCH_BACKOFF_MS = 500;
 
+interface ServerError extends Error {
+  status: number;
+}
+
+async function readErrorBody(res: Response): Promise<ServerError> {
+  let message = `API request failed with status ${res.status}`;
+  try {
+    const body = await res.json();
+    if (body?.detail) message = `${res.status} ${body.detail}`;
+    else if (body?.message) message = `${res.status} ${body.message}`;
+  } catch {
+    // Ignore JSON parse errors; use the status-based message.
+  }
+  const err = new Error(message) as ServerError;
+  err.status = res.status;
+  return err;
+}
+
 async function serverFetch(
   path: string,
   { cache = 'force-cache' }: { cache?: 'force-cache' | 'no-store' } = {}
@@ -43,6 +61,12 @@ async function serverFetch(
         lastError = res;
         await new Promise((resolve) => setTimeout(resolve, SERVER_FETCH_BACKOFF_MS * (attempt + 1)));
         continue;
+      }
+      // Throw on any non-ok response (including 404) so callers can distinguish
+      // "not found" from "server error" vs "network error".
+      if (!res.ok) {
+        lastError = await readErrorBody(res);
+        throw lastError;
       }
       return res;
     } catch (caught) {

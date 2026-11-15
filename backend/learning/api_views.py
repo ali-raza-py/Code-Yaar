@@ -720,10 +720,19 @@ class CareerTrackViewSet(viewsets.ReadOnlyModelViewSet):
     search_fields = ['title', 'description']
     ordering_fields = ['order', 'title', 'estimated_hours']
 
+    # Cache TTLs (seconds): track catalogue is stable; invalidated via signals
+    # when a course or track is published/edited.
+    TRACK_LIST_TTL = 600
+
     def get_serializer_class(self):
         if self.action == 'list':
             return CareerTrackListSerializer
         return CareerTrackSerializer
+
+    def _track_list_cache_key(self):
+        from django.core.cache import cache as _cache
+        qs = self.request.META.get('QUERY_STRING', '')
+        return f'cy:track:list:{self.request.user.pk if self.request.user.is_authenticated else "anon"}:{qs}'
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -734,21 +743,6 @@ class CareerTrackViewSet(viewsets.ReadOnlyModelViewSet):
         # destination, so they never reach the learner-facing list.
         qs = qs.filter(courses__is_active=True, courses__is_published=True).distinct()
         if self.action == 'list':
-            visible_lessons = Lesson.objects.filter(
-                chapter__course__track=OuterRef('pk'),
-                chapter__course__is_active=True,
-                chapter__course__is_published=True,
-                chapter__is_active=True,
-                is_active=True,
-            )
-            visible_exercises = Exercise.objects.filter(
-                lesson__chapter__course__track=OuterRef('pk'),
-                lesson__chapter__course__is_active=True,
-                lesson__chapter__course__is_published=True,
-                lesson__chapter__is_active=True,
-                lesson__is_active=True,
-                is_active=True,
-            )
             qs = qs.annotate(
                 published_course_count=Count(
                     'courses',
@@ -765,27 +759,24 @@ class CareerTrackViewSet(viewsets.ReadOnlyModelViewSet):
                     ),
                     distinct=True,
                 ),
-                published_lesson_xp=Coalesce(
-                    Subquery(
-                        visible_lessons.values('chapter__course__track')
-                        .annotate(total=Sum('xp_reward'))
-                        .values('total')[:1]
-                    ),
-                    Value(0),
-                ),
-                published_exercise_xp=Coalesce(
-                    Subquery(
-                        visible_exercises.values('lesson__chapter__course__track')
-                        .annotate(total=Sum('xp_reward'))
-                        .values('total')[:1]
-                    ),
-                    Value(0),
-                ),
             )
             # Aggregate annotations descope the model's Meta ordering, which
             # would page the list nondeterministically; restate it explicitly.
             qs = qs.order_by('order', 'title')
         return qs
+
+    def list(self, request, *args, **kwargs):
+        # Anonymous reads hit the cache; authenticated responses include
+        # per-user enrolment/progress data and must not be shared.
+        if not request.user.is_authenticated:
+            key = self._track_list_cache_key()
+            cached = cache.get(key)
+            if cached is not None:
+                return Response(cached)
+        response = super().list(request, *args, **kwargs)
+        if not request.user.is_authenticated and response.status_code == 200:
+            cache.set(self._track_list_cache_key(), response.data, self.TRACK_LIST_TTL)
+        return response
 
     @action(
         detail=True,
