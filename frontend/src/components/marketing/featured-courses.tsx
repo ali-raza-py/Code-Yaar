@@ -16,7 +16,7 @@ export function FeaturedCourses() {
 
   useEffect(() => {
     let cancelled = false;
-    coursesApi.list()
+    coursesApi.list({ page_size: 3, singlePage: true })
       .then((data) => { if (!cancelled) setCourses(data); })
       .catch(() => { if (!cancelled) setCourses([]); });
     return () => { cancelled = true; };

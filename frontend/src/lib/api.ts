@@ -847,7 +847,7 @@ export async function restoreSession(): Promise<MePayload | null> {
 // ─── Course Endpoints ───────────────────────────────────────────────────────
 
 export const courses = {
-  list: async (params?: { track?: string; difficulty?: string; language?: string; search?: string; page_size?: number }): Promise<Course[]> => {
+  list: async (params?: { track?: string; difficulty?: string; language?: string; search?: string; page_size?: number; singlePage?: boolean }): Promise<Course[]> => {
     const query = new URLSearchParams();
     if (params?.track) query.set('track', params.track);
     if (params?.difficulty) query.set('difficulty', params.difficulty);
@@ -858,7 +858,14 @@ export const courses = {
     // DRF paginates list endpoints globally ({ count, next, previous, results }).
     // Consume every page so the full eligible catalogue is returned instead of
     // stopping at the first page (regression: page_size was reduced 200 -> 20
-    // and pagination was never followed).
+    // and pagination was never followed). Components that only need page 1
+    // (e.g. featured courses) set singlePage to avoid fetching the full catalog.
+    if (params?.singlePage) {
+      const data = await request<Paginated<Course>>(`/courses/${qs ? `?${qs}` : ''}`, {
+        cachePolicy: 'courses',
+      });
+      return unwrapList(data);
+    }
     return fetchAllPages<Course>(`/courses/${qs ? `?${qs}` : ''}`, {
       cachePolicy: 'courses',
     });
