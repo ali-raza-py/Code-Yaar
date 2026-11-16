@@ -11,7 +11,6 @@ import { queryDefaults } from '@/lib/query-client';
 import { NetworkError } from '@/components/learning/workspace/error-states';
 import { CourseSkeleton } from '@/components/learning/course-skeleton';
 
-export const revalidate = 600;
 
 const CourseRow = React.memo(function CourseRow({ course }: { course: Course }) {
   return (
