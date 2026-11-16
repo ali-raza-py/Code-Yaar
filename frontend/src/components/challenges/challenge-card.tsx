@@ -1,4 +1,5 @@
-import Link from "next/link";
+import React from 'react';
+﻿import Link from "next/link";
 import { ArrowUpRight, Circle, CheckCircle2, Clock3 } from "lucide-react";
 import type { Challenge } from "@/types";
 import { DifficultyPill } from "@/components/ui/difficulty-pill";
@@ -8,7 +9,7 @@ interface ChallengeCardProps {
   solved?: boolean;
 }
 
-export function ChallengeCard({ challenge, solved: solvedProp }: ChallengeCardProps) {
+const ChallengeCardInner = function ChallengeCard({ challenge, solved: solvedProp }: ChallengeCardProps) {
   const solved = solvedProp ?? Boolean(challenge.solved);
   const attempts = challenge.attempts ?? 0;
   const inProgress = !solved && attempts > 0;
@@ -38,4 +39,6 @@ export function ChallengeCard({ challenge, solved: solvedProp }: ChallengeCardPr
       </div>
     </article>
   );
-}
+};
+
+export const ChallengeCard = React.memo(ChallengeCardInner);

@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import Image from 'next/image';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { ArrowRight, Award, CheckCircle2, Clock, BookOpen, Target } from 'lucide-react';
 import {
@@ -25,7 +26,7 @@ import {
  * course page; enrollment and the lesson workspace stay inside the app.
  */
 
-function CourseRow({ course, index, signedIn }: { course: Course; index: number; signedIn: boolean }) {
+const CourseRow = React.memo(function CourseRow({ course, index, signedIn }: { course: Course; index: number; signedIn: boolean }) {
   const inProgress = course.enrolled && (course.progress_percentage ?? 0) > 0;
   const done = (course.progress_percentage ?? 0) >= 100;
   // Signed-in learners jump straight into the workspace; visitors get the
@@ -88,7 +89,7 @@ function CourseRow({ course, index, signedIn }: { course: Course; index: number;
       </Link>
     </li>
   );
-}
+});
 
 /** A board class: its published theory course(s) plus any matching practicals. */
 interface BoardClass {
@@ -289,8 +290,14 @@ export default function TrackDetailPage() {
 
       <header className="overflow-hidden rounded-card border border-border bg-card">
         {track.cover_url && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={track.cover_url} alt="" className="h-40 w-full object-cover sm:h-52" />
+          <Image
+            src={track.cover_url}
+            alt=""
+            fill
+            sizes="(max-width: 768px) 100vw, 768px"
+            className="h-40 w-full object-cover sm:h-52"
+            priority={false}
+          />
         )}
         <div className="p-6 sm:p-8">
           <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-wider">

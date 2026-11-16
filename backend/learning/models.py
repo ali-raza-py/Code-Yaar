@@ -134,6 +134,7 @@ class UserProfile(models.Model):
         ordering = ['-xp_points']
         indexes = [
             models.Index(fields=['-xp_points'], name='profile_xp_points_idx'),
+            models.Index(fields=['-xp_points', 'streak_days'], name='profile_xp_points_streak_days'),
         ]
 
 
@@ -194,6 +195,12 @@ class CareerTrack(models.Model):
 
     class Meta:
         ordering = ['order', 'title']
+        indexes = [
+            models.Index(fields=['is_active', 'is_published', 'order'], name='track_published_active_order'),
+            models.Index(fields=['category'], name='track_category'),
+            models.Index(fields=['difficulty'], name='track_difficulty'),
+            models.Index(fields=['is_active', 'is_published', 'category'], name='track_active_pub_cat'),
+        ]
 
 
 class CourseCategory(models.Model):
@@ -456,6 +463,13 @@ class Course(models.Model):
                 fields=['is_published', 'is_active', 'slug'],
                 name='course_published_active_slug',
             ),
+            models.Index(fields=['track', 'is_active', 'is_published'], name='course_track_published_active'),
+            models.Index(fields=['difficulty'], name='course_difficulty'),
+            models.Index(fields=['language'], name='course_language'),
+            models.Index(fields=['order'], name='course_order'),
+            models.Index(fields=['created_at'], name='course_created_at'),
+            models.Index(fields=['track', 'difficulty'], name='course_track_difficulty'),
+            models.Index(fields=['is_published', 'is_active', 'created_at'], name='course_pub_active_created'),
         ]
 
 
@@ -678,6 +692,7 @@ class Lesson(SourceReference):
                 fields=['chapter', 'is_active', 'order'],
                 name='lesson_chapter_active_order',
             ),
+            models.Index(fields=['chapter', 'order'], name='lesson_chapter_order'),
         ]
 
 
@@ -870,6 +885,9 @@ class Enrollment(models.Model):
                 fields=['user', 'course', 'status'],
                 name='enroll_user_course_status',
             ),
+            models.Index(fields=['status'], name='enrollment_status'),
+            models.Index(fields=['user', 'status'], name='enrollment_user_status'),
+            models.Index(fields=['completed_at'], name='enrollment_completed_at'),
         ]
 
 
@@ -957,6 +975,9 @@ class ExerciseAttempt(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', '-created_at'], name='xp_transaction_user_created'),
+        ]
         constraints = [
             # Two submissions may never resolve to the same idempotency key.
             models.UniqueConstraint(
@@ -1331,6 +1352,11 @@ class Announcement(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['-published_at', 'priority'], name='announce_pub_priority'),
+            models.Index(fields=['status', '-published_at'], name='announcement_status_published'),
+            models.Index(fields=['status', 'target_audience', '-published_at'], name='ann_status_aud_pub'),
+        ]
 
     def __str__(self):
         return self.title
@@ -1416,6 +1442,9 @@ class PlatformUpdate(models.Model):
 
     class Meta:
         ordering = ['-published_at', '-created_at']
+        indexes = [
+            models.Index(fields=['status', '-published_at'], name='platform_status_published'),
+        ]
         verbose_name_plural = 'platform updates'
 
     def __str__(self):
@@ -2182,6 +2211,12 @@ class Challenge(models.Model):
 
     class Meta:
         ordering = ['topic', 'difficulty', 'title']
+        indexes = [
+            models.Index(fields=['is_active', 'topic', 'difficulty'], name='challenge_topic_diff_active'),
+            models.Index(fields=['is_active', 'created_at'], name='challenge_active_created'),
+            models.Index(fields=['topic', 'difficulty'], name='challenge_topic_difficulty'),
+            models.Index(fields=['is_active', 'difficulty'], name='challenge_active_difficulty'),
+        ]
 
 
 class PracticalClass(models.Model):
@@ -2443,7 +2478,8 @@ class ChallengeSubmission(models.Model):
     class Meta:
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['user', 'challenge', 'status']),
+            models.Index(fields=['user', 'challenge', 'status'], name='challenge_sub_challenge_status'),
+            models.Index(fields=['user', 'status'], name='challenge_sub_user_status'),
         ]
 
 

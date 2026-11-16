@@ -1,12 +1,14 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { queryDefaults } from "@/lib/query-client";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { AlertCircle, Check, RotateCcw } from "lucide-react";
 import { challenges as challengesApi, ApiError } from "@/lib/api";
 import { demoChallenges } from "@/data/challenges";
-import type { Challenge } from "@/types";
+
 import { ChallengeCard } from "@/components/challenges/challenge-card";
 import { ChallengeSkeleton } from "@/components/challenges/challenge-skeleton";
 import { EmptyState } from "@/components/challenges/empty-state";
@@ -27,10 +29,6 @@ function ChallengesContent() {
   const initialDifficulty = params.get("difficulty") as Difficulty;
   const initialSort = params.get("sort") as SortOrder;
   const initialProgress = params.get("progress") as ProgressFilter;
-  const [challenges, setChallenges] = useState<Challenge[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [usingDemoData, setUsingDemoData] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>(["all", "beginner", "intermediate", "advanced"].includes(initialDifficulty) ? initialDifficulty : "all");
   const [topic, setTopic] = useState(params.get("topic") || "All");
   const [sort, setSort] = useState<SortOrder>(["newest", "difficulty", "solved"].includes(initialSort) ? initialSort : "newest");
@@ -40,24 +38,15 @@ function ChallengesContent() {
   const [showAllTopics, setShowAllTopics] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  const loadChallenges = useCallback(async () => {
-    try {
-      const liveChallenges = await challengesApi.list();
-      const shouldUseDemo = liveChallenges.length === 0 && process.env.NODE_ENV === "development";
-      setChallenges(shouldUseDemo ? demoChallenges : liveChallenges);
-      setUsingDemoData(shouldUseDemo);
-      setError(null);
-    } catch (requestError) {
-      setError(requestError instanceof ApiError && requestError.status === 401 ? "auth" : "network");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const { data: rawChallenges = [], isLoading: loading, error: queryError, refetch: refetchChallenges } = useQuery({
+    queryKey: ["challenges"],
+    queryFn: () => challengesApi.list(),
+    ...queryDefaults["challenges"],
+  });
 
-  useEffect(() => {
-    // Deferred via await so the effect never sets state synchronously.
-    (async () => { await loadChallenges(); })();
-  }, [loadChallenges]);
+  const error = queryError ? (queryError instanceof ApiError && queryError.status === 401 ? "auth" : "network") : null;
+  const usingDemoData = process.env.NODE_ENV === "development" && rawChallenges.length === 0;
+  const challenges = usingDemoData ? demoChallenges : rawChallenges;
 
   useEffect(() => {
     const timeout = window.setTimeout(() => setSearch(searchInput.trim()), 250);
@@ -157,7 +146,7 @@ function ChallengesContent() {
         {usingDemoData && <p className="mt-3 text-xs text-[var(--challenge-muted)]"><Check aria-hidden="true" className="mr-1 inline h-3.5 w-3.5 text-success" />Development preview using local examples while the API library is empty.</p>}
 
         <section className="mt-5" aria-label="Challenge results">
-          {error === "network" && <div role="alert" className="flex items-center justify-between gap-4 rounded-card border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger"><span className="inline-flex items-center gap-2"><AlertCircle aria-hidden="true" className="h-4 w-4" />Could not load the challenge library.</span><button type="button" onClick={() => { setLoading(true); void loadChallenges(); }} className="focus-ring rounded font-bold underline underline-offset-2">Try again</button></div>}
+          {error === "network" && <div role="alert" className="flex items-center justify-between gap-4 rounded-card border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger"><span className="inline-flex items-center gap-2"><AlertCircle aria-hidden="true" className="h-4 w-4" />Could not load the challenge library.</span><button type="button" onClick={() => { refetchChallenges(); }} className="focus-ring rounded font-bold underline underline-offset-2">Try again</button></div>}
           {error === "auth" && <div role="alert" className="rounded-card border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-tone-amber-fg">Sign in to view your challenge progress. <Link href="/sign-in?next=%2Fchallenges" className="focus-ring rounded font-bold underline underline-offset-2">Sign in</Link></div>}
           {loading ? <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">{Array.from({ length: 6 }).map((_, index) => <ChallengeSkeleton key={index} />)}</div> : !error && filtered.length === 0 ? <EmptyState filtered={hasFilters} onClear={clearFilters} /> : !error && <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">{filtered.map((challenge) => <ChallengeCard key={challenge.id} challenge={challenge} />)}</div>}
         </section>

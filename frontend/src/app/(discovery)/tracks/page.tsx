@@ -1,7 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import Image from 'next/image';
+import React, { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { queryDefaults } from '@/lib/query-client';
 import { ArrowRight, Clock, Layers, Search, Target } from 'lucide-react';
 import { tracks as tracksApi, type TrackCategory, type TrackSummary } from '@/lib/api';
 import { NetworkError } from '@/components/learning/workspace/error-states';
@@ -23,7 +26,7 @@ const CATEGORY_LABELS: Record<TrackCategory, string> = {
   other: 'Other',
 };
 
-function TrackCard({ track }: { track: TrackSummary }) {
+const TrackCard = React.memo(function TrackCard({ track }: { track: TrackSummary }) {
   return (
     <Link
       href={`/tracks/${track.slug}`}
@@ -32,8 +35,14 @@ function TrackCard({ track }: { track: TrackSummary }) {
       {/* Cover: admin-uploaded artwork when set, a calm navy panel otherwise. */}
       <div className="relative h-32 shrink-0 overflow-hidden bg-hero-navy">
         {track.cover_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={track.cover_url} alt="" className="h-full w-full object-cover" />
+          <Image
+            src={track.cover_url}
+            alt=""
+            fill
+            sizes="(max-width: 640px) 100vw, 640px"
+            className="h-full w-full object-cover"
+            priority={false}
+          />
         ) : (
           <div className="flex h-full items-end justify-between p-4">
             <span className="rounded-pill bg-white/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-white/80">
@@ -99,31 +108,17 @@ function TrackCard({ track }: { track: TrackSummary }) {
       </div>
     </Link>
   );
-}
+});
 
 export default function TracksPage() {
-  const [tracks, setTracks] = useState<TrackSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
   const [category, setCategory] = useState<TrackCategory | 'all'>('all');
   const [search, setSearch] = useState('');
 
-  const load = async () => {
-    try {
-      const data = await tracksApi.list();
-      setTracks(data);
-      setError(false);
-    } catch {
-      setError(true);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    // Deferred via await so the effect never sets state synchronously.
-    (async () => { await load(); })();
-  }, []);
+  const { data: tracks = [], isLoading: loading, error, refetch } = useQuery({
+    queryKey: ['tracks'],
+    queryFn: () => tracksApi.list(),
+    ...queryDefaults['tracks'],
+  });
 
   // Only categories that actually have published tracks get a chip.
   const categories = useMemo(
@@ -195,7 +190,7 @@ export default function TracksPage() {
       </div>
 
       {error ? (
-        <NetworkError onRetry={load} />
+        <NetworkError onRetry={() => { refetch(); }} />
       ) : loading ? (
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {[1, 2, 3].map((item) => (

@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { memo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { queryDefaults } from '@/lib/query-client';
 import Link from 'next/link';
-import { leaderboard as leaderboardApi, ApiError, type LeaderboardEntry } from '@/lib/api';
+import { leaderboard as leaderboardApi, type LeaderboardEntry } from '@/lib/api';
 import { useAuth } from '@/hooks/use-auth';
 import { NetworkError } from '@/components/learning/workspace/error-states';
 import { Avatar } from '@/components/ui/avatar';
@@ -19,41 +21,72 @@ import { Avatar } from '@/components/ui/avatar';
 const ANON_LIMIT = 10;
 const STUDENT_LIMIT = 50;
 
+const getRankBadge = (rank: number) => {
+  if (rank === 1) return { bg: 'bg-warning/20', text: 'text-tone-amber-fg', icon: '🥇' };
+  if (rank === 2) return { bg: 'bg-muted', text: 'text-muted-foreground', icon: '🥈' };
+  if (rank === 3) return { bg: 'bg-warning/10', text: 'text-tone-amber-fg/80', icon: '🥉' };
+  return { bg: 'bg-card', text: 'text-muted-foreground', icon: String(rank) };
+};
+
+// Memoized so re-fetches of the board do not re-render unchanged rows.
+const LeaderboardEntryRow = memo(function LeaderboardEntryRow({ entry, currentUserId }: { entry: LeaderboardEntry; currentUserId: number | null }) {
+  const badge = getRankBadge(entry.rank);
+  const isCurrentUser = entry.user_id === currentUserId;
+  return (
+    <div
+      key={entry.user_id}
+      className={`flex items-center gap-4 rounded-card border p-4 transition-colors ${
+        isCurrentUser
+          ? 'border-primary/30 bg-primary/5'
+          : 'border-border bg-card hover:bg-muted/50'
+      }`}
+    >
+      <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${badge.bg} ${badge.text}`}>
+        {entry.rank <= 3 ? badge.icon : entry.rank}
+      </div>
+      <Link href={`/profile/${entry.username}/portfolio`} aria-label={`View ${entry.full_name}'s portfolio`}>
+        <Avatar src={entry.avatar} username={entry.username} name={entry.full_name} size={36} />
+      </Link>
+      <div className="flex-1 min-w-0">
+        <p className={`text-sm font-semibold truncate ${isCurrentUser ? 'text-primary' : 'text-foreground'}`}>
+          <Link href={`/profile/${entry.username}/portfolio`} className="hover:underline">
+            {entry.full_name || entry.username}
+          </Link>
+          <span className="ml-1 text-xs font-normal text-muted-foreground">@{entry.username}</span>
+          {isCurrentUser && <span className="ml-2 text-xs font-normal text-primary">(You)</span>}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Level {entry.level} · {entry.streak_days} day streak
+        </p>
+      </div>
+      <div className="hidden sm:flex items-center gap-4 text-xs text-muted-foreground">
+        <span>{entry.courses_completed} courses</span>
+        <span>{entry.challenges_solved} solved</span>
+      </div>
+      <div className="text-right">
+        <p className="text-sm font-bold text-foreground">{entry.xp_points.toLocaleString()}</p>
+        <p className="text-xs text-muted-foreground">XP</p>
+      </div>
+    </div>
+  );
+});
+
 export default function LeaderboardPage() {
   const { user, loading: authLoading } = useAuth();
-  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   // The signed-in user's id comes straight from the auth context — no extra
   // profile round trip needed to highlight their own row.
   const currentUserId = user?.id ?? null;
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const data = await leaderboardApi.list({ limit: user ? STUDENT_LIMIT : ANON_LIMIT });
-        if (cancelled) return;
-        setEntries(data.entries);
-        setError(null);
-      } catch (e) {
-        if (cancelled) return;
-        setError(e instanceof ApiError && e.status === 401 ? 'auth' : 'network');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [user]);
+  const { data, isLoading: loading, error } = useQuery({
+    queryKey: ['leaderboard', { limit: user ? STUDENT_LIMIT : ANON_LIMIT }],
+    queryFn: () => leaderboardApi.list({ limit: user ? STUDENT_LIMIT : ANON_LIMIT }),
+    ...queryDefaults['leaderboard'],
+    enabled: !authLoading,
+  });
 
-  const getRankBadge = (rank: number) => {
-    if (rank === 1) return { bg: 'bg-warning/20', text: 'text-tone-amber-fg', icon: '🥇' };
-    if (rank === 2) return { bg: 'bg-muted', text: 'text-muted-foreground', icon: '🥈' };
-    if (rank === 3) return { bg: 'bg-warning/10', text: 'text-tone-amber-fg/80', icon: '🥉' };
-    return { bg: 'bg-card', text: 'text-muted-foreground', icon: String(rank) };
-  };
+  const entries = data?.entries ?? [];
 
-  if (error === 'network') return <NetworkError />;
+  if (error) return <NetworkError />;
 
   const signedIn = Boolean(user);
 
@@ -99,81 +132,34 @@ export default function LeaderboardPage() {
         </div>
       ) : (
         <div className="space-y-2">
-          {entries.map((entry) => {
-            const badge = getRankBadge(entry.rank);
-            const isCurrentUser = entry.user_id === currentUserId;
-            return (
-              <div
-                key={entry.user_id}
-                className={`flex items-center gap-4 rounded-card border p-4 transition-colors ${
-                  isCurrentUser
-                    ? 'border-primary/30 bg-primary/5'
-                    : 'border-border bg-card hover:bg-muted/50'
-                }`}
-              >
-                {/* Rank */}
-                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${badge.bg} ${badge.text}`}>
-                  {entry.rank <= 3 ? badge.icon : entry.rank}
-                </div>
+          {entries.map((entry) => (
+            <LeaderboardEntryRow key={entry.user_id} entry={entry} currentUserId={currentUserId} />
+          ))}
+        </div>
+      )}
 
-                {/* Avatar — shared initials primitive (no invented photos) */}
-                <Link href={`/profile/${entry.username}/portfolio`} aria-label={`View ${entry.full_name}'s portfolio`}>
-                  <Avatar src={entry.avatar} username={entry.username} name={entry.full_name} size={36} />
-                </Link>
-
-                {/* Username */}
-                <div className="flex-1 min-w-0">
-                  <p className={`text-sm font-semibold truncate ${isCurrentUser ? 'text-primary' : 'text-foreground'}`}>
-                    <Link href={`/profile/${entry.username}/portfolio`} className="hover:underline">
-                      {entry.full_name || entry.username}
-                    </Link>
-                    <span className="ml-1 text-xs font-normal text-muted-foreground">@{entry.username}</span>
-                    {isCurrentUser && <span className="ml-2 text-xs font-normal text-primary">(You)</span>}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Level {entry.level} · {entry.streak_days} day streak
-                  </p>
-                </div>
-
-                {/* Stats */}
-                <div className="hidden sm:flex items-center gap-4 text-xs text-muted-foreground">
-                  <span>{entry.courses_completed} courses</span>
-                  <span>{entry.challenges_solved} solved</span>
-                </div>
-
-                {/* XP */}
-                <div className="text-right">
-                  <p className="text-sm font-bold text-foreground">{entry.xp_points.toLocaleString()}</p>
-                  <p className="text-xs text-muted-foreground">XP</p>
-                </div>
-              </div>
-            );
-          })}
-
-          {/* Visitors get a teaser — the join CTA is the point of the page. */}
-          {!signedIn && (
-            <div className="rounded-card border border-primary/25 bg-primary/[0.04] p-6 text-center">
-              <h2 className="text-lg font-bold text-foreground">Your name could be on this board</h2>
-              <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-                Every lesson, exercise and challenge you complete earns XP. Create a free
-                account to start climbing the rankings.
-              </p>
-              <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
-                <Link
-                  href="/sign-up?next=%2Fleaderboard"
-                  className="inline-flex h-10 items-center rounded-lg bg-cta px-4 text-sm font-semibold text-cta-fg transition-colors hover:bg-cta-hover"
-                >
-                  Get started free
-                </Link>
-                <Link
-                  href="/sign-in?next=%2Fleaderboard"
-                  className="inline-flex h-10 items-center rounded-lg border border-border px-4 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
-                >
-                  Sign in
-                </Link>
-              </div>
-            </div>
-          )}
+      {/* Visitors get a teaser — the join CTA is the point of the page. */}
+      {!signedIn && (
+        <div className="rounded-card border border-primary/25 bg-primary/[0.04] p-6 text-center">
+          <h2 className="text-lg font-bold text-foreground">Your name could be on this board</h2>
+          <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
+            Every lesson, exercise and challenge you complete earns XP. Create a free
+            account to start climbing the rankings.
+          </p>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+            <Link
+              href="/sign-up?next=%2Fleaderboard"
+              className="inline-flex h-10 items-center rounded-lg bg-cta px-4 text-sm font-semibold text-cta-fg transition-colors hover:bg-cta-hover"
+            >
+              Get started free
+            </Link>
+            <Link
+              href="/sign-in?next=%2Fleaderboard"
+              className="inline-flex h-10 items-center rounded-lg border border-border px-4 text-sm font-semibold text-foreground transition-colors hover:bg-muted"
+            >
+              Sign in
+            </Link>
+          </div>
         </div>
       )}
     </div>

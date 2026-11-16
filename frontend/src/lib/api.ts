@@ -237,6 +237,9 @@ function nextEndpoint(next: string): string {
   return next;
 }
 
+/** Hard cap on any list page_size so no caller can pull an unbounded catalogue. */
+export const MAX_PAGE_SIZE = 50;
+
 async function fetchAllPages<T>(endpoint: string, options?: ApiRequestOptions): Promise<T[]> {
   let url: string | null = endpoint;
   const all: T[] = [];
@@ -247,6 +250,12 @@ async function fetchAllPages<T>(endpoint: string, options?: ApiRequestOptions): 
     url = data.next ? nextEndpoint(data.next) : null;
   }
   return all;
+}
+
+/** Clamp a requested page_size to the hard cap. */
+function cappedPageSize(requested?: number): number {
+  const size = requested == null ? MAX_PAGE_SIZE : Math.min(Math.max(Number(requested), 1), MAX_PAGE_SIZE);
+  return size;
 }
 
 function unwrapList<T>(data: Paginated<T>): T[] {
@@ -489,13 +498,13 @@ async function requestUncached<T>(
 
 function ttlForPolicy(cachePolicy: string): number {
   const ms = {
-    leaderboard: 30_000,
+    leaderboard: 45_000,   // matches backend leaderboard cache TTL (45s)
     progress: 15_000,
     analytics: 60_000,
     profile: 60_000,
     dashboard: 60_000,
-    courses: 300_000,
-    tracks: 300_000,
+    courses: 600_000,      // matches backend course-list cache TTL (600s)
+    tracks: 600_000,       // matches backend track-list cache TTL (600s)
     practicals: 60_000,
     projects: 60_000,
   }[cachePolicy];
@@ -847,28 +856,26 @@ export async function restoreSession(): Promise<MePayload | null> {
 // ─── Course Endpoints ───────────────────────────────────────────────────────
 
 export const courses = {
-  list: async (params?: { track?: string; difficulty?: string; language?: string; search?: string; page_size?: number; singlePage?: boolean }): Promise<Course[]> => {
+  list: async (params?: { track?: string; difficulty?: string; language?: string; search?: string; page_size?: number; singlePage?: boolean; fetchAll?: boolean }): Promise<Course[]> => {
     const query = new URLSearchParams();
     if (params?.track) query.set('track', params.track);
     if (params?.difficulty) query.set('difficulty', params.difficulty);
     if (params?.language) query.set('language', params.language);
     if (params?.search) query.set('search', params.search);
-    query.set('page_size', String(params?.page_size ?? 100));
+    query.set('page_size', String(cappedPageSize(params?.page_size)));
     const qs = query.toString();
-    // DRF paginates list endpoints globally ({ count, next, previous, results }).
-    // Consume every page so the full eligible catalogue is returned instead of
-    // stopping at the first page (regression: page_size was reduced 200 -> 20
-    // and pagination was never followed). Components that only need page 1
-    // (e.g. featured courses) set singlePage to avoid fetching the full catalog.
-    if (params?.singlePage) {
-      const data = await request<Paginated<Course>>(`/courses/${qs ? `?${qs}` : ''}`, {
+    // Single page by default: cap page_size at MAX_PAGE_SIZE so no caller can
+    // pull an unbounded catalogue. Opt into full-catalogue pagination with
+    // fetchAll: true when a caller genuinely needs every page.
+    if (params?.fetchAll) {
+      return fetchAllPages<Course>(`/courses/${qs ? `?${qs}` : ''}`, {
         cachePolicy: 'courses',
       });
-      return unwrapList(data);
     }
-    return fetchAllPages<Course>(`/courses/${qs ? `?${qs}` : ''}`, {
+    const data = await request<Paginated<Course>>(`/courses/${qs ? `?${qs}` : ''}`, {
       cachePolicy: 'courses',
     });
+    return unwrapList(data);
   },
 
   detail: (slug: string) =>
@@ -1175,15 +1182,16 @@ export interface LeaderboardEntry {
 // ─── Projects & Challenges ──────────────────────────────────────────────────
 
 export const projects = {
-  list: async (params?: { track?: string; difficulty?: string }): Promise<Project[]> => {
+  list: async (params?: { track?: string; difficulty?: string; page_size?: number }): Promise<Project[]> => {
     const query = new URLSearchParams();
     if (params?.track) query.set('track', params.track);
     if (params?.difficulty) query.set('difficulty', params.difficulty);
-    query.set('page_size', '500');
+    query.set('page_size', String(cappedPageSize(params?.page_size)));
     const qs = query.toString();
-    return fetchAllPages<Project>(`/projects/${qs ? `?${qs}` : ''}`, {
+    const data = await request<Paginated<Project>>(`/projects/${qs ? `?${qs}` : ''}`, {
       cachePolicy: 'projects',
     });
+    return unwrapList(data);
   },
   detail: (slug: string) => request<Project>(`/projects/${slug}/`, {
     cachePolicy: 'projects',
@@ -1191,13 +1199,16 @@ export const projects = {
 };
 
 export const challenges = {
-  list: async (params?: { topic?: string; difficulty?: string }): Promise<Challenge[]> => {
+  list: async (params?: { topic?: string; difficulty?: string; page_size?: number }): Promise<Challenge[]> => {
     const query = new URLSearchParams();
     if (params?.topic) query.set('topic', params.topic);
     if (params?.difficulty) query.set('difficulty', params.difficulty);
-    query.set('page_size', '500');
+    query.set('page_size', String(cappedPageSize(params?.page_size)));
     const qs = query.toString();
-    return fetchAllPages<Challenge>(`/challenges/${qs ? `?${qs}` : ''}`);
+    const data = await request<Paginated<Challenge>>(`/challenges/${qs ? `?${qs}` : ''}`, {
+      cachePolicy: 'questions',
+    });
+    return unwrapList(data);
   },
   detail: (slug: string) => request<ChallengeDetail>(`/challenges/${slug}/`, {
     cachePolicy: 'questions',
@@ -2185,3 +2196,4 @@ export const studentProjects = {
       { withAuth: false },
     ),
 };
+

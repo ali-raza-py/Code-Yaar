@@ -1,5 +1,6 @@
-"use client";
+﻿"use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -11,8 +12,13 @@ import {
 import { CourseResumeCard } from "@/components/marketing/course-resume-card";
 import { FeaturedCourses } from "@/components/marketing/featured-courses";
 import { LeaderboardPreview } from "@/components/marketing/leaderboard-preview";
-import { ProductShowcase } from "@/components/marketing/product-showcase";
+import { ProductShowcaseSkeleton } from "@/components/ui/product-showcase-skeleton";
 import { TracksStrip } from "@/components/marketing/tracks-strip";
+
+const ProductShowcase = dynamic(
+  () => import("@/components/marketing/product-showcase").then((mod) => mod.ProductShowcase),
+  { ssr: false, loading: () => <ProductShowcaseSkeleton /> },
+);
 
 const loop = [
   { index: "01", title: "Discover", description: "Choose a track and a course that fits your next move." },

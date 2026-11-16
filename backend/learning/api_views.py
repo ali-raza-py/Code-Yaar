@@ -11,7 +11,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Exists, F, Sum, Count, Q, Avg, Case, When, Value, IntegerField, OuterRef, Subquery, Prefetch
+from django.db.models import Exists, F, Sum, Count, Q, Avg, Case, When, Value, IntegerField, OuterRef, Subquery, Prefetch, CharField
 from django.db.models.functions import Coalesce
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404
@@ -486,6 +486,7 @@ class AnnouncementViewSet(viewsets.ReadOnlyModelViewSet):
     lookup_field = 'slug'
     permission_classes = [permissions.AllowAny]
     serializer_class = AnnouncementSerializer
+    ordering = ['-published_at', '-created_at']
 
     def get_queryset(self):
         now = timezone.now()
@@ -540,6 +541,7 @@ class PlatformUpdateViewSet(viewsets.ReadOnlyModelViewSet):
     lookup_field = 'slug'
     permission_classes = [permissions.AllowAny]
     serializer_class = PlatformUpdateSerializer
+    ordering = ['-published_at']
 
     def get_queryset(self):
         queryset = PlatformUpdate.objects.filter(
@@ -719,6 +721,7 @@ class CareerTrackViewSet(viewsets.ReadOnlyModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['title', 'description']
     ordering_fields = ['order', 'title', 'estimated_hours']
+    ordering = ['order', 'title']
 
     # Cache TTLs (seconds): track catalogue is stable; invalidated via signals
     # when a course or track is published/edited.
@@ -984,6 +987,7 @@ class CourseViewSet(viewsets.ReadOnlyModelViewSet):
 class ChapterViewSet(viewsets.ReadOnlyModelViewSet):
     """List and retrieve chapters for a course."""
     permission_classes = [permissions.AllowAny]
+    ordering = ['order']
 
     CHAPTER_LIST_TTL = 600
 
@@ -1025,6 +1029,7 @@ class ChapterViewSet(viewsets.ReadOnlyModelViewSet):
 class LessonViewSet(viewsets.ReadOnlyModelViewSet):
     """List and retrieve lessons; completing one is the only write action."""
     permission_classes = [permissions.AllowAny]
+    ordering = ['chapter__order', 'order']
     # These routes are wired with explicit `as_view({'post': ...})` mappings in
     # api_urls.py, which drop the per-action kwargs a router would apply, so the
     # requirement is resolved from `self.action` instead.
@@ -1194,6 +1199,7 @@ class LessonViewSet(viewsets.ReadOnlyModelViewSet):
 class ExerciseViewSet(viewsets.ReadOnlyModelViewSet):
     """List and retrieve exercises."""
     permission_classes = [permissions.AllowAny]
+    ordering = ['lesson__chapter__order', 'lesson__order', 'order']
     # See LessonViewSet.action_permissions: explicit `as_view` mappings do not
     # carry the per-action kwargs, so `self.action` decides.
     action_permissions = {
@@ -1520,6 +1526,7 @@ class ProjectViewSet(viewsets.ReadOnlyModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['title', 'description']
     ordering_fields = ['title', 'estimated_hours']
+    ordering = ['title', 'id']
 
     def get_queryset(self):
         qs = (
@@ -1945,6 +1952,7 @@ class PracticalClassViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = PracticalClassSerializer
     permission_classes = [permissions.AllowAny]
     lookup_field = 'slug'
+    ordering = ['order', 'title']
 
     def get_queryset(self):
         return super().get_queryset().annotate(
@@ -1960,6 +1968,7 @@ class PracticalSubjectViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = PracticalSubjectSerializer
     permission_classes = [permissions.AllowAny]
     lookup_field = 'slug'
+    ordering = ['practical_class', 'order', 'title']
 
     def get_queryset(self):
         qs = PracticalSubject.objects.filter(
@@ -2015,6 +2024,7 @@ class PracticalViewSet(viewsets.ReadOnlyModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['title', 'chapter_topic', 'subject__title']
     ordering_fields = ['title', 'practical_number', 'order']
+    ordering = ['subject__order', 'order', 'practical_number', 'title']
 
     def get_serializer_class(self):
         return PracticalDetailSerializer if self.action == 'retrieve' else PracticalListSerializer
@@ -2105,6 +2115,7 @@ class PracticalViewSet(viewsets.ReadOnlyModelViewSet):
 class PracticalProgressViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = PracticalProgressSerializer
     permission_classes = [permissions.IsAuthenticated]
+    ordering = ['-updated_at']
 
     def get_queryset(self):
         return PracticalProgress.objects.filter(
@@ -2115,6 +2126,7 @@ class PracticalProgressViewSet(viewsets.ReadOnlyModelViewSet):
 class PracticalBookmarkViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = PracticalBookmarkSerializer
     permission_classes = [permissions.IsAuthenticated]
+    ordering = ['-created_at']
 
     def get_queryset(self):
         return PracticalBookmark.objects.filter(
@@ -2129,6 +2141,7 @@ class PracticalClassAdminViewSet(viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['title', 'slug', 'description']
     ordering_fields = ['title', 'order', 'is_active']
+    ordering = ['order', 'title']
 
 
 class PracticalSubjectAdminViewSet(viewsets.ModelViewSet):
@@ -2138,6 +2151,7 @@ class PracticalSubjectAdminViewSet(viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['title', 'slug', 'description', 'practical_class__title']
     ordering_fields = ['title', 'order', 'is_active']
+    ordering = ['order', 'title']
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -2154,6 +2168,7 @@ class PracticalAdminViewSet(viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['title', 'slug', 'description', 'subject__title']
     ordering_fields = ['title', 'practical_number', 'order', 'is_published']
+    ordering = ['title']
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -2172,6 +2187,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     """Manage course enrollments for the current user."""
     serializer_class = EnrollmentSerializer
     permission_classes = [permissions.IsAuthenticated]
+    ordering = ['-enrolled_at']
 
     def get_queryset(self):
         return Enrollment.objects.filter(user=self.request.user).select_related('course', 'course__track')
@@ -2181,6 +2197,7 @@ class LessonProgressViewSet(viewsets.ModelViewSet):
     """Manage lesson progress for the current user."""
     serializer_class = LessonProgressSerializer
     permission_classes = [permissions.IsAuthenticated]
+    ordering = ['-updated_at']
 
     def get_queryset(self):
         return LessonProgress.objects.filter(user=self.request.user).select_related(
@@ -2199,6 +2216,7 @@ class ExerciseAttemptViewSet(viewsets.ReadOnlyModelViewSet):
     """View exercise attempts for the current user."""
     serializer_class = ExerciseAttemptSerializer
     permission_classes = [permissions.IsAuthenticated]
+    ordering = ['-created_at']
 
     def get_queryset(self):
         return ExerciseAttempt.objects.filter(user=self.request.user).select_related('exercise')
@@ -2208,9 +2226,10 @@ class ProgressViewSet(viewsets.ModelViewSet):
     """Manage generic progress entries for the current user."""
     serializer_class = ProgressSerializer
     permission_classes = [permissions.IsAuthenticated]
+    ordering = ['-updated_at']
 
     def get_queryset(self):
-        return Progress.objects.filter(user=self.request.user)
+        return Progress.objects.filter(user=self.request.user).order_by('-updated_at')
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
@@ -2222,9 +2241,10 @@ class XPTransactionViewSet(viewsets.ReadOnlyModelViewSet):
     """View XP history for the current user."""
     serializer_class = XPTransactionSerializer
     permission_classes = [permissions.IsAuthenticated]
+    ordering = ['-created_at']
 
     def get_queryset(self):
-        return XPTransaction.objects.filter(user=self.request.user)
+        return XPTransaction.objects.filter(user=self.request.user).order_by('-created_at')
 
 
 class AchievementViewSet(viewsets.ReadOnlyModelViewSet):
@@ -2233,15 +2253,17 @@ class AchievementViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = AchievementSerializer
     permission_classes = [permissions.AllowAny]
     lookup_field = 'slug'
+    ordering = ['title']
 
 
 class UserAchievementViewSet(viewsets.ReadOnlyModelViewSet):
     """View achievements earned by the current user."""
     serializer_class = UserAchievementSerializer
     permission_classes = [permissions.IsAuthenticated]
+    ordering = ['-earned_at']
 
     def get_queryset(self):
-        return UserAchievement.objects.filter(user=self.request.user).select_related('achievement')
+        return UserAchievement.objects.filter(user=self.request.user).select_related('achievement').order_by('-earned_at')
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -2369,6 +2391,7 @@ class UserCertificationViewSet(viewsets.ReadOnlyModelViewSet):
     """List certifications earned by the current user."""
     serializer_class = UserCertificationSerializer
     permission_classes = [permissions.IsAuthenticated]
+    ordering = ['-earned_at']
 
     def get_queryset(self):
         return UserCertification.objects.filter(user=self.request.user)
@@ -2379,12 +2402,14 @@ class SkillViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Skill.objects.all()
     serializer_class = SkillSerializer
     permission_classes = [permissions.AllowAny]
+    ordering = ['name']
 
 
 class UserSkillViewSet(viewsets.ModelViewSet):
     """Manage skills for the current user."""
     serializer_class = UserSkillSerializer
     permission_classes = [permissions.IsAuthenticated]
+    ordering = ['skill__name']
 
     def get_queryset(self):
         return UserSkill.objects.filter(user=self.request.user)
@@ -3545,6 +3570,7 @@ class StudentProjectViewSet(viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['title', 'short_description', 'overview']
     ordering_fields = ['display_order', 'created_at', 'updated_at', 'title']
+    ordering = ['display_order', 'created_at']
 
     def get_queryset(self):
         qs = StudentProject.objects.filter(user=self.request.user).prefetch_related('images')

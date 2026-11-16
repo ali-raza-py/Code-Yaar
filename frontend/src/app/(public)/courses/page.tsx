@@ -1,9 +1,37 @@
+'use client';
+
 import Link from 'next/link';
 import { ArrowRight, BookOpen, Search } from 'lucide-react';
-import { fetchCoursesServer } from '@/lib/server-api';
+import { useSearchParams } from 'next/navigation';
+import React, { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { courses as coursesApi } from '@/lib/api';
 import type { Course } from '@/types';
+import { queryDefaults } from '@/lib/query-client';
 import { NetworkError } from '@/components/learning/workspace/error-states';
 import { CourseSkeleton } from '@/components/learning/course-skeleton';
+
+export const revalidate = 600;
+
+const CourseRow = React.memo(function CourseRow({ course }: { course: Course }) {
+  return (
+    <Link key={course.id} href={`/courses/${course.slug}`} prefetch className="group overflow-hidden rounded-[var(--radius-card)] border border-[#334155] bg-[#0f172a] text-[#f8fafc] transition-[border-color,box-shadow] duration-200 hover:border-primary/30 hover:shadow-[var(--shadow-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <div className="h-1.5 bg-primary/80" />
+      <div className="p-5">
+        <div className="flex items-center justify-between text-xs font-medium uppercase tracking-wide text-[#94a3b8]">
+          <span>{course.track_title || course.language}</span>
+          <span className="capitalize text-[#f8fafc]">{course.difficulty}</span>
+        </div>
+        <h2 className="mt-3 text-lg font-semibold text-[#f8fafc] transition-colors group-hover:text-primary">{course.title}</h2>
+        <p className="mt-2 line-clamp-2 text-sm leading-6 text-[#cbd5e1]">{course.description}</p>
+        <div className="mt-5 flex items-center justify-between text-xs text-[#94a3b8]">
+          <span>{course.estimated_hours}h · {course.lesson_count} lessons</span>
+          <span className="inline-flex items-center gap-1 font-medium text-primary">View course<ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" /></span>
+        </div>
+      </div>
+    </Link>
+  );
+});
 
 interface CoursesCatalogProps {
   searchParams: { track?: string; difficulty?: string; language?: string; search?: string };
@@ -14,6 +42,21 @@ interface CoursesCatalogProps {
 function CoursesCatalog({ searchParams, courses, error }: CoursesCatalogProps) {
   const { track, difficulty, language, search } = searchParams;
 
+  // Category chips reflect languages that actually exist in the catalog.
+  const categories = useMemo(() => ['All', ...Array.from(new Set(courses.map((course) => course.language))).sort((a, b) => a.localeCompare(b))], [courses]);
+
+  const query = (search || '').trim().toLowerCase();
+  const filteredCourses = useMemo(() => courses.filter((course) => {
+    const matchesCategory = !track || course.language === track;
+    const matchesDifficulty = !difficulty || course.difficulty === difficulty;
+    const matchesLanguage = !language || course.language === language;
+    const matchesSearch = !query ||
+      `${course.title} ${course.description} ${course.track_title || ''}`.toLowerCase().includes(query);
+    return matchesCategory && matchesDifficulty && matchesLanguage && matchesSearch;
+  }), [courses, track, difficulty, language, query]);
+
+  const activeFilter = track || difficulty || language || 'All';
+
   if (error) {
     return (
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
@@ -21,21 +64,6 @@ function CoursesCatalog({ searchParams, courses, error }: CoursesCatalogProps) {
       </div>
     );
   }
-
-  // Category chips reflect languages that actually exist in the catalog.
-  const categories = ['All', ...Array.from(new Set(courses.map((course) => course.language))).sort((a, b) => a.localeCompare(b))];
-
-  const query = (search || '').trim().toLowerCase();
-  const filteredCourses = courses.filter((course) => {
-    const matchesCategory = !track || course.language === track;
-    const matchesDifficulty = !difficulty || course.difficulty === difficulty;
-    const matchesLanguage = !language || course.language === language;
-    const matchesSearch = !query ||
-      `${course.title} ${course.description} ${course.track_title || ''}`.toLowerCase().includes(query);
-    return matchesCategory && matchesDifficulty && matchesLanguage && matchesSearch;
-  });
-
-  const activeFilter = track || difficulty || language || 'All';
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
@@ -79,21 +107,7 @@ function CoursesCatalog({ searchParams, courses, error }: CoursesCatalogProps) {
       ) : (
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {filteredCourses.map((course) => (
-            <Link key={course.id} href={`/courses/${course.slug}`} prefetch className="group overflow-hidden rounded-[var(--radius-card)] border border-[#334155] bg-[#0f172a] text-[#f8fafc] transition-[border-color,box-shadow] duration-200 hover:border-primary/30 hover:shadow-[var(--shadow-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <div className="h-1.5 bg-primary/80" />
-              <div className="p-5">
-                <div className="flex items-center justify-between text-xs font-medium uppercase tracking-wide text-[#94a3b8]">
-                  <span>{course.track_title || course.language}</span>
-                  <span className="capitalize text-[#f8fafc]">{course.difficulty}</span>
-                </div>
-                <h2 className="mt-3 text-lg font-semibold text-[#f8fafc] transition-colors group-hover:text-primary">{course.title}</h2>
-                <p className="mt-2 line-clamp-2 text-sm leading-6 text-[#cbd5e1]">{course.description}</p>
-                <div className="mt-5 flex items-center justify-between text-xs text-[#94a3b8]">
-                  <span>{course.estimated_hours}h · {course.lesson_count} lessons</span>
-                  <span className="inline-flex items-center gap-1 font-medium text-primary">View course<ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" /></span>
-                </div>
-              </div>
-            </Link>
+            <CourseRow key={course.id} course={course} />
           ))}
         </div>
       )}
@@ -101,33 +115,24 @@ function CoursesCatalog({ searchParams, courses, error }: CoursesCatalogProps) {
   );
 }
 
-export default async function CoursesPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ track?: string; difficulty?: string; language?: string; search?: string }>;
-}) {
-  const params = await searchParams;
+export default function CoursesPage() {
+  const params = useSearchParams();
+  const track = params.get('track') || undefined;
+  const difficulty = params.get('difficulty') || undefined;
+  const language = params.get('language') || undefined;
+  const search = params.get('search') || undefined;
 
-  let courses: Course[] = [];
-  let error: Error | null = null;
-
-  try {
-    courses = await fetchCoursesServer({
-      track: params.track,
-      difficulty: params.difficulty,
-      language: params.language,
-      search: params.search,
-      page_size: 100,
-    });
-  } catch (err) {
-    error = err instanceof Error ? err : new Error('Failed to load courses');
-  }
+  const { data: courses = [], isLoading: loading, error, refetch } = useQuery({
+    queryKey: ['courses', { track, difficulty, language, search }],
+    queryFn: () => coursesApi.list({ track, difficulty, language, search, page_size: 50, singlePage: true }),
+    ...queryDefaults['courses'],
+  });
 
   if (error) {
     return (
       <div className="min-h-screen bg-background">
         <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-          <NetworkError onRetry={() => { /* handled by Next.js refresh */ }} />
+          <NetworkError onRetry={() => { refetch(); }} />
         </div>
       </div>
     );
@@ -135,9 +140,7 @@ export default async function CoursesPage({
 
   return (
     <div className="min-h-screen bg-background">
-      {courses.length > 0 ? (
-        <CoursesCatalog searchParams={params} courses={courses} error={null} />
-      ) : (
+      {loading ? (
         <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {[1, 2, 3, 4, 5, 6].map((i) => (
@@ -145,6 +148,8 @@ export default async function CoursesPage({
             ))}
           </div>
         </div>
+      ) : (
+        <CoursesCatalog searchParams={{ track, difficulty, language, search }} courses={courses} error={null} />
       )}
     </div>
   );
