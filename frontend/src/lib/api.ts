@@ -274,9 +274,24 @@ const FETCH_TIMEOUT_MS = 15000;
 const MAX_FETCH_RETRIES = 2;
 const RETRY_BACKOFF_MS = 400;
 
+/**
+ * Only requests that are safe to send twice are retried.
+ *
+ * Retrying a write cannot fix a slow connection: each attempt waits out the
+ * full transport timeout, so a single slow POST turned into three attempts
+ * (~46s) before the UI said anything, and a request that did reach the server
+ * could be applied twice. Reads keep the retry; writes fail once and fast.
+ */
+const RETRYABLE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+function methodOf(init: RequestInit): string {
+  return (init.method ?? 'GET').toUpperCase();
+}
+
 async function fetchOrThrow(url: string, init: RequestInit = {}): Promise<Response> {
+  const maxRetries = RETRYABLE_METHODS.has(methodOf(init)) ? MAX_FETCH_RETRIES : 0;
   let lastError: unknown = null;
-  for (let attempt = 0; attempt <= MAX_FETCH_RETRIES; attempt++) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const controller = new AbortController();
     let timedOut = false;
     const timeout = setTimeout(() => {
@@ -288,7 +303,7 @@ async function fetchOrThrow(url: string, init: RequestInit = {}): Promise<Respon
       clearTimeout(timeout);
       // Retry on transient server errors, but not on client errors (4xx) which
       // retrying cannot fix.
-      if (res.status >= 500 && attempt < MAX_FETCH_RETRIES) {
+      if (res.status >= 500 && attempt < maxRetries) {
         lastError = res;
         await new Promise((resolve) => setTimeout(resolve, RETRY_BACKOFF_MS * (attempt + 1)));
         continue;
@@ -305,7 +320,7 @@ async function fetchOrThrow(url: string, init: RequestInit = {}): Promise<Respon
       } else {
         lastError = caught;
       }
-      if (attempt < MAX_FETCH_RETRIES) {
+      if (attempt < maxRetries) {
         await new Promise((resolve) => setTimeout(resolve, RETRY_BACKOFF_MS * (attempt + 1)));
         continue;
       }
@@ -316,10 +331,15 @@ async function fetchOrThrow(url: string, init: RequestInit = {}): Promise<Respon
   if (lastError instanceof Response) {
     throw await readError(lastError);
   }
-  throw new ApiError(
-    0,
-    `Can't reach the API at ${API_BASE}. Is the Django server running? (start both with scripts/dev.ps1)`
-  );
+  // A timeout already explained itself; replacing it with "can't reach the
+  // API" hid the fact that the request was sent and the server was just slow.
+  if (lastError instanceof ApiError) {
+    throw lastError;
+  }
+  const hint = API_BASE.includes('localhost') || API_BASE.includes('127.0.0.1')
+    ? ' Is the Django server running? (start both with scripts/dev.ps1)'
+    : '';
+  throw new ApiError(0, `Can't reach the API at ${API_BASE}.${hint}`);
 }
 
 let csrfToken: string | null = null;
