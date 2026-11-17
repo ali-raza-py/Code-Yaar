@@ -142,13 +142,23 @@ class PracticalListSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         return request.user if request and request.user.is_authenticated else None
 
+    # PracticalViewSet annotates both flags with EXISTS for the whole page.
+    # Reading the annotation keeps the list at a constant query count; the
+    # per-row fallbacks below only run for callers that did not annotate
+    # (for example the detail serializer used outside a list queryset).
     def get_is_completed(self, obj):
+        annotated = getattr(obj, 'current_user_completed', None)
+        if annotated is not None:
+            return bool(annotated)
         user = self._user()
         return bool(user and obj.progress_entries.filter(
             user=user, completed_at__isnull=False
         ).exists())
 
     def get_is_bookmarked(self, obj):
+        annotated = getattr(obj, 'current_user_bookmarked', None)
+        if annotated is not None:
+            return bool(annotated)
         user = self._user()
         return bool(user and obj.bookmarks.filter(user=user).exists())
 

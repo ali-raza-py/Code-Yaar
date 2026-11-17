@@ -444,6 +444,30 @@ function clearResponseCache(): void {
 function clearCache(): void {
   clearResponseCache();
   inFlightRequests.clear();
+  emitCacheInvalidation(['*']);
+}
+
+/**
+ * Cache-invalidation event bridge.
+ *
+ * `lib/api.ts` owns the HTTP cache and knows when a mutation has invalidated a
+ * read; TanStack Query owns the per-component cache. Without this bridge a
+ * mutation dropped the HTTP entry while a mounted `useQuery` kept serving the
+ * pre-mutation object until its staleTime expired — the mutation looked like
+ * it had silently failed. Listeners receive the same prefixes mutations pass
+ * to `invalidateCache`, or `['*']` when everything (including another account's
+ * data) must go.
+ */
+type CacheInvalidationListener = (patterns: string[]) => void;
+const cacheInvalidationListeners = new Set<CacheInvalidationListener>();
+
+export function onApiCacheInvalidated(listener: CacheInvalidationListener): () => void {
+  cacheInvalidationListeners.add(listener);
+  return () => { cacheInvalidationListeners.delete(listener); };
+}
+
+function emitCacheInvalidation(patterns: string[]): void {
+  for (const listener of cacheInvalidationListeners) listener(patterns);
 }
 
 function getCacheMetrics() {
@@ -461,6 +485,7 @@ export function getCurrentUserId(): string | null {
 function invalidateCache(...prefixes: string[]): void {
   if (prefixes.length === 0) {
     clearResponseCache();
+    emitCacheInvalidation(['*']);
     return;
   }
   for (const prefix of prefixes) {
@@ -468,6 +493,7 @@ function invalidateCache(...prefixes: string[]): void {
       if (key.startsWith(prefix)) responseCache.delete(key);
     }
   }
+  emitCacheInvalidation(prefixes);
 }
 
 function cacheScope(withAuth: boolean): string | null {
@@ -505,6 +531,7 @@ function ttlForPolicy(cachePolicy: string): number {
     dashboard: 60_000,
     courses: 600_000,      // matches backend course-list cache TTL (600s)
     tracks: 600_000,       // matches backend track-list cache TTL (600s)
+    competitions: 60_000,
     practicals: 60_000,
     projects: 60_000,
   }[cachePolicy];
@@ -1238,10 +1265,16 @@ export const competitions = {
       if (value) query.set(key, value);
     });
     const qs = query.toString();
-    const data = await request<Paginated<Competition>>(`/competitions/${qs ? `?${qs}` : ''}`, { withAuth: false });
+    const data = await request<Paginated<Competition>>(`/competitions/${qs ? `?${qs}` : ''}`, {
+      withAuth: false,
+      cachePolicy: 'competitions',
+    });
     return unwrapList(data);
   },
-  detail: (slug: string) => request<CompetitionDetail>(`/competitions/${slug}/`, { withAuth: false }),
+  detail: (slug: string) => request<CompetitionDetail>(`/competitions/${slug}/`, {
+    withAuth: false,
+    cachePolicy: 'competitions',
+  }),
   mine: async () => {
     const data = await request<Paginated<Competition>>('/competitions/mine/');
     return unwrapList(data);
@@ -1321,10 +1354,12 @@ export interface RegistrationFormFieldPublic {
 }
 
 export const announcements = {
-  list: async (params?: { category?: string }): Promise<PublicAnnouncement[]> => {
+  /** `page_size` lets a summary surface (the dashboard strip) avoid pulling
+   * every announcement body just to show its first four titles. */
+  list: async (params?: { category?: string; page_size?: number }): Promise<PublicAnnouncement[]> => {
     const query = new URLSearchParams();
     Object.entries(params || {}).forEach(([key, value]) => {
-      if (value) query.set(key, value);
+      if (value) query.set(key, String(value));
     });
     const qs = query.toString();
     const data = await request<Paginated<PublicAnnouncement>>(`/announcements/${qs ? `?${qs}` : ''}`, { withAuth: false });
@@ -1532,6 +1567,17 @@ export interface ProfileStatsData {
     progress_percentage: number;
     enrolled_at: string;
   }>;
+  /** Top of the leaderboard plus this learner's standing, computed with the
+   * stats request so the dashboard does not fire a second section request. */
+  leaderboard_snapshot: {
+    rank: number;
+    entries: Array<{
+      rank: number;
+      user_id: number;
+      username: string;
+      xp_points: number;
+    }>;
+  };
 }
 
 // ─── Certificates ───────────────────────────────────────────────────────────

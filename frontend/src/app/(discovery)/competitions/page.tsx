@@ -20,7 +20,16 @@ export default function CompetitionsPage() {
   const [competitions, setCompetitions] = useState<Competition[]>([]);
   const [tab, setTab] = useState("");
   const [search, setSearch] = useState("");
+  // The API filters by search server-side, so every keystroke would otherwise
+  // be its own request. Debounce the value the effect depends on, not the
+  // input, so typing stays instant while the network sees one settled query.
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [category, setCategory] = useState("");
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => window.clearTimeout(timeout);
+  }, [search]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,14 +37,14 @@ export default function CompetitionsPage() {
     let active = true;
     const load = tab === "mine"
       ? competitionsApi.mine()
-      : competitionsApi.list({ status: tab || undefined, search: search || undefined, category: category || undefined });
+      : competitionsApi.list({ status: tab || undefined, search: debouncedSearch || undefined, category: category || undefined });
     load.then((items) => {
       if (active) setCompetitions(items);
     }).catch((requestError) => {
       if (active) setError(requestError instanceof ApiError ? requestError.message : "Competitions could not be loaded.");
     }).finally(() => active && setLoading(false));
     return () => { active = false; };
-  }, [category, search, tab]);
+  }, [category, debouncedSearch, tab]);
 
   const categories = useMemo(() => Array.from(new Set(competitions.map((item) => item.category))).sort(), [competitions]);
 

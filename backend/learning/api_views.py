@@ -3017,6 +3017,19 @@ def profile_stats_view(request):
             'enrolled_at': enrollment.enrolled_at.isoformat(),
         })
 
+    # Dashboard leaderboard snapshot. The dashboard shows a five-row board and
+    # the viewer's own standing; deriving both here means opening the dashboard
+    # never has to call /api/leaderboard/ as a second, unrelated section read.
+    # Ordering copies the leaderboard (XP desc, id asc) so ranks agree.
+    leaderboard_rows = list(
+        UserProfile.objects.order_by('-xp_points', 'id')
+        .values('user_id', 'user__username', 'xp_points')[:5]
+    )
+    leaderboard_rank = UserProfile.objects.filter(
+        Q(xp_points__gt=profile.xp_points)
+        | Q(xp_points=profile.xp_points, id__lt=profile.id)
+    ).count() + 1
+
     return Response({
         'user': {
             'id': user.id,
@@ -3062,6 +3075,18 @@ def profile_stats_view(request):
         'skills': skills_data,
         'certifications': certs_data,
         'active_enrollments': active_enrollments_data,
+        'leaderboard_snapshot': {
+            'rank': leaderboard_rank,
+            'entries': [
+                {
+                    'rank': rank,
+                    'user_id': row['user_id'],
+                    'username': row['user__username'],
+                    'xp_points': row['xp_points'],
+                }
+                for rank, row in enumerate(leaderboard_rows, start=1)
+            ],
+        },
     })
 
 

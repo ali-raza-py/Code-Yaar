@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ArrowRight, BookOpen, Search } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { courses as coursesApi } from "@/lib/api";
-import type { Course } from "@/types";
+import { queryDefaults } from "@/lib/query-client";
 import { NetworkError } from "@/components/learning/workspace/error-states";
 
 function LearnContent() {
@@ -14,37 +15,28 @@ function LearnContent() {
   const router = useRouter();
   const viewParam = searchParams.get("view");
   const trackParam = searchParams.get("track") ?? undefined;
-  const [courses, setCourses] = useState<Course[]>([]);
   const [category, setCategory] = useState("All");
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
 
-  // Tracks now live on the public discovery pages; legacy bookmarks are
-  // redirected so old ?view=tracks / ?track= links keep working.
+  // Legacy ?view=tracks / ?track= links are redirects, not a course view: the
+  // catalogue query stays disabled for them so the redirect never pays for a
+  // request whose answer is immediately discarded.
+  const onTrackRedirect = viewParam === "tracks" || Boolean(trackParam);
+
   useEffect(() => {
     if (viewParam === "tracks") router.replace("/tracks");
     else if (trackParam) router.replace(`/tracks/${trackParam}`);
   }, [viewParam, trackParam, router]);
 
-  const onTrackRedirect = viewParam === "tracks" || Boolean(trackParam);
-
-  const load = async () => {
-    try {
-      const data = await coursesApi.list({ page_size: 50, singlePage: true });
-      setCourses(data);
-      setError(false);
-    } catch {
-      setError(true);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    // Deferred via await so the effect never sets state synchronously.
-    (async () => { await load(); })();
-  }, []);
+  // Shares the TanStack Query cache (and its 10-minute staleTime) with the
+  // rest of the course catalogue, so returning to Explore within the window
+  // re-renders from cache instead of re-requesting the list.
+  const { data: courses = [], isLoading: loading, error, refetch } = useQuery({
+    queryKey: ["courses", "catalog"],
+    queryFn: () => coursesApi.list({ page_size: 50 }),
+    ...queryDefaults["courses"],
+    enabled: !onTrackRedirect,
+  });
 
   // Category chips reflect languages that actually exist in the catalog.
   const categories = useMemo(
@@ -61,7 +53,7 @@ function LearnContent() {
   if (onTrackRedirect) {
     return <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8"><div className="h-40 animate-pulse rounded-xl bg-white" /></div>;
   }
-  if (error) return <NetworkError onRetry={load} />;
+  if (error) return <NetworkError onRetry={() => { refetch(); }} />;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">

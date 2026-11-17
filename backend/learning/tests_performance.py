@@ -21,11 +21,14 @@ from django.contrib.auth.models import User
 from django.db import connection
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from .models import (
     CareerTrack, Course, Chapter, Lesson, Exercise, Enrollment,
     LessonProgress, ExerciseAttempt, UserProfile,
+    PracticalClass, PracticalSubject, Practical, PracticalProgress,
+    Announcement,
 )
 
 # Dataset shape. Large enough that per-row queries dominate, small enough to
@@ -36,6 +39,7 @@ CHAPTERS_PER_COURSE = 3
 LESSONS_PER_CHAPTER = 4
 EXERCISES_PER_LESSON = 2
 LEARNERS = 60                  # > leaderboard default limit of 50
+PRACTICALS = 20                # one DRF page of practicals
 
 
 def seed_catalogue():
@@ -114,6 +118,59 @@ def seed_learners(courses, lessons):
     return users
 
 
+def seed_practicals(users):
+    """One class, two subjects, and enough published practicals to fill a page.
+
+    The list endpoint is a school-facing section: it must stay cheap per row or
+    the catalog page pays for every practical twice (completed + bookmarked).
+    """
+    practical_class, _ = PracticalClass.objects.get_or_create(
+        slug='class-9',
+        defaults={'title': 'Class 9', 'is_published': True, 'is_active': True},
+    )
+    subjects = PracticalSubject.objects.bulk_create([
+        PracticalSubject(
+            practical_class=practical_class, slug=f'subject-{s}',
+            title=f'Subject {s}', order=s,
+        )
+        for s in range(2)
+    ])
+    practicals = Practical.objects.bulk_create([
+        Practical(
+            practical_class=practical_class,
+            subject=subjects[i % len(subjects)],
+            slug=f'practical-{i}', title=f'Practical {i}',
+            practical_number=i + 1, order=i,
+            is_active=True, is_published=True,
+        )
+        for i in range(PRACTICALS)
+    ])
+    PracticalProgress.objects.bulk_create([
+        PracticalProgress(
+            user=user, practical=practicals[i % len(practicals)],
+            completed_at=timezone.now(),
+        )
+        for i, user in enumerate(users)
+    ])
+    return practical_class, subjects, practicals
+
+
+def seed_announcements(author, count=12):
+    """Published notices with realistic bodies, so the dashboard's summary
+    request can be compared against the full notice-board payload."""
+    now = timezone.now()
+    Announcement.objects.bulk_create([
+        Announcement(
+            slug=f'notice-{i}', title=f'Notice {i}',
+            short_description='Short summary.', body='Body. ' * 200,
+            category='general', priority='normal', target_audience='all',
+            status=Announcement.Status.PUBLISHED, published_at=now,
+            created_by=author,
+        )
+        for i in range(count)
+    ])
+
+
 def _measure(client, url):
     """Return (query_count, elapsed_ms, response) for a single GET."""
     with CaptureQueriesContext(connection) as ctx:
@@ -121,6 +178,90 @@ def _measure(client, url):
         response = client.get(url)
         elapsed_ms = (time.perf_counter() - started) * 1000
     return len(ctx.captured_queries), elapsed_ms, response
+
+
+class SectionEndpointQueryBudgetTest(TestCase):
+    """Query budgets for the endpoints each on-demand section calls alone.
+
+    These are the requests a single section page makes: practicals for the
+    school-practicals view, announcements for the dashboard notice strip, and
+    profile stats for the dashboard summaries. Counting them separately is what
+    keeps one section's data cost from hiding inside another's page budget.
+    """
+
+    BUDGET_PRACTICALS_ANON = 2
+    BUDGET_PRACTICALS_AUTH = 2
+    BUDGET_ANNOUNCEMENTS = 2
+    BUDGET_PROFILE_STATS = 18
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.tracks, cls.courses, cls.lessons = seed_catalogue()
+        cls.users = seed_learners(cls.courses, cls.lessons)
+        cls.learner = cls.users[0]
+        seed_practicals(cls.users)
+        seed_announcements(cls.users[0])
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def _report(self, label, queries, elapsed_ms, response):
+        self.assertEqual(response.status_code, 200, response.content[:300])
+        print(f'\n[perf] {label}: {queries} SQL queries, {elapsed_ms:.1f} ms')
+
+    def test_practicals_list_anonymous(self):
+        queries, ms, response = _measure(
+            self.client, '/api/practicals/?class=class-9&subject=subject-0',
+        )
+        self._report('GET /api/practicals/ (anonymous)', queries, ms, response)
+        self.assertEqual(len(response.data['results']), PRACTICALS // 2)
+        self.assertFalse(response.data['results'][0]['is_completed'])
+        self.assertLessEqual(queries, self.BUDGET_PRACTICALS_ANON)
+
+    def test_practicals_list_authenticated(self):
+        self.client.force_authenticate(user=self.learner)
+        queries, ms, response = _measure(
+            self.client, '/api/practicals/?class=class-9&subject=subject-0',
+        )
+        self._report('GET /api/practicals/ (authenticated)', queries, ms, response)
+        results = response.data['results']
+        # The per-row flags must still be real, not defaulted by the optimisation.
+        self.assertTrue(any(row['is_completed'] for row in results))
+        self.assertEqual(results[0]['is_completed'], self.learner.id == self.users[0].id)
+        self.assertLessEqual(queries, self.BUDGET_PRACTICALS_AUTH)
+
+    def test_announcements_list(self):
+        queries, ms, response = _measure(self.client, '/api/announcements/?page_size=4')
+        self._report('GET /api/announcements/?page_size=4', queries, ms, response)
+        self.assertEqual(len(response.data['results']), 4)
+        self.assertLessEqual(queries, self.BUDGET_ANNOUNCEMENTS)
+
+        # The dashboard strip asks for four rows; the notice board still gets
+        # the whole feed. Compare payloads so the saving is measured, not
+        # asserted from the query string alone.
+        full_queries, full_ms, full = _measure(self.client, '/api/announcements/')
+        self._report('GET /api/announcements/ (full feed)', full_queries, full_ms, full)
+        self.assertEqual(len(full.data['results']), 12)
+        summary_bytes = len(response.content)
+        full_bytes = len(full.content)
+        print(f'\n[perf] dashboard notice payload: {summary_bytes} B vs {full_bytes} B full feed')
+        self.assertLess(summary_bytes, full_bytes / 2)
+
+    def test_profile_stats(self):
+        self.client.force_authenticate(user=self.learner)
+        queries, ms, response = _measure(self.client, '/api/profile/stats/')
+        self._report('GET /api/profile/stats/', queries, ms, response)
+        self.assertEqual(response.data['user']['id'], self.learner.id)
+        # The dashboard renders this snapshot instead of calling the separate
+        # leaderboard endpoint on load.
+        snapshot = response.data['leaderboard_snapshot']
+        self.assertEqual(len(snapshot['entries']), 5)
+        self.assertGreaterEqual(snapshot['rank'], 1)
+        self.assertEqual(
+            [entry['rank'] for entry in snapshot['entries']],
+            list(range(1, 6)),
+        )
+        self.assertLessEqual(queries, self.BUDGET_PROFILE_STATS)
 
 
 class EndpointQueryBudgetTest(TestCase):

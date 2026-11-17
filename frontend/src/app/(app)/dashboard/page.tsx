@@ -18,8 +18,8 @@ import {
   Trophy,
   Zap,
 } from "lucide-react";
-import { announcements as announcementsApi, leaderboard as leaderboardApi, profileStats } from "@/lib/api";
-import type { LeaderboardEntry, ProfileStatsData, PublicAnnouncement } from "@/lib/api";
+import { announcements as announcementsApi, profileStats } from "@/lib/api";
+import type { ProfileStatsData, PublicAnnouncement } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
 import { NetworkError } from "@/components/learning/workspace/error-states";
 import { AchievementIcon } from "@/components/achievements/achievement-icon";
@@ -46,7 +46,6 @@ const developerBadges = [
 export default function DashboardPage() {
   const { user, loading: authLoading } = useAuth();
   const [stats, setStats] = useState<ProfileStatsData | null>(null);
-  const [topLearners, setTopLearners] = useState<LeaderboardEntry[]>([]);
   const [latestAnnouncements, setLatestAnnouncements] = useState<PublicAnnouncement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -54,14 +53,16 @@ export default function DashboardPage() {
   const load = useCallback(async () => {
     if (!user) return;
     try {
-      const [statsData, board, announcementList] = await Promise.all([
+      // One stats request carries the dashboard's own summaries *and* the
+      // leaderboard snapshot, so opening the dashboard never calls the
+      // leaderboard section's endpoint. The notice strip asks for four rows
+      // instead of pulling every announcement body in the system.
+      const [statsData, announcementList] = await Promise.all([
         profileStats.get(),
-        leaderboardApi.list({ limit: 10 }),
-        announcementsApi.list().catch(() => [] as PublicAnnouncement[]),
+        announcementsApi.list({ page_size: 4 }).catch(() => [] as PublicAnnouncement[]),
       ]);
       setStats(statsData);
-      setTopLearners(board.entries);
-      setLatestAnnouncements(announcementList.slice(0, 4));
+      setLatestAnnouncements(announcementList);
       setError(false);
     } catch {
       setError(true);
@@ -140,7 +141,8 @@ export default function DashboardPage() {
     { label: 'Solve your first exercise', done: (stats?.stats.unique_exercises_solved ?? 0) > 0, href: '/learn' },
   ];
   const doneCount = checklist.filter((item) => item.done).length;
-  const userRank = topLearners.find((entry) => entry.user_id === stats?.user.id)?.rank ?? null;
+  const topLearners = stats?.leaderboard_snapshot.entries ?? [];
+  const userRank = stats?.leaderboard_snapshot.rank ?? null;
   const courseProgress = Math.max(0, Math.min(100, enrollment?.progress_percentage ?? 0));
   const checklistProgress = Math.round((doneCount / checklist.length) * 100);
 
